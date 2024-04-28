@@ -1,6 +1,8 @@
 # Deno Standard Library Extended
 
 [![JSR @stdext](https://jsr.io/badges/@stdext)](https://jsr.io/@stdext)
+[![codecov](https://codecov.io/gh/halvardssm/deno_stdext/graph/badge.svg?token=T1JEMGF8VW)](https://codecov.io/gh/halvardssm/deno_stdext)
+[![ci](https://github.com/halvardssm/deno_stdext/actions/workflows/ci.yml/badge.svg)](https://github.com/halvardssm/deno_stdext/actions/workflows/ci.yml)
 
 An extension of the
 [Deno Standard Library](https://github.com/denoland/deno_std).
