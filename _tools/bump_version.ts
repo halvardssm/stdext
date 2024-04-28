@@ -14,7 +14,7 @@ async function updateMetaVersion(filepath: string, version: string) {
   metaConfig.version = version;
   await Deno.writeTextFile(
     filepath,
-    JSON.stringify(metaConfig, null, 2),
+    JSON.stringify(metaConfig, null, 2) + "\n",
   );
 }
 
@@ -25,8 +25,6 @@ const version = Deno.env.get("VERSION");
 if (!version) {
   throw new Error("VERSION environment variable is required");
 }
-
-await updateMetaVersion(resolve("deno.json"), version);
 
 for (const workspace of workspaces) {
   const workspacePath = resolve(workspace);

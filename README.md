@@ -42,7 +42,8 @@ console.log(dump(buffer));
 
 ## Packages
 
-- [encoding](https://jsr.io/@stdext/encoding): Packages
+- [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
+  helpers for text encoding.
 
 ## Versioning
 
