@@ -1,0 +1,11 @@
+.DS_Store
+.idea
+.vscode/settings.json
+.fleet
+.vim
+**/cov/
+deno.lock
+html_cov/
+cov.lcov
+coverage/
+docs/
