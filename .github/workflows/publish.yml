@@ -1,4 +1,4 @@
-name: workspace publish
+name: publish
 
 on:
   release:
