@@ -1,4 +1,15 @@
 /**
+ * Utilities for hex encoded data.
+ * @module
+ *
+ * ```ts
+ * import { dump } from "@stdext/encoding/hex";
+ * const buffer = new TextEncoder().encode("Hello world!");
+ * console.log(dump(buffer));
+ * ```
+ */
+
+/**
  * Convert a buffer to a hexdump string.
  *
  * @example
