@@ -11,6 +11,7 @@
     "cov:gen": "deno coverage coverage --lcov --output=cov.lcov"
   },
   "workspaces": [
-    "./encoding"
+    "./encoding",
+    "./http"
   ]
 }

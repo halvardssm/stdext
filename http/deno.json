@@ -1,0 +1,9 @@
+{
+  "version": "0.0.2",
+  "name": "@stdext/http",
+  "lock": false,
+  "exports": {
+    "./header": "./header.ts",
+    "./method": "./method.ts"
+  }
+}
