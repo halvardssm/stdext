@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.0.3] - 2024-04-29
+
 ### Added
 
 - feat(http): added package
