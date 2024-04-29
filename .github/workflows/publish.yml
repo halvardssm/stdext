@@ -22,8 +22,11 @@ jobs:
         with:
           deno-version: canary
 
-      - name: Check
+      - name: Format & Lint
         run: deno task check
+
+      - name: Build
+        run: deno task build:check
 
       - name: Test
         run: deno task test
