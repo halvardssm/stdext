@@ -6,12 +6,22 @@
   },
   "tasks": {
     "bump_version": "deno run --allow-env=VERSION --allow-read=. --allow-write=. ./_tools/bump_version.ts",
-    "check": "deno fmt --check && deno lint && deno check **/*.ts",
+    "check": "deno task format:check && deno lint && deno check **/*.ts",
     "test": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks",
-    "cov:gen": "deno coverage coverage --lcov --output=cov.lcov"
+    "cov:gen": "deno coverage coverage --lcov --output=cov.lcov",
+    "build": "deno task build:wasm",
+    "build:check": "deno task build:wasm:check",
+    "build:wasm": "deno task --cwd crypto build",
+    "build:wasm:check": "deno task --cwd crypto build:check",
+    "format": "deno fmt && deno task --cwd crypto format",
+    "format:check": "deno fmt --check && deno task --cwd crypto format:check"
   },
   "workspaces": [
+    "./crypto",
     "./encoding",
     "./http"
+  ],
+  "exclude": [
+    "./crypto/hash/_wasm/target"
   ]
 }

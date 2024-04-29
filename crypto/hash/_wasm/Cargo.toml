@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+  "argon2",
+  "bcrypt"
+]
+
+[profile.release]
+codegen-units = 1
+incremental = true
+lto = true
+opt-level = "z"
