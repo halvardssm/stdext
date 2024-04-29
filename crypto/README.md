@@ -7,4 +7,9 @@ hashing.
 
 ### Hash
 
-The hash module contains helpers and implementations for password hashing
+The hash module contains helpers and implementations for password hashing.
+
+The following algorithms are provided:
+
+- Argon2
+- Bcrypt

@@ -9,4 +9,4 @@
  * ```
  */
 
-export { Argon2 } from "./hash/argon2.ts";
+export * from "./hash/mod.ts";
