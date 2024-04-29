@@ -1,0 +1,15 @@
+{
+  "version": "0.0.2",
+  "name": "@stdext/crypto",
+  "lock": false,
+  "exports": {
+    "./hash": "./hash.ts"
+  },
+  "tasks": {
+    "build": "deno task build:argon2",
+    "build:argon2": "deno task --cwd hash/_wasm wasmbuild --js-ext mjs --sync --project deno_stdext_crypto_hash_wasm_argon2",
+    "wasmbuild": "deno run -A jsr:@deno/wasmbuild@0.17.1",
+    "format": "cd hash/_wasm && cargo fmt --all",
+    "format:check": "cd hash/_wasm && cargo fmt --all -- --check"
+  }
+}
