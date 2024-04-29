@@ -44,8 +44,12 @@ console.log(dump(buffer));
 
 ## Packages
 
+- [crypto](https://jsr.io/@stdext/crypto): The crypto package contains utility
+  for crypto and hashing
 - [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
-  helpers for text encoding.
+  utility for text encoding.
+- [http](https://jsr.io/@stdext/http): The http package contains utility for
+  fetching and http servers
 
 ## Versioning
 
