@@ -26,7 +26,7 @@
  * @module
  */
 
-import { argon2, bcrypt } from "./hash/mod.ts";
+import { argon2, bcrypt, scrypt } from "./hash/mod.ts";
 
 /**
  * The names of the hashing algorithms supported by this module.
@@ -34,6 +34,7 @@ import { argon2, bcrypt } from "./hash/mod.ts";
 export const AlgorithmName = {
   Argon2: "argon2",
   Bcrypt: "bcrypt",
+  Scrypt: "scrypt",
 } as const;
 export type AlgorithmName = typeof AlgorithmName[keyof typeof AlgorithmName];
 
@@ -46,7 +47,10 @@ export type Algorithm =
   } & argon2.Argon2Options)
   | ({
     name: typeof AlgorithmName.Bcrypt;
-  } & bcrypt.BcryptOptions);
+  } & bcrypt.BcryptOptions)
+  | ({
+    name: typeof AlgorithmName.Scrypt;
+  } & scrypt.ScryptOptions);
 
 /**
  * Allows to specify the hashing algorithm and its options, or just the algorithm name.
@@ -83,6 +87,8 @@ export function hash(algorithm: AlgorithmIdentifier, data: string): string {
       return argon2.hash(data, algo);
     case AlgorithmName.Bcrypt:
       return bcrypt.hash(data, algo);
+    case AlgorithmName.Scrypt:
+      return scrypt.hash(data, algo);
     default:
       throw new Error(`Unsupported algorithm: ${algorithm}`);
   }
@@ -107,11 +113,12 @@ export function verify(
   const algo = getAlgorithm(algorithm);
 
   switch (algo.name) {
-    case AlgorithmName.Argon2: {
+    case AlgorithmName.Argon2:
       return argon2.verify(data, hash, algo);
-    }
     case AlgorithmName.Bcrypt:
       return bcrypt.verify(data, hash, algo);
+    case AlgorithmName.Scrypt:
+      return scrypt.verify(data, hash, algo);
     default:
       throw new Error(`Unsupported algorithm: ${algorithm}`);
   }

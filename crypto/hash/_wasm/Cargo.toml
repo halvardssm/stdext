@@ -2,7 +2,8 @@
 resolver = "2"
 members = [
   "argon2",
-  "bcrypt"
+  "bcrypt",
+  "scrypt"
 ]
 
 [profile.release]

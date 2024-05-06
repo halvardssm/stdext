@@ -28,4 +28,13 @@ Deno.test("hash", async (t) => {
     assertMatch(h2, /^\$2b\$12\$/);
     assert(verify({ name: "bcrypt" }, "password", h2));
   });
+
+  await t.step("scrypt", () => {
+    const h1 = hash("scrypt", "password");
+    assertMatch(h1, /^\$scrypt\$ln=17,r=8,p=1\$/);
+    assert(verify("scrypt", "password", h1));
+    const h2 = hash({ name: "scrypt" }, "password");
+    assertMatch(h2, /^\$scrypt\$ln=17,r=8,p=1\$/);
+    assert(verify({ name: "scrypt" }, "password", h2));
+  });
 });

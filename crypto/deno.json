@@ -6,13 +6,15 @@
     "./hash": "./hash.ts"
   },
   "tasks": {
-    "build": "deno task build:argon2 && deno task build:bcrypt",
-    "build:check": "deno task build:argon2:check && deno task build:bcrypt:check",
+    "build": "deno task build:argon2 && deno task build:bcrypt && deno task build:scrypt",
+    "build:check": "deno task build:argon2:check && deno task build:bcrypt:check && deno task build:scrypt:check",
     "build:wasm": "deno task --cwd hash/_wasm wasmbuild --js-ext mjs --sync",
     "build:argon2": "deno task build:wasm --project deno_stdext_crypto_hash_wasm_argon2",
     "build:argon2:check": "deno task build:argon2 --check",
     "build:bcrypt": "deno task build:wasm --project deno_stdext_crypto_hash_wasm_bcrypt",
     "build:bcrypt:check": "deno task build:bcrypt --check",
+    "build:scrypt": "deno task build:wasm --project deno_stdext_crypto_hash_wasm_scrypt",
+    "build:scrypt:check": "deno task build:scrypt --check",
     "wasmbuild": "deno run -A jsr:@deno/wasmbuild@0.17.1",
     "format": "cd hash/_wasm && cargo fmt --all",
     "format:check": "cd hash/_wasm && cargo fmt --all -- --check"
