@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.0.5] - 2024-05-06
+
+### Changed
+
+- feat(crypto/hash): added scrypt hashing algorithm
+
 ## [0.0.4] - 2024-05-06
 
 ### Changed
