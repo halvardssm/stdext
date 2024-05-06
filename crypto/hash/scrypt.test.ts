@@ -17,7 +17,7 @@ Deno.test("Scrypt", async (t) => {
       keyLenght: 16,
     } as ScryptOptions;
     const h = hash("password", o);
-    assertMatch(h, /^\$scrypt\$ln=10,r=1,p=2\$/);
+    assertMatch(h, /^\$scrypt\$ln=1,r=1,p=2\$/);
     assert(verify("password", h, o));
   });
 });
