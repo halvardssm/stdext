@@ -1,7 +1,16 @@
-import { assert, assertMatch } from "@std/assert";
+import { assert, assertMatch, assertThrows } from "@std/assert";
 import { hash, verify } from "./hash.ts";
 
 Deno.test("hash", async (t) => {
+  await t.step("unsupported", () => {
+    // deno-lint-ignore ban-ts-comment
+    // @ts-ignore
+    assertThrows(() => hash("unsupported", "password"));
+    // deno-lint-ignore ban-ts-comment
+    // @ts-ignore
+    assertThrows(() => verify("unsupported", "password", ""));
+  });
+
   await t.step("argon2", () => {
     const h1 = hash("argon2", "password");
     assertMatch(h1, /^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
