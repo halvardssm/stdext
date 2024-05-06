@@ -1,20 +1,18 @@
 import { assert, assertMatch } from "@std/assert";
-import { Bcrypt } from "./bcrypt.ts";
+import { type BcryptOptions, hash, verify } from "./bcrypt.ts";
 
 Deno.test("Bcrypt", async (t) => {
   await t.step("defaults", () => {
-    const r = new Bcrypt();
-    const h = r.hash("password");
-    assertMatch(h, /^\$2b\$12/);
-    assert(r.verify("password", h));
+    const o = {} as BcryptOptions;
+    const h = hash("password", o);
+    assertMatch(h, /^\$2b\$12\$/);
+    assert(verify("password", h, o));
   });
 
   await t.step("cost 4", () => {
-    const r = new Bcrypt({
-      cost: 4,
-    });
-    const h = r.hash("password");
-    assertMatch(h, /^\$2b\$04/);
-    assert(r.verify("password", h));
+    const o = { cost: 4 } as BcryptOptions;
+    const h = hash("password", o);
+    assertMatch(h, /^\$2b\$04\$/);
+    assert(verify("password", h, o));
   });
 });

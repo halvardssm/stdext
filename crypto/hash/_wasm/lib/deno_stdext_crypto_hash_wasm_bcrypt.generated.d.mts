@@ -4,7 +4,8 @@
 export interface InstantiateResult {
   instance: WebAssembly.Instance;
   exports: {
-    StdextBcrypt : typeof StdextBcrypt 
+    hash: typeof hash;
+    verify: typeof verify
   };
 }
 
@@ -22,8 +23,26 @@ export function instantiate(): InstantiateResult["exports"];
  * loaded it will always return a reference to the same object. */
 export function instantiateWithInstance(): InstantiateResult;
 
+/**
+* Hash a password using Bcrypt
+* @param {string} password
+* @param {BcryptOptions} options
+* @returns {string}
+*/
+export function hash(password: string, options: BcryptOptions): string;
+/**
+* Verify a password using Bcrypt
+* @param {string} password
+* @param {string} hash
+* @param {BcryptOptions} options
+* @returns {boolean}
+*/
+export function verify(password: string, hash: string, options: BcryptOptions): boolean;
 
-export interface StdextBcryptOptions {
+/**
+ * Bcrypt options
+ */
+export interface BcryptOptions {
   /**
    * Must be a number between 4 and 31
    * 
@@ -33,23 +52,3 @@ export interface StdextBcryptOptions {
 }
 
 
-/**
-*/
-export class StdextBcrypt {
-  free(): void;
-/**
-* @param {StdextBcryptOptions} i
-*/
-  constructor(i: StdextBcryptOptions);
-/**
-* @param {string} password
-* @returns {string}
-*/
-  hash(password: string): string;
-/**
-* @param {string} password
-* @param {string} hash
-* @returns {boolean}
-*/
-  verify(password: string, hash: string): boolean;
-}
