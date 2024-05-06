@@ -1,0 +1,14 @@
+[package]
+name = "deno_stdext_crypto_hash_wasm_scrypt"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate_type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "=0.2.92"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.4"
+getrandom = { version = "0.2", features = ["js"] }
+scrypt = { version = "0.11" }
