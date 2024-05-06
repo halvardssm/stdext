@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.0.4] - 2024-05-06
+
+### Changed
+
+- refactor(crypto/hash): crypto hash to allign with the signature of WebCrypto
+
 ## [0.0.3] - 2024-04-29
 
 ### Added
