@@ -4,7 +4,8 @@
 export interface InstantiateResult {
   instance: WebAssembly.Instance;
   exports: {
-    StdextArgon2 : typeof StdextArgon2 
+    hash: typeof hash;
+    verify: typeof verify
   };
 }
 
@@ -22,34 +23,58 @@ export function instantiate(): InstantiateResult["exports"];
  * loaded it will always return a reference to the same object. */
 export function instantiateWithInstance(): InstantiateResult;
 
-
-export type StdextArgon2Algorithm = "argon2d" | "argon2i" | "argon2id"
-export interface StdextArgon2Options {
-    algorithm?: StdextArgon2Algorithm;
-    memoryCost?: number;
-    timeCost?: number;
-    parallelism?: number;
-    outputLength?: number;
-}
-
-
 /**
-*/
-export class StdextArgon2 {
-  free(): void;
-/**
-* @param {StdextArgon2Options} i
-*/
-  constructor(i: StdextArgon2Options);
-/**
-* @param {string} password
+* Hash a password using Argon2
+* @param {string} data
+* @param {Argon2Options} options
 * @returns {string}
 */
-  hash(password: string): string;
+export function hash(data: string, options: Argon2Options): string;
 /**
-* @param {string} password
+* Verify a password using Argon2
+* @param {string} data
 * @param {string} hash
+* @param {Argon2Options} options
 * @returns {boolean}
 */
-  verify(password: string, hash: string): boolean;
+export function verify(data: string, hash: string, options: Argon2Options): boolean;
+
+/**
+ * Argon2 algorithms
+ */
+export type Argon2Algorithm = "argon2d" | "argon2i" | "argon2id"
+/**
+ * Argon2 options
+ */
+export interface Argon2Options {
+  /**
+   * The Argon2 algorithm to use
+   * 
+   * @default "argon2id"
+   */
+  algorithm?: Argon2Algorithm;
+  /**
+   * Memory cost
+   * 
+   * @default 19456
+   */
+  memoryCost?: number;
+  /**
+   * Time cost
+   * 
+   * @default 2
+   */
+  timeCost?: number;
+  /**
+   * Parallelism
+   * 
+   * @default 1
+   */
+  parallelism?: number;
+  /**
+   * Output length, will default to 32usize
+   */
+  outputLength?: number;
 }
+
+

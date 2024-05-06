@@ -13,3 +13,9 @@ The following algorithms are provided:
 
 - Argon2
 - Bcrypt
+
+```ts
+import { hash, verify } from "@stdext/crypto/hash";
+const h = hash("argon2", "password");
+verify("argon2", "password", h);
+```
