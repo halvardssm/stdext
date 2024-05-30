@@ -52,6 +52,8 @@ console.log(dump(buffer));
   utility for text encoding.
 - [http](https://jsr.io/@stdext/http): The http package contains utility for
   fetching and http servers
+- [sql](https://jsr.io/@stdext/sql): The SQL package contains a standard
+  interface for SQL based databases
 
 ## Versioning
 

@@ -1,0 +1,9 @@
+{
+  "version": "0.0.5",
+  "name": "@stdext/sql",
+  "lock": false,
+  "exports": {
+    ".": "./mod.ts",
+    "./testing": "./lib/testing.ts"
+  }
+}

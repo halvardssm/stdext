@@ -20,7 +20,8 @@
     "./collections",
     "./crypto",
     "./encoding",
-    "./http"
+    "./http",
+    "./sql"
   ],
   "exclude": [
     "./crypto/hash/_wasm/target"
