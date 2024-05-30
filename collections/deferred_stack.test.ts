@@ -1,10 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertMatch,
-  assertThrows,
-} from "@std/assert";
+import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
 import { DeferredStack } from "./deferred_stack.ts";
 
 Deno.test("deferred", async (t) => {

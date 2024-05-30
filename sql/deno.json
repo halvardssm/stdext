@@ -4,6 +4,6 @@
   "lock": false,
   "exports": {
     ".": "./mod.ts",
-    "./testing": "./lib/testing.ts"
+    "./testing": "./testing.ts"
   }
 }
