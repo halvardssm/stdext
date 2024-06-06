@@ -194,25 +194,19 @@ In most cases, these are the classes and the inheritance graph that should be
 implemented. Notice how almost everything extends `SqlBase` at the base.
 
 - SqlConnection
-  - SqlBase
 - SqlPreparedQueriable
-  - SqlBase
 - SqlTransactionQueriable
   - SqlPreparable
     - SqlQueriable
-      - SqlBase
 - SqlClient
   - SqlTransactionable
     - SqlPreparable
       - SqlQueriable
-        - SqlBase
 - SqlPoolClient
   - SqlTransactionable
     - SqlPreparable
       - SqlQueriable
-        - SqlBase
 - SqlClientPool
-  - SqlBase
 
 ### Other
 

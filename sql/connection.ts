@@ -1,5 +1,3 @@
-import type { SqlBase } from "./core.ts";
-
 /**
  * SqlConnectionOptions
  *
@@ -30,7 +28,7 @@ export interface SqlConnectionOptions {
  */
 export interface SqlConnection<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-> extends SqlBase, AsyncDisposable {
+> extends AsyncDisposable {
   /**
    * Connection URL
    */

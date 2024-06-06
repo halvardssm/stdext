@@ -6,9 +6,7 @@ import { VERSION } from "./meta.ts";
  *
  * Base SQLx Error
  */
-export class SqlError extends Error implements SqlBase {
-  readonly sqlxVersion = VERSION;
-  static readonly sqlxVersion = VERSION;
+export class SqlError extends Error {
   constructor(message: string) {
     super(message);
     this.name = this.constructor.name;

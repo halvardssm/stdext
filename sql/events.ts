@@ -2,8 +2,7 @@
  * Events
  */
 import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
-import type { SqlBase, SqlConnectableBase } from "./core.ts";
-import { VERSION } from "./meta.ts";
+import type { SqlConnectableBase } from "./core.ts";
 
 /**
  * Event types
@@ -55,9 +54,7 @@ export interface SqlConnectableEventInit<
  */
 export class SqlErrorEvent<
   EventInit extends SqlErrorEventInit = SqlErrorEventInit,
-> extends ErrorEvent implements SqlBase {
-  readonly sqlxVersion = VERSION;
-  static readonly sqlxVersion = VERSION;
+> extends ErrorEvent {
   constructor(type: "error", eventInitDict?: EventInit) {
     super(type, eventInitDict);
   }
@@ -69,9 +66,7 @@ export class SqlErrorEvent<
 export class SqlEvent<
   EventType extends SqlPoolConnectionEventType = SqlPoolConnectionEventType,
   EventInit extends SqlConnectableEventInit = SqlConnectableEventInit,
-> extends Event implements SqlBase {
-  readonly sqlxVersion = VERSION;
-  static readonly sqlxVersion = VERSION;
+> extends Event {
   constructor(type: EventType, eventInitDict?: EventInit) {
     super(type, eventInitDict);
   }
@@ -188,7 +183,7 @@ export class SqlEventTarget<
  */
 export interface SqlEventable<
   EventTarget extends SqlEventTarget = SqlEventTarget,
-> extends SqlBase {
+> {
   /**
    * The EventTarget to reduce inheritance
    */

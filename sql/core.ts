@@ -1,7 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
 import type { DeferredStack as SqlDeferredStack } from "../collections/deferred_stack.ts";
-import { VERSION } from "./meta.ts";
 
 /**
  * Row
@@ -48,7 +47,7 @@ export interface SqlQueryOptions extends SqlConnectionOptions {
  */
 export interface SqlConnectableBase<
   Connection extends SqlConnection = SqlConnection,
-> extends SqlBase {
+> {
   /**
    * The connection to the database
    */
@@ -464,13 +463,15 @@ export interface SqlTransactionable<
  * SqlPoolable
  *
  * Represents an object that can acquire a connection from a pool.
+ *
+ * TODO: check if this still works with new DeferredStack
  */
 export interface SqlPoolable<
   Connectable extends SqlConnectablePoolBase = SqlConnectablePoolBase,
   DeferredStack extends SqlDeferredStack<Connectable> = SqlDeferredStack<
     Connectable
   >,
-> extends SqlBase {
+> {
   /**
    * The deferred stack of connections
    */
@@ -485,29 +486,4 @@ export interface SqlPoolable<
    * Releases the connection to the pool
    */
   release(connectable: Connectable): Promise<void>;
-}
-
-/**
- * Base class for all SQLx classes
- *
- * All SQLx implemented classes should have this class as its base class for inheritance,
- * or at the least imlement it as an interface and manually include the static and dynamic properties
- */
-export class SqlBase {
-  /**
-   * The version of SQLx
-   * @example
-   * ```ts
-   * import { VERSION } from "@halvardm/sqlx";
-   * ```
-   */
-  readonly sqlxVersion: string = VERSION;
-  /**
-   * The version of SQLx
-   * @example
-   * ```ts
-   * import { VERSION } from "@halvardm/sqlx";
-   * ```
-   */
-  static readonly sqlxVersion: string = VERSION;
 }
