@@ -35,14 +35,14 @@ export interface SqlErrorEventInit<
 }
 
 /**
- * SqlPoolEventInit
+ * SqlConnectableEventInit
  *
- * SQLx Pool event init
+ * SQLx Connectable event init
  */
-export interface SqlConnectableEventInit<
-  Connectable extends SqlConnectableBase = SqlConnectableBase,
+export interface SqlConnectionEventInit<
+  Connection extends SqlConnection = SqlConnection,
 > extends EventInit {
-  connectable: Connectable;
+  connection: Connection;
 }
 
 /**
@@ -65,7 +65,7 @@ export class SqlErrorEvent<
  */
 export class SqlEvent<
   EventType extends SqlPoolConnectionEventType = SqlPoolConnectionEventType,
-  EventInit extends SqlConnectableEventInit = SqlConnectableEventInit,
+  EventInit extends SqlConnectionEventInit = SqlConnectionEventInit,
 > extends Event {
   constructor(type: EventType, eventInitDict?: EventInit) {
     super(type, eventInitDict);
@@ -73,10 +73,10 @@ export class SqlEvent<
 }
 
 /**
- * SqlClientConnectEvent class
+ * Gets dispatched when a connection is established
  */
-export class SqlConnectableConnectEvent<
-  EventInit extends SqlConnectableEventInit = SqlConnectableEventInit,
+export class SqlConnectEvent<
+  EventInit extends SqlConnectionEventInit = SqlConnectionEventInit,
 > extends SqlEvent<"connect", EventInit> {
   constructor(eventInitDict: EventInit) {
     super("connect", eventInitDict);
@@ -84,10 +84,10 @@ export class SqlConnectableConnectEvent<
 }
 
 /**
- * SqlConnectionCloseEvent class
+ * Gets dispatched when a connection is about to be closed
  */
-export class SqlConnectableCloseEvent<
-  EventInit extends SqlConnectableEventInit = SqlConnectableEventInit,
+export class SqlCloseEvent<
+  EventInit extends SqlConnectionEventInit = SqlConnectionEventInit,
 > extends SqlEvent<"close", EventInit> {
   constructor(eventInitDict: EventInit) {
     super("close", eventInitDict);
@@ -95,10 +95,10 @@ export class SqlConnectableCloseEvent<
 }
 
 /**
- * SqlPoolConnectionAcquireEvent class
+ * Gets dispatched when a connection is acquired from the pool
  */
-export class SqlPoolConnectableAcquireEvent<
-  EventInit extends SqlConnectableEventInit = SqlConnectableEventInit,
+export class SqlAcquireEvent<
+  EventInit extends SqlConnectionEventInit = SqlConnectionEventInit,
 > extends SqlEvent<"acquire", EventInit> {
   constructor(eventInitDict: EventInit) {
     super("acquire", eventInitDict);
@@ -106,10 +106,10 @@ export class SqlPoolConnectableAcquireEvent<
 }
 
 /**
- * SqlPoolConnectionReleaseEvent class
+ * Gets dispatched when a connection is released back to the pool
  */
-export class SqlPoolConnectableReleaseEvent<
-  EventInit extends SqlConnectableEventInit = SqlConnectableEventInit,
+export class SqlReleaseEvent<
+  EventInit extends SqlConnectionEventInit = SqlConnectionEventInit,
 > extends SqlEvent<"release", EventInit> {
   constructor(eventInitDict: EventInit) {
     super("release", eventInitDict);
@@ -131,8 +131,9 @@ export class SqlEventTarget<
     ConnectionOptions
   >,
   EventType extends SqlPoolConnectionEventType = SqlPoolConnectionEventType,
-  EventInit extends SqlConnectableEventInit<SqlConnectableBase<Connection>> =
-    SqlConnectableEventInit<SqlConnectableBase<Connection>>,
+  EventInit extends SqlConnectionEventInit<Connection> = SqlConnectionEventInit<
+    Connection
+  >,
   Event extends SqlEvent<EventType, EventInit> = SqlEvent<
     EventType,
     EventInit

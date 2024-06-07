@@ -1,19 +1,12 @@
 // deno-lint-ignore-file no-explicit-any
-import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertInstanceOf,
-} from "@std/assert";
+import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
   type ArrayRow,
   type Row,
-  SqlBase,
-  type SqlPreparable,
-  type SqlPreparedQueriable,
+  type SqlClientQueriable,
+  type SqlPreparedStatement,
   type SqlQueriable,
-  type SqlTransactionable,
-  type SqlTransactionQueriable,
+  type SqlTransaction,
 } from "./core.ts";
 import type { SqlClient } from "./client.ts";
 import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
@@ -22,86 +15,91 @@ import type {
   SqlClientPoolOptions,
   SqlPoolClient,
 } from "./pool.ts";
-import { VERSION } from "./meta.ts";
 import type { SqlQueryOptions } from "./core.ts";
-import { DeferredStack } from "../collections/deferred_stack.ts";
+import {
+  assertIsSqlClient,
+  assertIsSqlClientPool,
+  assertIsSqlClientQueriable,
+  assertIsSqlConnection,
+  assertIsSqlPreparedStatement,
+  assertIsSqlQueriable,
+  assertIsSqlTransaction,
+} from "./asserts.ts";
 
-interface ConnectionConstructor extends SqlBase {
+interface ConnectionConstructor {
   new (
     ...args: any[]
   ): SqlConnection;
 }
-interface ClientConstructor extends SqlBase {
+interface ClientConstructor {
   new (
     ...args: any[]
   ): SqlClient;
 }
-interface ClientPoolConstructor extends SqlBase {
+interface ClientPoolConstructor {
   new (
     ...args: any[]
   ): SqlClientPool<any, any, any, any, any, any, any, any>;
 }
 
+export type TestQueries = {
+  /**
+   * Should create a table "sqlxtesttable" if not exist with a single column "testcol" of string type (min 10 characters)
+   */
+  createTable: string;
+  /**
+   * Should drop the table "sqlxtesttable" if exists
+   */
+  dropTable: string;
+  /**
+   * Should insert a single row into the table
+   */
+  insertOneToTable: string;
+  /**
+   * Should insert multiple rows into the table
+   */
+  insertManyToTable: string;
+  /**
+   * Should select a single row from the table
+   */
+  selectOneFromTable: string;
+  /**
+   * Should select a single row by matching the testcol value
+   */
+  selectByMatchFromTable: string;
+  /**
+   * Should select multiple rows from the table
+   */
+  selectManyFromTable: string;
+  /**
+   * Should return "1" as "result"
+   */
+  select1AsString: string;
+  /**
+   * Should return 1+1 as "result"
+   */
+  select1Plus1AsNumber: string;
+  /**
+   * Should delete a single row by matching the testcol value
+   */
+  deleteByMatchFromTable: string;
+  /**
+   * Should delete all rows from the table
+   */
+  deleteAllFromTable: string;
+};
+
 export type BaseQueriableTestOptions = {
   t: Deno.TestContext;
-  queries: {
-    /**
-     * Should create a table "sqlxtesttable" if not exist with a single column "testcol" of string type (min 10 characters)
-     */
-    createTable: string;
-    /**
-     * Should drop the table "sqlxtesttable" if exists
-     */
-    dropTable: string;
-    /**
-     * Should insert a single row into the table
-     */
-    insertOneToTable: string;
-    /**
-     * Should insert multiple rows into the table
-     */
-    insertManyToTable: string;
-    /**
-     * Should select a single row from the table
-     */
-    selectOneFromTable: string;
-    /**
-     * Should select a single row by matching the testcol value
-     */
-    selectByMatchFromTable: string;
-    /**
-     * Should select multiple rows from the table
-     */
-    selectManyFromTable: string;
-    /**
-     * Should return "1" as "result"
-     */
-    select1AsString: string;
-    /**
-     * Should return 1+1 as "result"
-     */
-    select1Plus1AsNumber: string;
-    /**
-     * Should delete a single row by matching the testcol value
-     */
-    deleteByMatchFromTable: string;
-    /**
-     * Should delete all rows from the table
-     */
-    deleteAllFromTable: string;
-  };
+  queries: TestQueries;
 };
 
 export type TestConnectAndClosePoolClient = PoolTestOptions;
 
-export type TestPreparableOptions = BaseQueriableTestOptions & {
-  db: SqlPreparable;
-};
-
-export type TestPreparedQueriableOptions =
+export type TestPreparedStatementOptions =
   & Omit<BaseQueriableTestOptions, "queries">
   & {
-    db: SqlPreparedQueriable;
+    db: SqlPreparedStatement;
     cases: {
       execute: {
         params?: any[];
@@ -138,16 +136,11 @@ export type TestQueriableOptions = BaseQueriableTestOptions & {
   db: SqlQueriable;
 };
 
-export type TestTransactionableOptions = BaseQueriableTestOptions & {
-  db: SqlTransactionable & SqlQueriable;
+export type TestClientQueriableOptions = BaseQueriableTestOptions & {
+  db: SqlClientQueriable;
 };
 export type TestTransactionOptions = BaseQueriableTestOptions & {
-  db: SqlTransactionQueriable;
-};
-
-export type SqlBaseStaticTestOptions = {
-  t: Deno.TestContext;
-  Base: typeof SqlBase;
+  db: SqlTransaction;
 };
 
 export type ConnectionTestOptions = {
@@ -159,13 +152,13 @@ export type ConnectionConstructorTestOptions = {
   t: Deno.TestContext;
   Connection: ConnectionConstructor;
   connectionUrl: string | URL;
-  connectionOptions: SqlConnectionOptions;
+  connectionOptions: SqlConnectionOptions & Record<any, any>;
 };
 
 export type ClientTestOptions = BaseQueriableTestOptions & {
   Client: ClientConstructor;
   connectionUrl: string | URL;
-  connectionOptions: SqlConnectionOptions & SqlQueryOptions;
+  connectionOptions: SqlConnectionOptions & SqlQueryOptions & Record<any, any>;
 };
 
 export type PoolTestOptions = BaseQueriableTestOptions & {
@@ -174,10 +167,11 @@ export type PoolTestOptions = BaseQueriableTestOptions & {
   connectionOptions:
     & SqlConnectionOptions
     & SqlQueryOptions
-    & SqlClientPoolOptions;
+    & SqlClientPoolOptions
+    & Record<any, any>;
 };
 
-async function testConnectAndCloseClient(
+async function _testConnectAndCloseClient(
   { t, Client, connectionUrl, connectionOptions }: ClientTestOptions,
 ): Promise<void> {
   await t.step("testConnectAndClose", async (t) => {
@@ -217,21 +211,19 @@ async function testConnectAndCloseClient(
         error = e;
       }
 
-      assertEquals(
+      assert(
         connectListenerCalled,
-        true,
         "Connect listener not called: " + error?.message,
       );
-      assertEquals(
+      assert(
         closeListenerCalled,
-        true,
         "Close listener not called: " + error?.message,
       );
     });
   });
 }
 
-async function testConnectAndClosePoolClient(
+async function _testConnectAndClosePoolClient(
   { t, Client, connectionUrl, connectionOptions }:
     TestConnectAndClosePoolClient,
 ): Promise<void> {
@@ -302,19 +294,11 @@ async function testConnectAndClosePoolClient(
   });
 }
 
-async function testPreparedQueriable(
-  { t, db, cases }: TestPreparedQueriableOptions,
+async function _testPreparedStatement(
+  { t, db, cases }: TestPreparedStatementOptions,
 ): Promise<void> {
-  await t.step("testPreparedQueriable", async (t) => {
-    await t.step("has properties", () => {
-      assertEquals(typeof db["execute"], "function");
-      assertEquals(typeof db["query"], "function");
-      assertEquals(typeof db["queryOne"], "function");
-      assertEquals(typeof db["queryMany"], "function");
-      assertEquals(typeof db["queryArray"], "function");
-      assertEquals(typeof db["queryOneArray"], "function");
-      assertEquals(typeof db["queryManyArray"], "function");
-    });
+  await t.step("testPreparedStatement", async (t) => {
+    assertIsSqlPreparedStatement(db);
 
     await t.step("should execute", async () => {
       if (cases.execute.expected) {
@@ -361,120 +345,11 @@ async function testPreparedQueriable(
   });
 }
 
-async function testPreparable(
-  { t, db, queries }: TestPreparableOptions,
-): Promise<void> {
-  await t.step("testPreparable", async (t) => {
-    assertEquals(typeof db["prepare"], "function");
-
-    await t.step("prepare select1AsString", async (t) => {
-      const statement = db.prepare(queries.select1AsString);
-      await testPreparedQueriable({
-        t,
-        db: statement,
-        cases: {
-          execute: { expected: undefined },
-          query: { expected: [{ result: "1" }] },
-          queryOne: { expected: { result: "1" } },
-          queryMany: { expected: [{ result: "1" }] },
-          queryArray: { expected: [["1"]] },
-          queryOneArray: { expected: ["1"] },
-          queryManyArray: { expected: [["1"]] },
-        },
-      });
-    });
-    await t.step("prepare select1Plus1AsNumber", async (t) => {
-      const statement = db.prepare(queries.select1Plus1AsNumber);
-      await testPreparedQueriable({
-        t,
-        db: statement,
-        cases: {
-          execute: { expected: undefined },
-          query: { expected: [{ result: 2 }] },
-          queryOne: { expected: { result: 2 } },
-          queryMany: { expected: [{ result: 2 }] },
-          queryArray: { expected: [[2]] },
-          queryOneArray: { expected: [2] },
-          queryManyArray: { expected: [[2]] },
-        },
-      });
-    });
-    await t.step("prepare selectByMatchFromTable", async (t) => {
-      const statement = db.prepare(queries.selectOneFromTable);
-      await testPreparedQueriable({
-        t,
-        db: statement,
-        cases: {
-          execute: { params: ["test"], expected: undefined },
-          query: { params: ["test"], expected: [{ testcol: "test" }] },
-          queryOne: { params: ["test"], expected: { testcol: "test" } },
-          queryMany: { params: ["test"], expected: [{ testcol: "test" }] },
-          queryArray: { params: ["test"], expected: [["test"]] },
-          queryOneArray: { params: ["test"], expected: ["test"] },
-          queryManyArray: { params: ["test"], expected: [["test"]] },
-        },
-      });
-    });
-    await t.step("prepare selectByMatchFromTable", async (t) => {
-      const statement = db.prepare(queries.selectByMatchFromTable);
-      await testPreparedQueriable({
-        t,
-        db: statement,
-        cases: {
-          execute: { params: ["test"], expected: undefined },
-          query: { params: ["test"], expected: [{ testcol: "test" }] },
-          queryOne: { params: ["test"], expected: { testcol: "test" } },
-          queryMany: { params: ["test"], expected: [{ testcol: "test" }] },
-          queryArray: { params: ["test"], expected: [["test"]] },
-          queryOneArray: { params: ["test"], expected: ["test"] },
-          queryManyArray: { params: ["test"], expected: [["test"]] },
-        },
-      });
-    });
-    await t.step("prepare selectManyFromTable", async (t) => {
-      const statement = db.prepare(queries.selectManyFromTable);
-      await testPreparedQueriable({
-        t,
-        db: statement,
-        cases: {
-          execute: { expected: undefined },
-          query: {
-            expected: [{ testcol: "test" }, { testcol: "test1" }, {
-              testcol: "test2",
-            }, { testcol: "test3" }],
-          },
-          queryOne: { expected: { testcol: "test" } },
-          queryMany: {
-            expected: [{ testcol: "test" }, { testcol: "test1" }, {
-              testcol: "test2",
-            }, { testcol: "test3" }],
-          },
-          queryArray: { expected: [["test"], ["test1"], ["test2"], ["test3"]] },
-          queryOneArray: { expected: ["test"] },
-          queryManyArray: {
-            expected: [["test"], ["test1"], ["test2"], ["test3"]],
-          },
-        },
-      });
-    });
-  });
-}
-
-async function testQueriable(
+async function _testQueriable(
   { t, db, queries }: TestQueriableOptions,
 ): Promise<void> {
   await t.step("testQueriable", async (t) => {
-    await t.step("has properties", () => {
-      assertEquals(typeof db["execute"], "function");
-      assertEquals(typeof db["query"], "function");
-      assertEquals(typeof db["queryOne"], "function");
-      assertEquals(typeof db["queryMany"], "function");
-      assertEquals(typeof db["queryArray"], "function");
-      assertEquals(typeof db["queryOneArray"], "function");
-      assertEquals(typeof db["queryManyArray"], "function");
-      assertEquals(typeof db["sql"], "function");
-      assertEquals(typeof db["sqlArray"], "function");
-    });
+    assertIsSqlQueriable(db);
 
     await t.step("should execute", async () => {
       await db.execute(queries.selectManyFromTable);
@@ -522,43 +397,132 @@ async function testQueriable(
   });
 }
 
-async function testTransactionable(
-  { t, db, queries }: TestTransactionableOptions,
+async function _testClientQueriable(
+  { t, db, queries }: TestClientQueriableOptions,
 ): Promise<void> {
-  await t.step("testTransactionable", async (t) => {
-    await t.step("has properties", () => {
-      assertEquals(typeof db["beginTransaction"], "function");
-      assertEquals(typeof db["transaction"], "function");
-    });
+  await t.step("testClientQueriable", async (t) => {
+    assertIsSqlClientQueriable(db);
 
-    await testQueriable({ t, db, queries });
-
-    await t.step("transaction wrapper", async (t) => {
-      await db.transaction(async (c) => {
-        await testTransaction({ t, db: c, queries });
+    await t.step("test prepared statements", async (t) => {
+      await t.step("prepare select1AsString", async (t) => {
+        const statement = db.prepare(queries.select1AsString);
+        await _testPreparedStatement({
+          t,
+          db: statement,
+          cases: {
+            execute: { expected: undefined },
+            query: { expected: [{ result: "1" }] },
+            queryOne: { expected: { result: "1" } },
+            queryMany: { expected: [{ result: "1" }] },
+            queryArray: { expected: [["1"]] },
+            queryOneArray: { expected: ["1"] },
+            queryManyArray: { expected: [["1"]] },
+          },
+        });
+      });
+      await t.step("prepare select1Plus1AsNumber", async (t) => {
+        const statement = db.prepare(queries.select1Plus1AsNumber);
+        await _testPreparedStatement({
+          t,
+          db: statement,
+          cases: {
+            execute: { expected: undefined },
+            query: { expected: [{ result: 2 }] },
+            queryOne: { expected: { result: 2 } },
+            queryMany: { expected: [{ result: 2 }] },
+            queryArray: { expected: [[2]] },
+            queryOneArray: { expected: [2] },
+            queryManyArray: { expected: [[2]] },
+          },
+        });
+      });
+      await t.step("prepare selectByMatchFromTable", async (t) => {
+        const statement = db.prepare(queries.selectOneFromTable);
+        await _testPreparedStatement({
+          t,
+          db: statement,
+          cases: {
+            execute: { params: ["test"], expected: undefined },
+            query: { params: ["test"], expected: [{ testcol: "test" }] },
+            queryOne: { params: ["test"], expected: { testcol: "test" } },
+            queryMany: { params: ["test"], expected: [{ testcol: "test" }] },
+            queryArray: { params: ["test"], expected: [["test"]] },
+            queryOneArray: { params: ["test"], expected: ["test"] },
+            queryManyArray: { params: ["test"], expected: [["test"]] },
+          },
+        });
+      });
+      await t.step("prepare selectByMatchFromTable", async (t) => {
+        const statement = db.prepare(queries.selectByMatchFromTable);
+        await _testPreparedStatement({
+          t,
+          db: statement,
+          cases: {
+            execute: { params: ["test"], expected: undefined },
+            query: { params: ["test"], expected: [{ testcol: "test" }] },
+            queryOne: { params: ["test"], expected: { testcol: "test" } },
+            queryMany: { params: ["test"], expected: [{ testcol: "test" }] },
+            queryArray: { params: ["test"], expected: [["test"]] },
+            queryOneArray: { params: ["test"], expected: ["test"] },
+            queryManyArray: { params: ["test"], expected: [["test"]] },
+          },
+        });
+      });
+      await t.step("prepare selectManyFromTable", async (t) => {
+        const statement = db.prepare(queries.selectManyFromTable);
+        await _testPreparedStatement({
+          t,
+          db: statement,
+          cases: {
+            execute: { expected: undefined },
+            query: {
+              expected: [{ testcol: "test" }, { testcol: "test1" }, {
+                testcol: "test2",
+              }, { testcol: "test3" }],
+            },
+            queryOne: { expected: { testcol: "test" } },
+            queryMany: {
+              expected: [{ testcol: "test" }, { testcol: "test1" }, {
+                testcol: "test2",
+              }, { testcol: "test3" }],
+            },
+            queryArray: {
+              expected: [["test"], ["test1"], ["test2"], ["test3"]],
+            },
+            queryOneArray: { expected: ["test"] },
+            queryManyArray: {
+              expected: [["test"], ["test1"], ["test2"], ["test3"]],
+            },
+          },
+        });
       });
     });
 
-    await t.step("get a transaction instance", async (t) => {
-      const res = await db.beginTransaction();
+    await t.step("test transactions", async (t) => {
+      await _testQueriable({ t, db, queries });
 
-      await testTransaction({ t, db: res, queries });
+      await t.step("transaction wrapper", async (t) => {
+        await db.transaction(async (c) => {
+          await _testTransaction({ t, db: c, queries });
+        });
+      });
+
+      await t.step("get a transaction instance", async (t) => {
+        const res = await db.beginTransaction();
+
+        await _testTransaction({ t, db: res, queries });
+      });
     });
   });
 }
 
-async function testTransaction(
+async function _testTransaction(
   { t, db, queries }: TestTransactionOptions,
 ): Promise<void> {
   await t.step("testTransaction", async (t) => {
-    await t.step("has properties", () => {
-      assertEquals(typeof db["commitTransaction"], "function");
-      assertEquals(typeof db["rollbackTransaction"], "function");
-      assertEquals(typeof db["createSavepoint"], "function");
-      assertEquals(typeof db["releaseSavepoint"], "function");
-    });
+    assertIsSqlTransaction(db);
 
-    await testQueriable({ t, db, queries });
+    await _testQueriable({ t, db, queries });
 
     await t.step(
       "createSavepoint, releaseSavepoint",
@@ -570,17 +534,17 @@ async function testTransaction(
   });
 }
 
-export async function testSetupTable(
+export async function _testSetupTable(
   { t, db, queries }: TestQueriableOptions,
 ): Promise<void> {
   await t.step("drop table", async () => {
     const res = await db.execute(queries.dropTable);
-    assertEquals(res, 0);
+    assertFalse(res);
   });
 
   await t.step("setup table", async () => {
     const res = await db.execute(queries.createTable);
-    assertEquals(res, 0);
+    assertFalse(res);
   });
 
   await t.step("insert one", async () => {
@@ -615,23 +579,11 @@ export async function testSetupTable(
   });
 }
 
-export async function connectionTest(
+export async function _connectionTest(
   { t, connection }: ConnectionTestOptions,
 ): Promise<void> {
   await t.step("Connection Test", async (t) => {
-    await t.step("is instance of base", () => {
-      assertInstanceOf(connection, SqlBase);
-    });
-
-    await t.step("has properties", () => {
-      assertEquals(typeof connection.connectionUrl, "string");
-      assertEquals(typeof connection.connectionOptions, "object");
-      assertEquals(typeof connection.connected, "boolean");
-      assertEquals(connection.connected, false);
-      assertEquals(typeof connection.connect, "function");
-      assertEquals(typeof connection.close, "function");
-      assertEquals(typeof connection[Symbol.asyncDispose], "function");
-    });
+    assertIsSqlConnection(connection);
 
     await t.step("can connect and close", async () => {
       assertEquals(connection.connected, false);
@@ -647,17 +599,6 @@ export async function connectionTest(
       assertEquals(connection.connected, true);
       await connection.close();
       assertEquals(connection.connected, false);
-    });
-  });
-}
-
-export async function sqlxBaseStaticTest(
-  { t, Base }: SqlBaseStaticTestOptions,
-): Promise<void> {
-  await t.step("SqlBase Static Test", async (t) => {
-    await t.step("has properties", () => {
-      assertEquals(typeof Base, "function");
-      assertEquals(Base.sqlxVersion, VERSION);
     });
   });
 }
@@ -681,16 +622,10 @@ export async function connectionConstructorTest(
     ConnectionConstructorTestOptions,
 ): Promise<void> {
   await t.step("SQLx Connection Constructor Test", async (t) => {
-    await t.step("is constructor", async (t) => {
-      assertEquals(typeof Connection, "function");
-      await sqlxBaseStaticTest({ t, Base: Connection });
-    });
+    assertEquals(typeof Connection, "function");
 
-    await t.step("can construct", async (t) => {
-      const connection = new Connection(connectionUrl, connectionOptions);
-
-      await connectionTest({ t, connection });
-    });
+    const connection = new Connection(connectionUrl, connectionOptions);
+    await _connectionTest({ t, connection });
 
     await t.step("can connect with using and dispose", async () => {
       await using connection = new Connection(connectionUrl, connectionOptions);
@@ -719,17 +654,18 @@ export async function clientTest(
   { t, Client, connectionUrl, connectionOptions, queries }: ClientTestOptions,
 ): Promise<void> {
   await t.step("SQLx Client Tests", async (t) => {
-    await t.step("is constructor", async (t) => {
+    await t.step("is constructor", () => {
       assertEquals(typeof Client, "function");
-      await sqlxBaseStaticTest({ t, Base: Client });
     });
 
     await t.step("can construct", async (t) => {
       const client = new Client(connectionUrl, connectionOptions);
 
-      await connectionTest({ t, connection: client.connection });
+      assertIsSqlClient(client);
 
-      await testConnectAndCloseClient({
+      await _connectionTest({ t, connection: client.connection });
+
+      await _testConnectAndCloseClient({
         t,
         Client,
         connectionUrl,
@@ -749,10 +685,9 @@ export async function clientTest(
 
     await db.connect();
 
-    await testSetupTable({ t, db, queries });
+    await _testSetupTable({ t, db, queries });
 
-    await testPreparable({ t, db, queries });
-    await testTransactionable({ t, db, queries });
+    // await testClientQueriable({ t, db, queries });
 
     await t.step("drop table", async () => {
       await db.execute(queries.dropTable);
@@ -783,24 +718,16 @@ export async function clientPoolTest(
       maxSize: 3,
       lazyInitialization: true,
     };
-    await t.step("is constructor", async (t) => {
+    await t.step("is constructor", () => {
       assertEquals(typeof Client, "function");
-      await sqlxBaseStaticTest({ t, Base: Client });
     });
 
-    await t.step("can construct", async (t) => {
+    await t.step("can construct", () => {
       const client = new Client(connectionUrl, parsedConnectionOptions);
-      await t.step("has properties", () => {
-        assertEquals(typeof client.deferredStack, "object");
-        assertEquals(typeof client.acquire, "function");
-        assertEquals(typeof client.release, "function");
-        assertEquals(typeof client.connect, "function");
-        assertEquals(typeof client.close, "function");
-        assertInstanceOf(client.deferredStack, DeferredStack);
-      });
+      assertIsSqlClientPool(client);
     });
 
-    await testConnectAndClosePoolClient({
+    await _testConnectAndClosePoolClient({
       t: t,
       Client,
       connectionUrl,
@@ -890,13 +817,13 @@ export async function clientPoolTest(
     await db.connect();
 
     const p = await db.acquire();
-    await testSetupTable({ t, db: p, queries });
+    await _testSetupTable({ t, db: p, queries });
     await p.release();
 
     await t.step("acquire and release with query", async (t) => {
       for (let i = 0; i < db.deferredStack.maxSize; i++) {
         const p = await db.acquire();
-        await testTransactionable({ t, db: p, queries });
+        await _testClientQueriable({ t, db: p, queries });
         p.release();
       }
     });

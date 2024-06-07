@@ -24,56 +24,74 @@ const res = await db.query("SELECT * FROM table");
 ### Client
 
 Full compliance with `@stdext/std` provides a database client with the following
-methods (see [SqlClient](./lib/client.ts)):
+methods (see [SqlClient](./client.ts)):
 
-- `connect` (See [SqlConnection](./lib/connection.ts)): Creates a connection to
-  the database
-- `close` (See [SqlConnection](./lib/connection.ts)): Closes the connection to
-  the database
-- `execute` (See [SqlQueriable](./lib/core.ts)): Executes a SQL statement
-- `query` (See [SqlQueriable](./lib/core.ts)): Queries the database and returns
-  an array of object
-- `queryOne` (See [SqlQueriable](./lib/core.ts)): Queries the database and
-  returns at most one entry as an object
-- `queryMany` (See [SqlQueriable](./lib/core.ts)): Queries the database with an
+- `connect` (See [SqlConnection](./connection.ts)): Creates a connection to the
+  database
+- `close` (See [SqlConnection](./connection.ts)): Closes the connection to the
+  database
+- `execute` (See [SqlQueriable](./core.ts)): Executes a SQL statement
+- `query` (See [SqlQueriable](./core.ts)): Queries the database and returns an
+  array of object
+- `queryOne` (See [SqlQueriable](./core.ts)): Queries the database and returns
+  at most one entry as an object
+- `queryMany` (See [SqlQueriable](./core.ts)): Queries the database with an
   async generator and yields each entry as an object
-- `queryArray` (See [SqlQueriable](./lib/core.ts)): Queries the database and
-  returns an array of arrays
-- `queryOneArray` (See [SqlQueriable](./lib/core.ts)): Queries the database and
+- `queryArray` (See [SqlQueriable](./core.ts)): Queries the database and returns
+  an array of arrays
+- `queryOneArray` (See [SqlQueriable](./core.ts)): Queries the database and
   returns at most one entry as an array
-- `queryManyArray` (See [SqlQueriable](./lib/core.ts)): Queries the database
-  with an async generator and yields each entry as an array
-- `sql` (See [SqlQueriable](./lib/core.ts)): Allows you to create a query using
+- `queryManyArray` (See [SqlQueriable](./core.ts)): Queries the database with an
+  async generator and yields each entry as an array
+- `sql` (See [SqlQueriable](./core.ts)): Allows you to create a query using
   template literals, and returns the entries as an array of objects. This is a
   wrapper around `query`
-- `sqlArray` (See [SqlQueriable](./lib/core.ts)): Allows you to create a query
-  using template literals, and returns the entries as an array of arrays. This
-  is a wrapper around `queryArray`
-- `prepare` (See [SqlPreparable](./lib/core.ts)): Returns a prepared statement
-  class that contains a subset of the Queriable functions (see
-  [SqlPreparedQueriable](./lib/core.ts))
-- `beginTransaction` (See [SqlTransactionable](./lib/core.ts)): Returns a
+- `sqlArray` (See [SqlQueriable](./core.ts)): Allows you to create a query using
+  template literals, and returns the entries as an array of arrays. This is a
+  wrapper around `queryArray`
+- `prepare` (See [SqlPreparable](./core.ts)): Returns a prepared statement class
+  that contains a subset of the Queriable functions (see
+  [SqlPreparedQueriable](./core.ts))
+- `beginTransaction` (See [SqlTransactionable](./core.ts)): Returns a
   transaction class that contains implements the queriable functions, as well as
-  transaction related functions (see [SqlTransactionQueriable](./lib/core.ts))
-- `transaction` (See [SqlTransactionable](./lib/core.ts)): A wrapper function
-  for transactions, handles the logic of beginning, committing and rollback a
+  transaction related functions (see [SqlTransactionQueriable](./core.ts))
+- `transaction` (See [SqlTransactionable](./core.ts)): A wrapper function for
+  transactions, handles the logic of beginning, committing and rollback a
   transaction.
+
+#### Events
+
+The following events can be subscribed to according to the specs (see
+[events.ts](./events.ts)):
+
+- `connect`: Gets dispatched when a connection is established
+- `close`: Gets dispatched when a connection is about to be closed
+- `error`: Gets dispatched when an error is triggered
 
 ### ClientPool
 
 Full compliance with `@stdext/std` provides a database client pool (a pool of
-clients) with the following methods (see [SqlClientPool](./lib/pool.ts)):
+clients) with the following methods (see [SqlClientPool](./pool.ts)):
 
-- `connect` (See [SqlConnection](./lib/core.ts)): Creates the connection classes
-  and adds them to a connection pool, and optionally connects them to the
-  database
-- `close` (See [SqlConnection](./lib/core.ts)): Closes all connections in the
-  pool
-- `acquire` (See [SqlPoolable](./lib/core.ts)): Retrieves a
-  [SqlPoolClient](./lib/pool.ts) (a subset of [Client](#client)), and connects
-  it if not already connected
-- `release` (See [SqlPoolable](./lib/core.ts)): Releases a connection back to
-  the pool
+- `connect` (See [SqlConnection](./core.ts)): Creates the connection classes and
+  adds them to a connection pool, and optionally connects them to the database
+- `close` (See [SqlConnection](./core.ts)): Closes all connections in the pool
+- `acquire` (See [SqlPoolable](./core.ts)): Retrieves a
+  [SqlPoolClient](./pool.ts) (a subset of [Client](#client)), and connects it if
+  not already connected
+
+#### Events
+
+The following events can be subscribed to according to the specs (see
+[events.ts](./events.ts)):
+
+- `connect`: Gets dispatched when a connection is established for a pool client
+  (with lazy initialization, it will only get triggered once a connection is
+  popped and activated)
+- `close`: Gets dispatched when a connection is about to be closed
+- `error`: Gets dispatched when an error is triggered
+- `acquire`: Gets dispatched when a connection is acquired from the pool
+- `release`: Gets dispatched when a connection is released back to the pool
 
 ### Examples
 
@@ -163,62 +181,27 @@ console.log(res);
 To be fully compliant with `@stdext/std`, you will need to implement the
 following classes for your database driver:
 
-- `Connection` ([SqlConnection](./lib/connection.ts)): This represents the
+- `Connection` ([SqlConnection](./connection.ts)): This represents the
   connection to the database. This should preferably only contain the
-  functionality of containing a connection, and provide a minimum query method
-  to be used to query the database. The query method does not need to follow any
-  specific spec, but must be consumable by all query functions as well as
-  execute functions (see `SqlQueriable`)
-- `Prepared` ([SqlPreparedQueriable](./lib/core.ts)): This represents a prepared
-  statement. All queriable methods must be implemented
-- `Transaction` ([SqlTransactionQueriable](./lib/core.ts)): This represents a
-  transaction. All queriable methods must be implemented
-- `Client` ([SqlClient](./lib/client.ts)): This represents a database client
-- `ClientPool` ([SqlClientPool](./lib/pool.ts)): This represents a pool of
-  clients
-- `PoolClient` ([SqlPoolClient](./lib/pool.ts)): This represents a client to be
+  functionality of containing a connection, and provide a minimum set of query
+  methods to be used to query the database
+- `PreparedStatement` ([SqlPreparedStatement](./core.ts)): This represents a
+  prepared statement. All queriable methods must be implemented
+- `Transaction` ([SqlTransaction](./core.ts)): This represents a transaction.
+  All queriable methods must be implemented
+- `Client` ([SqlClient](./client.ts)): This represents a database client
+- `ClientPool` ([SqlClientPool](./pool.ts)): This represents a pool of clients
+- `PoolClient` ([SqlPoolClient](./pool.ts)): This represents a client to be
   provided by a pool
 
-It is also however advisable to create the following sub classes to use in other
-classes:
-
-- [SqlQueriable](./lib/core.ts): This represents a queriable base class that
-  contains the standard `@stdext/std` query methods. In most cases, this serves
-  as a base class for all other queriable classes
-- [SqlEventTarget](./lib/events.ts): A typed event target class
-- [SqlError](./lib/errors.ts): A typed error class
+It is also however advisable to create additional helper classes for easier
+inheritance. See [test.ts](./test.ts) for a minimum but functional example of
+how to implement these interfaces.
 
 ### Inheritance graph
 
-In most cases, these are the classes and the inheritance graph that should be
-implemented. Notice how almost everything extends `SqlBase` at the base.
+Here is an overview of the inheritance and flow of the different interfaces. In
+most cases, these are the classes and the inheritance graph that should be
+implemented.
 
-- SqlConnection
-- SqlPreparedQueriable
-- SqlTransactionQueriable
-  - SqlPreparable
-    - SqlQueriable
-- SqlClient
-  - SqlTransactionable
-    - SqlPreparable
-      - SqlQueriable
-- SqlPoolClient
-  - SqlTransactionable
-    - SqlPreparable
-      - SqlQueriable
-- SqlClientPool
-
-### Other
-
-There is also a [SqlDeferredStack](./lib//deferred.ts) that is used by the pool
-as a helper for queuing and stacking the pool clients.
-
-### Base class
-
-`@stdext/std` uses implementable interfaces as well as base classes that needs
-to be inherited for desired functionality.
-
-At the base layer, you will have to extend the `SqlBase` class for all
-`@stdext/std` derived classes. Alternatively, if this is not possible, you can
-implement SqlBase, and ensure that the dynamic and static properties are
-accessible.
+![inheritance flow](./_assets/inheritance_flowchart.jpg)

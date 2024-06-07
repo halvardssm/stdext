@@ -1,6 +1,5 @@
 // deno-lint-ignore-file no-explicit-any
 import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
-import type { DeferredStack as SqlDeferredStack } from "../collections/deferred_stack.ts";
 
 /**
  * Row
@@ -60,21 +59,11 @@ export interface SqlConnectableBase<
 }
 
 /**
- * SqlConnectablePoolBase
- *
- * The base interface for pool clients that interracts with the connection like querying.
- */
-export interface SqlConnectablePoolBase<
-  Connection extends SqlConnection = SqlConnection,
-> extends SqlConnectableBase<Connection>, AsyncDisposable {
-}
-
-/**
  * SqlPreparedQueriable
  *
  * Represents a prepared statement to be executed separately from creation.
  */
-export interface SqlPreparedQueriable<
+export interface SqlPreparedStatement<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
   Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
     ConnectionOptions
@@ -89,7 +78,7 @@ export interface SqlPreparedQueriable<
   /**
    * The (global) options to pass to the query method.
    */
-  readonly queryOptions: QueryOptions;
+  readonly options: QueryOptions;
 
   /**
    * Executes the prepared statement
@@ -190,7 +179,7 @@ export interface SqlQueriable<
   /**
    * The (global) options to pass to the query method.
    */
-  readonly queryOptions: QueryOptions;
+  readonly options: QueryOptions;
 
   /**
    * Execute a SQL statement
@@ -309,61 +298,11 @@ export interface SqlQueriable<
 }
 
 /**
- * SqlPreparable
- *
- * This interface is to be implemented by any class that supports creating a prepared statement.
- * A prepared statement should in most cases be unique to a connection,
- * and should not live after the related connection is closed.
- */
-export interface SqlPreparable<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
-    ConnectionOptions
-  >,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Prepared extends SqlPreparedQueriable<
-    ConnectionOptions,
-    Connection,
-    ParameterType,
-    QueryOptions
-  > = SqlPreparedQueriable<
-    ConnectionOptions,
-    Connection,
-    ParameterType,
-    QueryOptions
-  >,
-> extends SqlConnectableBase<Connection> {
-  /**
-   * Create a prepared statement that can be executed multiple times.
-   * This is useful when you want to execute the same SQL statement multiple times with different parameters.
-   *
-   * @param sql the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns a prepared statement
-   *
-   * @example
-   * ```ts
-   * const stmt = db.prepare("SELECT * FROM table WHERE id = ?");
-   *
-   * for (let i = 0; i < 10; i++) {
-   *   const row of stmt.query([i])
-   *   console.log(row);
-   * }
-   * ```
-   */
-  prepare(
-    sql: string,
-    options?: QueryOptions,
-  ): Prepared;
-}
-
-/**
  * SqlTransactionQueriable
  *
  * Represents a transaction.
  */
-export interface SqlTransactionQueriable<
+export interface SqlTransaction<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
   Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
     ConnectionOptions
@@ -410,32 +349,71 @@ export interface SqlTransactionQueriable<
 }
 
 /**
- * SqlTransactionable
+ * SqlClientQueriable
  *
- * Represents an object that can create a transaction.
+ * Represents an object that can create a transaction and a prepared statement.
+ *
+ * This interface is to be implemented by any class that supports creating a prepared statement.
+ * A prepared statement should in most cases be unique to a connection,
+ * and should not live after the related connection is closed.
  */
-export interface SqlTransactionable<
+export interface SqlClientQueriable<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
   Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
     ConnectionOptions
   >,
   ParameterType extends unknown = unknown,
   QueryOptions extends SqlQueryOptions = SqlQueryOptions,
+  Prepared extends SqlPreparedStatement<
+    ConnectionOptions,
+    Connection,
+    ParameterType,
+    QueryOptions
+  > = SqlPreparedStatement<
+    ConnectionOptions,
+    Connection,
+    ParameterType,
+    QueryOptions
+  >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
-  Transaction extends SqlTransactionQueriable<
+  Transaction extends SqlTransaction<
     ConnectionOptions,
     Connection,
     ParameterType,
     QueryOptions,
     TransactionOptions
-  > = SqlTransactionQueriable<
+  > = SqlTransaction<
     ConnectionOptions,
     Connection,
     ParameterType,
     QueryOptions,
     TransactionOptions
   >,
-> extends SqlConnectableBase<Connection> {
+> extends
+  SqlQueriable<ConnectionOptions, Connection, ParameterType, QueryOptions> {
+  /**
+   * Create a prepared statement that can be executed multiple times.
+   * This is useful when you want to execute the same SQL statement multiple times with different parameters.
+   *
+   * @param sql the SQL statement
+   * @param options the options to pass to the query method, will be merged with the global options
+   * @returns a prepared statement
+   *
+   * @example
+   * ```ts
+   * const stmt = db.prepare("SELECT * FROM table WHERE id = ?");
+   *
+   * for (let i = 0; i < 10; i++) {
+   *   const row of stmt.query([i])
+   *   console.log(row);
+   * }
+   * ```
+   */
+  prepare(
+    sql: string,
+    options?: QueryOptions,
+  ): Prepared;
+
   /**
    * Starts a transaction
    */
@@ -457,33 +435,4 @@ export interface SqlTransactionable<
   transaction<T>(
     fn: (t: Transaction) => Promise<T>,
   ): Promise<T>;
-}
-
-/**
- * SqlPoolable
- *
- * Represents an object that can acquire a connection from a pool.
- *
- * TODO: check if this still works with new DeferredStack
- */
-export interface SqlPoolable<
-  Connectable extends SqlConnectablePoolBase = SqlConnectablePoolBase,
-  DeferredStack extends SqlDeferredStack<Connectable> = SqlDeferredStack<
-    Connectable
-  >,
-> {
-  /**
-   * The deferred stack of connections
-   */
-  deferredStack: DeferredStack;
-
-  /**
-   * Acquire a connection from the pool
-   */
-  acquire(): Promise<Connectable>;
-
-  /**
-   * Releases the connection to the pool
-   */
-  release(connectable: Connectable): Promise<void>;
 }

@@ -1,3 +1,5 @@
+import { ArrayRow, Row, SqlQueryOptions } from "./core.ts";
+
 /**
  * SqlConnectionOptions
  *
@@ -28,6 +30,8 @@ export interface SqlConnectionOptions {
  */
 export interface SqlConnection<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
+  ParameterType extends unknown = unknown,
+  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
 > extends AsyncDisposable {
   /**
    * Connection URL
@@ -37,7 +41,7 @@ export interface SqlConnection<
   /**
    * Connection options
    */
-  readonly connectionOptions: ConnectionOptions;
+  readonly options: ConnectionOptions;
 
   /**
    * Whether the connection is connected to the database
@@ -53,4 +57,50 @@ export interface SqlConnection<
    * Close the connection to the database
    */
   close(): Promise<void>;
+
+  /**
+   * Execute a SQL statement
+   *
+   * @param sql the SQL statement
+   * @param params the parameters to bind to the SQL statement
+   * @param options the options to pass to the query method, will be merged with the global options
+   * @returns the number of affected rows if any
+   */
+  execute(
+    sql: string,
+    params?: ParameterType[],
+    options?: QueryOptions,
+  ): Promise<number | undefined>;
+
+  /**
+   * Query the database and return an iterator.
+   * Usefull when querying large datasets, as this should take advantage of data streams.
+   *
+   * @param sql the SQL statement
+   * @param params the parameters to bind to the SQL statement
+   * @param options the options to pass to the query method, will be merged with the global options
+   * @returns the rows returned by the query as object entries
+   */
+  // deno-lint-ignore no-explicit-any
+  queryMany<T extends Row<any> = Row<any>>(
+    sql: string,
+    params?: ParameterType[],
+    options?: QueryOptions,
+  ): AsyncGenerator<T>;
+
+  /**
+   * Query the database and return an iterator.
+   * Usefull when querying large datasets, as this should take advantage of data streams.
+   *
+   * @param sql the SQL statement
+   * @param params the parameters to bind to the SQL statement
+   * @param options the options to pass to the query method, will be merged with the global options
+   * @returns the rows returned by the query as array entries
+   */
+  // deno-lint-ignore no-explicit-any
+  queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
+    sql: string,
+    params?: ParameterType[],
+    options?: QueryOptions,
+  ): AsyncGenerator<T>;
 }

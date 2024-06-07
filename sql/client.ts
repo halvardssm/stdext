@@ -1,12 +1,11 @@
 import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
 import type {
-  SqlPreparable,
-  SqlPreparedQueriable,
+  SqlClientQueriable,
+  SqlPreparedStatement,
   SqlQueriable,
   SqlQueryOptions,
-  SqlTransactionable,
+  SqlTransaction,
   SqlTransactionOptions,
-  SqlTransactionQueriable,
 } from "./core.ts";
 import type { SqlEventable, SqlEventTarget } from "./events.ts";
 
@@ -19,30 +18,32 @@ import type { SqlEventable, SqlEventTarget } from "./events.ts";
 export interface SqlClient<
   EventTarget extends SqlEventTarget = SqlEventTarget,
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
-    ConnectionOptions
-  >,
   ParameterType extends unknown = unknown,
   QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Prepared extends SqlPreparedQueriable<
+  Connection extends SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  > = SqlConnection<ConnectionOptions, ParameterType, QueryOptions>,
+  Prepared extends SqlPreparedStatement<
     ConnectionOptions,
     Connection,
     ParameterType,
     QueryOptions
-  > = SqlPreparedQueriable<
+  > = SqlPreparedStatement<
     ConnectionOptions,
     Connection,
     ParameterType,
     QueryOptions
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
-  Transaction extends SqlTransactionQueriable<
+  Transaction extends SqlTransaction<
     ConnectionOptions,
     Connection,
     ParameterType,
     QueryOptions,
     TransactionOptions
-  > = SqlTransactionQueriable<
+  > = SqlTransaction<
     ConnectionOptions,
     Connection,
     ParameterType,
@@ -50,27 +51,22 @@ export interface SqlClient<
     TransactionOptions
   >,
 > extends
-  SqlConnection<ConnectionOptions>,
+  SqlConnection<ConnectionOptions, ParameterType, QueryOptions>,
   SqlQueriable<
     ConnectionOptions,
     Connection,
     ParameterType,
     QueryOptions
   >,
-  SqlPreparable<
+  SqlClientQueriable<
     ConnectionOptions,
     Connection,
     ParameterType,
     QueryOptions,
-    Prepared
-  >,
-  SqlTransactionable<
-    ConnectionOptions,
-    Connection,
-    ParameterType,
-    QueryOptions,
+    Prepared,
     TransactionOptions,
     Transaction
   >,
   SqlEventable<EventTarget> {
+  options: ConnectionOptions & QueryOptions & TransactionOptions;
 }
