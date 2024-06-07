@@ -3,11 +3,19 @@
  *
  * Options for DeferredStack
  */
-export type DeferredStackOptions = {
+export type DeferredStackOptions<T> = {
   /**
    * The maximum stack size to be allowed.
    */
   maxSize?: number;
+  /**
+   * The release function to be called when the element is released
+   */
+  releaseFn?: (element: DeferredStackElement<T>) => Promise<void> | void;
+  /**
+   * The remove function to be called when the element is removed
+   */
+  removeFn?: (element: DeferredStackElement<T>) => Promise<void> | void;
 };
 
 /**
@@ -30,6 +38,8 @@ export class DeferredStack<T> {
    * @default 10
    */
   readonly maxSize: number = 10;
+  #releaseFn?: DeferredStackOptions<T>["releaseFn"];
+  #removeFn?: DeferredStackOptions<T>["removeFn"];
 
   /**
    * The list of all elements
@@ -90,8 +100,10 @@ export class DeferredStack<T> {
     return this.queue.length;
   }
 
-  constructor(options: DeferredStackOptions) {
-    this.maxSize = options.maxSize ?? 10;
+  constructor(options?: DeferredStackOptions<T>) {
+    this.maxSize = options?.maxSize ?? 10;
+    this.#releaseFn = options?.releaseFn;
+    this.#removeFn = options?.removeFn;
   }
 
   /**
@@ -109,8 +121,14 @@ export class DeferredStack<T> {
 
     const newElement = new DeferredStackElement<T>({
       value: element,
-      releaseFn: (element) => this.#release(element),
-      removeFn: (element) => this.#remove(element),
+      releaseFn: async (element) => {
+        await this.#release(element);
+        await this.#releaseFn?.(element);
+      },
+      removeFn: async (element) => {
+        this.#remove(element);
+        await this.#removeFn?.(element);
+      },
     });
 
     this.#elements.push(newElement);
@@ -157,9 +175,9 @@ export class DeferredStack<T> {
    * To avoid that previous users of the element can still access it,
    * the element is removed from the stack, and added again.
    */
-  #release(element: DeferredStackElement<T>): void {
+  async #release(element: DeferredStackElement<T>): Promise<void> {
     const value = element.value;
-    element.remove();
+    await element.remove();
     this.add(value);
   }
 
@@ -183,11 +201,11 @@ export type DeferredStackElementOptions<T> = {
   /**
    * The release function to be called when the element is released
    */
-  releaseFn: (element: DeferredStackElement<T>) => void;
+  releaseFn: (element: DeferredStackElement<T>) => Promise<void>;
   /**
    * The remove function to be called when the element is removed
    */
-  removeFn: (element: DeferredStackElement<T>) => void;
+  removeFn: (element: DeferredStackElement<T>) => Promise<void>;
 };
 
 /**
@@ -201,7 +219,7 @@ export class DeferredStackElement<T> {
   /**
    * The unique identifier of the element
    */
-  _id = crypto.randomUUID();
+  _id: string = crypto.randomUUID();
 
   /**
    * Whether the element is in use
@@ -216,7 +234,7 @@ export class DeferredStackElement<T> {
   /**
    * The value of the element
    */
-  #value: T;
+  _value: T;
 
   /**
    * The release function to be called when the element is released
@@ -251,13 +269,13 @@ export class DeferredStackElement<T> {
   get value(): T {
     if (!this.active) throw new Error("Element is not active");
     if (this.#disposed) throw new Error("Element is disposed");
-    return this.#value;
+    return this._value;
   }
 
   constructor(
     options: DeferredStackElementOptions<T>,
   ) {
-    this.#value = options.value;
+    this._value = options.value;
     this.#releaseFn = options.releaseFn;
     this.#removeFn = options.removeFn;
   }
@@ -274,14 +292,14 @@ export class DeferredStackElement<T> {
   /**
    * Releases the element back to the DeferredStack
    */
-  release(): void {
+  release(): ReturnType<DeferredStackElementOptions<T>["releaseFn"]> {
     return this.#releaseFn(this);
   }
 
   /**
    * Removes the element from the DeferredStack
    */
-  remove(): void {
+  remove(): ReturnType<DeferredStackElementOptions<T>["removeFn"]> {
     this.#active = false;
     this.#disposed = true;
     return this.#removeFn(this);

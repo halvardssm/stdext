@@ -54,7 +54,7 @@ Deno.test("deferred", async (t) => {
     assertEquals(deferred.queuedCount, 0);
     assertEquals(e1.active, true);
     assertEquals(e1.value, 2);
-    e1.release();
+    await e1.release();
     assertEquals(deferred.maxSize, 2);
     assertEquals(deferred.elements.length, 2);
     assertEquals(deferred.stack.length, 2);
@@ -123,7 +123,7 @@ Deno.test("deferred", async (t) => {
     assertEquals(deferred.availableCount, 0);
     assertEquals(deferred.queuedCount, 2);
 
-    e2.release();
+    await e2.release();
     await e4;
     assert(e4Resolved);
     assertFalse(e5Resolved);
@@ -138,7 +138,7 @@ Deno.test("deferred", async (t) => {
     assertEquals(e1.active, false);
     assertEquals(e2.active, false);
 
-    e3.release();
+    await e3.release();
     await e5;
     assert(e5Resolved);
     assertEquals(deferred.maxSize, 2);
@@ -153,7 +153,7 @@ Deno.test("deferred", async (t) => {
     assertEquals(e2.active, false);
     assertEquals(e3.active, false);
 
-    (await e4).release();
+    await (await e4).release();
     assertEquals(deferred.maxSize, 2);
     assertEquals(deferred.elements.length, 2);
     assertEquals(deferred.stack.length, 1);
@@ -167,7 +167,7 @@ Deno.test("deferred", async (t) => {
     assertEquals(e3.active, false);
     assertEquals((await e4).active, false);
 
-    (await e5).release();
+    await (await e5).release();
     assertEquals(deferred.maxSize, 2);
     assertEquals(deferred.elements.length, 2);
     assertEquals(deferred.stack.length, 2);
@@ -183,7 +183,7 @@ Deno.test("deferred", async (t) => {
     assertEquals((await e5).active, false);
 
     const e6 = await deferred.pop();
-    e6.remove();
+    await e6.remove();
     assertEquals(deferred.maxSize, 2);
     assertEquals(deferred.elements.length, 1);
     assertEquals(deferred.stack.length, 1);
@@ -200,7 +200,7 @@ Deno.test("deferred", async (t) => {
     assertEquals(e6.active, false);
 
     const e7 = await deferred.pop();
-    e7.remove();
+    await e7.remove();
     assertEquals(deferred.maxSize, 2);
     assertEquals(deferred.elements.length, 0);
     assertEquals(deferred.stack.length, 0);
