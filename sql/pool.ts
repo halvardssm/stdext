@@ -1,16 +1,11 @@
 import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
 import type {
-  SqlClientQueriable,
-  SqlConnectableBase,
   SqlPreparedStatement,
   SqlQueryOptions,
   SqlTransaction,
+  SqlTransactionable,
   SqlTransactionOptions,
 } from "./core.ts";
-import type {
-  DeferredStack,
-  DeferredStackOptions,
-} from "../collections/deferred_stack.ts";
 import type { SqlEventable, SqlEventTarget } from "./events.ts";
 
 /**
@@ -30,8 +25,7 @@ export interface SqlPoolClientOptions {
  *
  * This represents the options for a connection pool.
  */
-export interface SqlClientPoolOptions
-  extends SqlConnectionOptions, DeferredStackOptions<SqlConnection> {
+export interface SqlClientPoolOptions extends SqlConnectionOptions {
   /**
    * Whether to lazily initialize connections.
    *
@@ -40,6 +34,10 @@ export interface SqlClientPoolOptions
    * acquiring a connection, and max pool size has not been reached.
    */
   lazyInitialization?: boolean;
+  /**
+   * The maximum stack size to be allowed.
+   */
+  maxSize?: number;
 }
 
 /**
@@ -58,37 +56,38 @@ export interface SqlPoolClient<
   QueryOptions extends SqlQueryOptions = SqlQueryOptions,
   Prepared extends SqlPreparedStatement<
     ConnectionOptions,
-    Connection,
     ParameterType,
-    QueryOptions
+    QueryOptions,
+    Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    Connection,
     ParameterType,
-    QueryOptions
+    QueryOptions,
+    Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
   Transaction extends SqlTransaction<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
+    Prepared,
     TransactionOptions
   > = SqlTransaction<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
+    Prepared,
     TransactionOptions
   >,
   PoolClientOptions extends SqlPoolClientOptions = SqlPoolClientOptions,
 > extends
-  SqlConnectableBase<Connection>,
-  SqlClientQueriable<
+  SqlTransactionable<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
     Prepared,
     TransactionOptions,
     Transaction
@@ -99,7 +98,6 @@ export interface SqlPoolClient<
   readonly options:
     & ConnectionOptions
     & QueryOptions
-    & TransactionOptions
     & PoolClientOptions;
   /**
    * Whether the pool client is disposed and should not be available anymore
@@ -133,27 +131,29 @@ export interface SqlClientPool<
   >,
   Prepared extends SqlPreparedStatement<
     ConnectionOptions,
-    Connection,
     ParameterType,
-    QueryOptions
+    QueryOptions,
+    Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    Connection,
     ParameterType,
-    QueryOptions
+    QueryOptions,
+    Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
   Transaction extends SqlTransaction<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
+    Prepared,
     TransactionOptions
   > = SqlTransaction<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
+    Prepared,
     TransactionOptions
   >,
   PoolClient extends SqlPoolClient<
@@ -182,12 +182,10 @@ export interface SqlClientPool<
     >,
     "execute" | "queryMany" | "queryManyArray"
   > {
-  readonly options: ConnectionOptions & QueryOptions & TransactionOptions;
-
-  /**
-   * The deferred stack of connections
-   */
-  deferredStack: DeferredStack<Connection>;
+  readonly options:
+    & ConnectionOptions
+    & QueryOptions
+    & SqlClientPoolOptions;
 
   /**
    * Acquire a connection from the pool

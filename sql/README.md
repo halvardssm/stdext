@@ -196,7 +196,7 @@ following classes for your database driver:
 
 It is also however advisable to create additional helper classes for easier
 inheritance. See [test.ts](./test.ts) for a minimum but functional example of
-how to implement these interfaces.
+how to implement these interfaces into intermediate classes.
 
 ### Inheritance graph
 

@@ -2,7 +2,7 @@
  * Events
  */
 import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
-import type { SqlConnectableBase } from "./core.ts";
+import type { SqlConnectable } from "./connection.ts";
 
 /**
  * Event types
@@ -29,7 +29,7 @@ export type SqlPoolConnectionEventType =
  * SqlErrorEventInit
  */
 export interface SqlErrorEventInit<
-  Connectable extends SqlConnectableBase = SqlConnectableBase,
+  Connectable extends SqlConnectable = SqlConnectable,
 > extends ErrorEventInit {
   connectable?: Connectable;
 }

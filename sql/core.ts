@@ -1,5 +1,9 @@
 // deno-lint-ignore-file no-explicit-any
-import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
+import type {
+  SqlConnectable,
+  SqlConnection,
+  SqlConnectionOptions,
+} from "./connection.ts";
 
 /**
  * Row
@@ -40,45 +44,30 @@ export interface SqlQueryOptions extends SqlConnectionOptions {
 }
 
 /**
- * SqlConnectableBase
- *
- * The base interface for everything that interracts with the connection like querying.
- */
-export interface SqlConnectableBase<
-  Connection extends SqlConnection = SqlConnection,
-> {
-  /**
-   * The connection to the database
-   */
-  connection: Connection;
-
-  /**
-   * Whether the connection is connected or not
-   */
-  get connected(): boolean;
-}
-
-/**
  * SqlPreparedQueriable
  *
  * Represents a prepared statement to be executed separately from creation.
  */
 export interface SqlPreparedStatement<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
-    ConnectionOptions
-  >,
   ParameterType extends unknown = unknown,
   QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-> extends SqlConnectableBase<Connection> {
+  Connection extends SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  > = SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  >,
+> extends SqlConnectable<ConnectionOptions, Connection> {
+  readonly options: ConnectionOptions & QueryOptions;
+
   /**
    * The SQL statement
    */
   readonly sql: string;
-  /**
-   * The (global) options to pass to the query method.
-   */
-  readonly options: QueryOptions;
 
   /**
    * Executes the prepared statement
@@ -170,16 +159,19 @@ export interface SqlPreparedStatement<
  */
 export interface SqlQueriable<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
-    ConnectionOptions
-  >,
   ParameterType extends unknown = unknown,
   QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-> extends SqlConnectableBase<Connection> {
-  /**
-   * The (global) options to pass to the query method.
-   */
-  readonly options: QueryOptions;
+  Connection extends SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  > = SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  >,
+> extends SqlConnectable<ConnectionOptions, Connection> {
+  readonly options: ConnectionOptions & QueryOptions;
 
   /**
    * Execute a SQL statement
@@ -298,25 +290,99 @@ export interface SqlQueriable<
 }
 
 /**
- * SqlTransactionQueriable
+ * SqlPreparable
+ *
+ * Represents an object that can create a prepared statement.
+ */
+export interface SqlPreparable<
+  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
+  ParameterType extends unknown = unknown,
+  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
+  Connection extends SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  > = SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  >,
+  PreparedStatement extends SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
+  > = SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
+  >,
+> extends
+  SqlQueriable<ConnectionOptions, ParameterType, QueryOptions, Connection> {
+  /**
+   * Create a prepared statement that can be executed multiple times.
+   * This is useful when you want to execute the same SQL statement multiple times with different parameters.
+   *
+   * @param sql the SQL statement
+   * @param options the options to pass to the query method, will be merged with the global options
+   * @returns a prepared statement
+   *
+   * @example
+   * ```ts
+   * const stmt = db.prepare("SELECT * FROM table WHERE id = ?");
+   *
+   * for (let i = 0; i < 10; i++) {
+   *   const row of stmt.query([i])
+   *   console.log(row);
+   * }
+   * ```
+   */
+  prepare(
+    sql: string,
+    options?: QueryOptions,
+  ): PreparedStatement;
+}
+
+/**
+ * SqlTransaction
  *
  * Represents a transaction.
  */
 export interface SqlTransaction<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
-    ConnectionOptions
-  >,
   ParameterType extends unknown = unknown,
   QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
-> extends
-  SqlQueriable<
+  Connection extends SqlConnection<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions
+  > = SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  >,
+  PreparedStatement extends SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
+  > = SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
+  >,
+  TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
+> extends
+  SqlPreparable<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection,
+    PreparedStatement
   > {
+  readonly options: ConnectionOptions & QueryOptions;
   /**
    * Whether the connection is in an active transaction or not.
    */
@@ -349,7 +415,7 @@ export interface SqlTransaction<
 }
 
 /**
- * SqlClientQueriable
+ * SqlTransactionable
  *
  * Represents an object that can create a transaction and a prepared statement.
  *
@@ -357,63 +423,55 @@ export interface SqlTransaction<
  * A prepared statement should in most cases be unique to a connection,
  * and should not live after the related connection is closed.
  */
-export interface SqlClientQueriable<
+export interface SqlTransactionable<
   ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
-    ConnectionOptions
-  >,
   ParameterType extends unknown = unknown,
   QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Prepared extends SqlPreparedStatement<
+  Connection extends SqlConnection<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions
+  > = SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  >,
+  PreparedStatement extends SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    Connection,
     ParameterType,
-    QueryOptions
+    QueryOptions,
+    Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
   Transaction extends SqlTransaction<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
+    PreparedStatement,
     TransactionOptions
   > = SqlTransaction<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
+    PreparedStatement,
     TransactionOptions
   >,
 > extends
-  SqlQueriable<ConnectionOptions, Connection, ParameterType, QueryOptions> {
-  /**
-   * Create a prepared statement that can be executed multiple times.
-   * This is useful when you want to execute the same SQL statement multiple times with different parameters.
-   *
-   * @param sql the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns a prepared statement
-   *
-   * @example
-   * ```ts
-   * const stmt = db.prepare("SELECT * FROM table WHERE id = ?");
-   *
-   * for (let i = 0; i < 10; i++) {
-   *   const row of stmt.query([i])
-   *   console.log(row);
-   * }
-   * ```
-   */
-  prepare(
-    sql: string,
-    options?: QueryOptions,
-  ): Prepared;
-
+  SqlPreparable<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection,
+    PreparedStatement
+  > {
+  readonly options: ConnectionOptions & QueryOptions;
   /**
    * Starts a transaction
    */

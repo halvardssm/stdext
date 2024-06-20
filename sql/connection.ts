@@ -104,3 +104,28 @@ export interface SqlConnection<
     options?: QueryOptions,
   ): AsyncGenerator<T>;
 }
+
+/**
+ * SqlConnectable
+ *
+ * The base interface for everything that interracts with the connection like querying.
+ */
+export interface SqlConnectable<
+  Options extends SqlConnectionOptions = SqlConnectionOptions,
+  Connection extends SqlConnection = SqlConnection,
+> extends AsyncDisposable {
+  /**
+   * The (global) options.
+   */
+  readonly options: Options;
+
+  /**
+   * The connection to the database
+   */
+  readonly connection: Connection;
+
+  /**
+   * Whether the connection is connected or not
+   */
+  get connected(): boolean;
+}

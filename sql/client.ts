@@ -1,10 +1,9 @@
 import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
 import type {
-  SqlClientQueriable,
   SqlPreparedStatement,
-  SqlQueriable,
   SqlQueryOptions,
   SqlTransaction,
+  SqlTransactionable,
   SqlTransactionOptions,
 } from "./core.ts";
 import type { SqlEventable, SqlEventTarget } from "./events.ts";
@@ -25,48 +24,47 @@ export interface SqlClient<
     ParameterType,
     QueryOptions
   > = SqlConnection<ConnectionOptions, ParameterType, QueryOptions>,
-  Prepared extends SqlPreparedStatement<
+  PreparedStatement extends SqlPreparedStatement<
     ConnectionOptions,
-    Connection,
     ParameterType,
-    QueryOptions
+    QueryOptions,
+    Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    Connection,
     ParameterType,
-    QueryOptions
+    QueryOptions,
+    Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
   Transaction extends SqlTransaction<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
+    PreparedStatement,
     TransactionOptions
   > = SqlTransaction<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
+    Connection,
+    PreparedStatement,
     TransactionOptions
   >,
 > extends
-  SqlConnection<ConnectionOptions, ParameterType, QueryOptions>,
-  SqlQueriable<
-    ConnectionOptions,
-    Connection,
-    ParameterType,
-    QueryOptions
+  Pick<
+    SqlConnection<ConnectionOptions, ParameterType, QueryOptions>,
+    "close" | "connect" | "connected"
   >,
-  SqlClientQueriable<
+  SqlTransactionable<
     ConnectionOptions,
-    Connection,
     ParameterType,
     QueryOptions,
-    Prepared,
+    Connection,
+    PreparedStatement,
     TransactionOptions,
     Transaction
   >,
-  SqlEventable<EventTarget> {
-  options: ConnectionOptions & QueryOptions & TransactionOptions;
+  SqlEventable<EventTarget>,
+  AsyncDisposable {
 }

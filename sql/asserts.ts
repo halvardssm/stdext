@@ -2,8 +2,7 @@ import { assertExists, assertInstanceOf, AssertionError } from "@std/assert";
 import {
   SqlClient,
   SqlClientPool,
-  SqlClientQueriable,
-  SqlConnectableBase,
+  SqlConnectable,
   SqlConnection,
   SqlError,
   SqlEventable,
@@ -11,8 +10,8 @@ import {
   SqlPreparedStatement,
   SqlQueriable,
   SqlTransaction,
+  SqlTransactionable,
 } from "./mod.ts";
-import { DeferredStack } from "../collections/deferred_stack.ts";
 
 function hasProperty<T>(obj: T, property: string | symbol | number): boolean {
   let currentProto = obj;
@@ -91,7 +90,6 @@ export function assertIsSqlConnection(
   assertHasProperties(
     value,
     [
-      "connectionUrl",
       "options",
       "connected",
       "connect",
@@ -103,9 +101,10 @@ export function assertIsSqlConnection(
   );
 }
 
-export function assertIsSqlConnectableBase(
+export function assertIsSqlConnectable(
   value: unknown,
-): asserts value is SqlConnectableBase {
+): asserts value is SqlConnectable {
+  assertIsAsyncDisposable(value);
   assertHasProperties(
     value,
     [
@@ -119,7 +118,7 @@ export function assertIsSqlConnectableBase(
 export function assertIsSqlPreparedStatement(
   value: unknown,
 ): asserts value is SqlPreparedStatement {
-  assertIsSqlConnectableBase(value);
+  assertIsSqlConnectable(value);
   assertHasProperties(
     value,
     [
@@ -139,7 +138,7 @@ export function assertIsSqlPreparedStatement(
 export function assertIsSqlQueriable(
   value: unknown,
 ): asserts value is SqlQueriable {
-  assertIsSqlConnectableBase(value);
+  assertIsSqlConnectable(value);
   assertHasProperties(
     value,
     [
@@ -154,11 +153,22 @@ export function assertIsSqlQueriable(
     ],
   );
 }
+export function assertIsSqlPreparable(
+  value: unknown,
+): asserts value is SqlQueriable {
+  assertIsSqlQueriable(value);
+  assertHasProperties(
+    value,
+    [
+      "prepare",
+    ],
+  );
+}
 
 export function assertIsSqlTransaction(
   value: unknown,
 ): asserts value is SqlTransaction {
-  assertIsSqlQueriable(value);
+  assertIsSqlPreparable(value);
   assertHasProperties(
     value,
     [
@@ -171,14 +181,13 @@ export function assertIsSqlTransaction(
   );
 }
 
-export function assertIsSqlClientQueriable(
+export function assertIsSqlTransactionable(
   value: unknown,
-): asserts value is SqlClientQueriable {
-  assertIsSqlQueriable(value);
+): asserts value is SqlTransactionable {
+  assertIsSqlPreparable(value);
   assertHasProperties(
     value,
     [
-      "prepare",
       "beginTransaction",
       "transaction",
     ],
@@ -195,7 +204,7 @@ export function assertIsSqlEventable(
 export function assertIsSqlClient(value: unknown): asserts value is SqlClient {
   assertIsSqlConnection(value);
   assertIsSqlQueriable(value);
-  assertIsSqlClientQueriable(value);
+  assertIsSqlTransactionable(value);
   assertIsSqlEventable(value);
   assertHasProperties(value, ["options"]);
 }
@@ -203,8 +212,8 @@ export function assertIsSqlClient(value: unknown): asserts value is SqlClient {
 export function assertIsSqlPoolClient(
   value: unknown,
 ): asserts value is SqlPoolClient {
-  assertIsSqlConnectableBase(value);
-  assertIsSqlClientQueriable(value);
+  assertIsSqlConnectable(value);
+  assertIsSqlTransactionable(value);
   assertHasProperties(value, [
     "options",
     "disposed",
@@ -226,5 +235,4 @@ export function assertIsSqlClientPool(
     "deferredStack",
     "acquire",
   ]);
-  assertInstanceOf(value.deferredStack, DeferredStack);
 }
