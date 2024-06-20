@@ -1,7 +1,7 @@
 import { assert, assertMatch } from "@std/assert";
 import { type BcryptOptions, hash, verify } from "./bcrypt.ts";
 
-Deno.test("Bcrypt", async (t) => {
+Deno.test("crypto/hash/Bcrypt", async (t) => {
   await t.step("defaults", () => {
     const o = {} as BcryptOptions;
     const h = hash("password", o);

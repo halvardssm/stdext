@@ -1,7 +1,7 @@
 import { assert, assertMatch } from "@std/assert";
 import { type Argon2Options, hash, verify } from "./argon2.ts";
 
-Deno.test("Argon2", async (t) => {
+Deno.test("crypto/hash/Argon2", async (t) => {
   await t.step("defaults", () => {
     const h = hash("password", {});
     assertMatch(h, /^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);

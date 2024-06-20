@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
 import { DeferredStack } from "./deferred_stack.ts";
 
-Deno.test("deferred", async (t) => {
+Deno.test("collections/deferred_stack/DeferredStack", async (t) => {
   await t.step("fill and empty x2", async () => {
     const deferred = new DeferredStack<number>({ maxSize: 2 });
     assertEquals(deferred.maxSize, 2);

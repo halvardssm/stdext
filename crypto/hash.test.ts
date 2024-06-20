@@ -1,7 +1,7 @@
 import { assert, assertMatch, assertThrows } from "@std/assert";
 import { hash, verify } from "./hash.ts";
 
-Deno.test("hash", async (t) => {
+Deno.test("crypto/hash/[hash|verify]", async (t) => {
   await t.step("unsupported", () => {
     // deno-lint-ignore ban-ts-comment
     // @ts-ignore

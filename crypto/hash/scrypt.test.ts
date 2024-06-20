@@ -1,7 +1,7 @@
 import { assert, assertMatch } from "@std/assert";
 import { hash, type ScryptOptions, verify } from "./scrypt.ts";
 
-Deno.test("Scrypt", async (t) => {
+Deno.test("crypto/hash/Scrypt", async (t) => {
   await t.step("defaults", () => {
     const o = {} as ScryptOptions;
     const h = hash("password", o);
