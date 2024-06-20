@@ -24,6 +24,7 @@
     "./sql"
   ],
   "exclude": [
-    "./crypto/hash/_wasm/target"
+    "./crypto/hash/_wasm/target",
+    "coverage"
   ]
 }
