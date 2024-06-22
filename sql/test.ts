@@ -5,7 +5,17 @@ import {
   SqlEventTarget,
   SqlPoolConnectionEventType,
 } from "./events.ts";
-import { sqlIntegrationTestSuite, sqlUnitTestSuite } from "./testing.ts";
+import {
+  testClientConnection,
+  testClientPoolConnection,
+  testSqlClient,
+  testSqlClientPool,
+  testSqlConnection,
+  testSqlEventTarget,
+  testSqlPoolClient,
+  testSqlPreparedStatement,
+  testSqlTransaction,
+} from "./testing.ts";
 import * as Sql from "./mod.ts";
 
 /**
@@ -625,27 +635,56 @@ const client = new TestSqlClient(connectionUrl, options);
 const poolClient = new TestSqlPoolClient(connection, options);
 const clientPool = new TestSqlClientPool(connectionUrl, options);
 
-sqlUnitTestSuite({
-  testPrefix: "sql",
-  connectionClass: connection,
-  preparedStatementClass: preparedStatement,
-  transactionClass: transaction,
-  eventTargetClass: eventTarget,
-  clientClass: client,
-  poolClientClass: poolClient,
-  clientPoolClass: clientPool,
-  checks: {
-    connectionUrl,
-    options,
-    clientPoolOptions: options,
-    sql,
-  },
+const expects = {
+  connectionUrl,
+  options,
+  clientPoolOptions: options,
+  sql,
+};
+
+Deno.test(`sql/type test`, async (t) => {
+  await t.step("SqlConnection", () => {
+    testSqlConnection(connection, expects);
+  });
+
+  await t.step(`sql/PreparedStatement`, () => {
+    testSqlPreparedStatement(preparedStatement, expects);
+  });
+
+  await t.step(`sql/SqlTransaction`, () => {
+    testSqlTransaction(transaction, expects);
+  });
+
+  await t.step(`sql/SqlEventTarget`, () => {
+    testSqlEventTarget(eventTarget);
+  });
+
+  await t.step(`sql/SqlClient`, () => {
+    testSqlClient(client, expects);
+  });
+
+  await t.step(`sql/SqlPoolClient`, () => {
+    testSqlPoolClient(poolClient, expects);
+  });
+
+  await t.step(`sql/SqlClientPool`, () => {
+    testSqlClientPool(clientPool, expects);
+  });
 });
 
-sqlIntegrationTestSuite({
-  testPrefix: "sql",
-  Client: TestSqlClient,
-  ClientPool: TestSqlClientPool,
-  clientArguments: [connectionUrl, options],
-  clientPoolArguments: [connectionUrl, options],
+Deno.test(`sql/connection test`, async (t) => {
+  await t.step("SqlClient", async (t) => {
+    await testClientConnection<TestSqlClient>(
+      t,
+      TestSqlClient,
+      [connectionUrl, options],
+    );
+  });
+  await t.step("SqlPoolClient", async (t) => {
+    await testClientPoolConnection<TestSqlClientPool>(
+      t,
+      TestSqlClientPool,
+      [connectionUrl, options],
+    );
+  });
 });
