@@ -36,13 +36,15 @@ methods (see [SqlClient](./client.ts)):
 - `queryOne` (See [SqlQueriable](./core.ts)): Queries the database and returns
   at most one entry as an object
 - `queryMany` (See [SqlQueriable](./core.ts)): Queries the database with an
-  async generator and yields each entry as an object
+  async generator and yields each entry as an object. This is good for when you
+  want to iterate over a massive amount of rows.
 - `queryArray` (See [SqlQueriable](./core.ts)): Queries the database and returns
   an array of arrays
 - `queryOneArray` (See [SqlQueriable](./core.ts)): Queries the database and
   returns at most one entry as an array
 - `queryManyArray` (See [SqlQueriable](./core.ts)): Queries the database with an
-  async generator and yields each entry as an array
+  async generator and yields each entry as an array. This is good for when you
+  want to iterate over a massive amount of rows.
 - `sql` (See [SqlQueriable](./core.ts)): Allows you to create a query using
   template literals, and returns the entries as an array of objects. This is a
   wrapper around `query`
@@ -95,45 +97,99 @@ The following events can be subscribed to according to the specs (see
 
 ### Examples
 
+Async dispose
+
+```ts
+await using client = new Client(connectionUrl, connectionOptions);
+await client.connect();
+await client.execute("SOME INSERT QUERY");
+const res = await client.query("SELECT * FROM table");
+```
+
 Using const (requires manual close at the end)
 
 ```ts
-const db = new Client(connectionUrl, connectionOptions);
-await db.connect();
-await db.execute("SOME INSERT QUERY");
-const res = await db.query("SELECT * FROM table");
-await db.close();
+const client = new Client(connectionUrl, connectionOptions);
+await client.connect();
+await client.execute("SOME INSERT QUERY");
+const res = await client.query("SELECT * FROM table");
+await client.close();
 ```
 
-Query object
+Query objects
 
 ```ts
-await using db = new Client(connectionUrl, connectionOptions);
-await db.connect();
-await db.execute("SOME INSERT QUERY");
-const res = await db.query("SELECT * FROM table");
+const res = await client.query("SELECT * FROM table");
 console.log(res);
 // [{ col1: "some value" }]
 ```
 
-Query array
+Query one object
 
 ```ts
-await using db = new Client(connectionUrl, connectionOptions);
-await db.connect();
-await db.execute("SOME INSERT QUERY");
-const res = await db.queryArray("SELECT * FROM table");
+const res = await client.queryOne("SELECT * FROM table");
+console.log(res);
+// { col1: "some value" }
+```
+
+Query many objects with an iterator
+
+```ts
+const res = Array.fromAsync(client.queryMany("SELECT * FROM table"));
+console.log(res);
+// [{ col1: "some value" }]
+
+// OR
+
+for await (const iterator of client.queryMany("SELECT * FROM table")) {
+  console.log(res);
+  // { col1: "some value" }
+}
+```
+
+Query as an array
+
+```ts
+const res = await client.queryArray("SELECT * FROM table");
 console.log(res);
 // [[ "some value" ]]
 ```
 
-Query with template literals
+Query one as an array
 
 ```ts
-await using db = new Client(connectionUrl, connectionOptions);
-await db.connect();
-await db.execute("SOME INSERT QUERY");
-const res = await db.sqlArray`SELECT * FROM table where id = ${id}`;
+const res = await client.queryOneArray("SELECT * FROM table");
+console.log(res);
+// [[ "some value" ]]
+```
+
+Query many as array with an iterator
+
+```ts
+const res = Array.fromAsync(client.queryManyArray("SELECT * FROM table"));
+console.log(res);
+// [[ "some value" ]]
+
+// OR
+
+for await (const iterator of client.queryManyArray("SELECT * FROM table")) {
+  console.log(res);
+  // [ "some value" ]
+}
+```
+
+Query with template literals as an object
+
+```ts
+const res = await client.sql`SELECT * FROM table where id = ${id}`;
+console.log(res);
+// [{ col1: "some value" }]
+```
+
+Query with template literals as an array
+
+```ts
+const res = await client.sqlArray`SELECT * FROM table where id = ${id}`;
 console.log(res);
 // [[ "some value" ]]
 ```
@@ -141,22 +197,16 @@ console.log(res);
 Transaction
 
 ```ts
-await using db = new Client(connectionUrl, connectionOptions);
-await db.connect();
-await db.execute("SOME INSERT QUERY");
-const transaction = await db.beginTransaction();
+const transaction = await client.beginTransaction();
 await transaction.execute("SOME INSERT QUERY");
 await transaction.commitTransaction();
-// transaction can no longer be used
+// `transaction` can no longer be used, and a new transaction needs to be created
 ```
 
 Transaction wrapper
 
 ```ts
-await using db = new Client(connectionUrl, connectionOptions);
-await db.connect();
-await db.execute("SOME INSERT QUERY");
-const res = await db.transaction(async (t) => {
+const res = await client.transaction(async (t) => {
   await t.execute("SOME INSERT QUERY");
   return t.query("SOME SELECT QUERY");
 });
@@ -167,9 +217,6 @@ console.log(res);
 Prepared statement
 
 ```ts
-await using db = new Client(connectionUrl, connectionOptions);
-await db.connect();
-await db.execute("SOME INSERT QUERY");
 const prepared = db.prepare("SOME PREPARED STATEMENT");
 await prepared.query([...params]);
 console.log(res);
