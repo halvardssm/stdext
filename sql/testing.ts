@@ -16,14 +16,14 @@ import {
   assertIsSqlQueriable,
   assertIsSqlTransaction,
   assertIsSqlTransactionable,
-  SqlClient,
-  SqlClientPool,
-  SqlConnectable,
-  SqlPoolClient,
-  SqlPreparedStatement,
-  SqlQueriable,
-  SqlTransaction,
-  SqlTransactionable,
+  type SqlClient,
+  type SqlClientPool,
+  type SqlConnectable,
+  type SqlPoolClient,
+  type SqlPreparedStatement,
+  type SqlQueriable,
+  type SqlTransaction,
+  type SqlTransactionable,
 } from "./mod.ts";
 
 // deno-lint-ignore no-explicit-any

@@ -1,16 +1,16 @@
 import { assertExists, assertInstanceOf, AssertionError } from "@std/assert";
 import {
-  SqlClient,
-  SqlClientPool,
-  SqlConnectable,
-  SqlConnection,
+  type SqlClient,
+  type SqlClientPool,
+  type SqlConnectable,
+  type SqlConnection,
   SqlError,
-  SqlEventable,
-  SqlPoolClient,
-  SqlPreparedStatement,
-  SqlQueriable,
-  SqlTransaction,
-  SqlTransactionable,
+  type SqlEventable,
+  type SqlPoolClient,
+  type SqlPreparedStatement,
+  type SqlQueriable,
+  type SqlTransaction,
+  type SqlTransactionable,
 } from "./mod.ts";
 
 /**

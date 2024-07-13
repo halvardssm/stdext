@@ -1,4 +1,4 @@
-import { ArrayRow, Row, SqlQueryOptions } from "./core.ts";
+import type { ArrayRow, Row, SqlQueryOptions } from "./core.ts";
 
 /**
  * SqlConnectionOptions

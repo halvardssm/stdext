@@ -1,9 +1,9 @@
 import { DeferredStack } from "../collections/deferred_stack.ts";
 import {
-  SqlConnectionEventInit,
-  SqlEvent,
+  type SqlConnectionEventInit,
+  type SqlEvent,
   SqlEventTarget,
-  SqlPoolConnectionEventType,
+  type SqlPoolConnectionEventType,
 } from "./events.ts";
 import {
   testClientConnection,
