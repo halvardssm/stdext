@@ -1,7 +1,6 @@
 {
   "version": "0.0.5",
   "name": "@stdext/crypto",
-  "lock": false,
   "exports": {
     "./hash": "./hash.ts"
   },

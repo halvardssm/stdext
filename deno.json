@@ -16,7 +16,7 @@
     "format": "deno fmt && deno task --cwd crypto format",
     "format:check": "deno fmt --check && deno task --cwd crypto format:check"
   },
-  "workspaces": [
+  "workspace": [
     "./collections",
     "./crypto",
     "./encoding",
