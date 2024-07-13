@@ -5,7 +5,7 @@ The SQL package contains a standard interface for SQL based databases
 Inspired by [rust sqlx](https://docs.rs/sqlx/latest/sqlx/index.html) and
 [go sql](https://pkg.go.dev/database/sql).
 
-The goal for this package is to have a standard interface for SQL like database
+The goal for this package is to have a standard interface for SQL-like database
 clients that can be used in Deno, Node and other JS runtimes.
 
 ## Usage
@@ -19,12 +19,18 @@ await db.execute("SOME INSERT QUERY");
 const res = await db.query("SELECT * FROM table");
 ```
 
-`@stdext/std` provides a standard for interacting with a database.
+Both the `Client` and `ClientPool` need to be connected using `connect()` before
+the database can be queried. At the end of the script, this connection also
+needs to be cleaned up by calling `close()`. If using the new
+[AsyncDispose](https://github.com/tc39/proposal-explicit-resource-management),
+there is no need to call `close()` manually as shown in the example above.
+
+See the [examples](#examples) section for more usage.
 
 ### Client
 
-Full compliance with `@stdext/std` provides a database client with the following
-methods (see [SqlClient](./client.ts)):
+The Client provides a database client with the following methods (see
+[SqlClient](./client.ts)):
 
 - `connect` (See [SqlConnection](./connection.ts)): Creates a connection to the
   database
@@ -72,14 +78,14 @@ The following events can be subscribed to according to the specs (see
 
 ### ClientPool
 
-Full compliance with `@stdext/std` provides a database client pool (a pool of
-clients) with the following methods (see [SqlClientPool](./pool.ts)):
+The ClientPool provides a database client pool (a pool of clients) with the
+following methods (see [SqlClientPool](./pool.ts)):
 
 - `connect` (See [SqlConnection](./core.ts)): Creates the connection classes and
   adds them to a connection pool, and optionally connects them to the database
 - `close` (See [SqlConnection](./core.ts)): Closes all connections in the pool
 - `acquire` (See [SqlPoolable](./core.ts)): Retrieves a
-  [SqlPoolClient](./pool.ts) (a subset of [Client](#client)), and connects it if
+  [SqlPoolClient](./pool.ts) (a subset of [Client](#client)), and connects if
   not already connected
 
 #### Events
@@ -225,8 +231,11 @@ console.log(res);
 
 ## Implementation
 
-To be fully compliant with `@stdext/std`, you will need to implement the
-following classes for your database driver:
+> This section is for implementing the interface for database drivers. For
+> general usage, read the [usage](#usage) section.
+
+To be fully compliant with the specs, you will need to implement the following
+classes for your database driver:
 
 - `Connection` ([SqlConnection](./connection.ts)): This represents the
   connection to the database. This should preferably only contain the
@@ -252,3 +261,65 @@ most cases, these are the classes and the inheritance graph that should be
 implemented.
 
 ![inheritance flow](./_assets/inheritance_flowchart.jpg)
+
+### Constructor Signature
+
+The constructor also must follow a strict signature.
+
+The constructor for both the Client and the ClientPool follows the same
+signature:
+
+1. `connectionUrl`: string | URL
+2. `options`?: ConnectionOptions & QueryOptions
+
+As `ConnectionOptions` and `QueryOptions` can be extended, the options can be
+used to customize the settings, thus having a standard 2 argument signature of
+the constructor.
+
+> The current way to specify a constructor using interfaces in TS, is to use a
+> combination of `implements` and `satisfies`. This will be updated if anything
+> changes.
+
+#### Client
+
+The Client must have a constructor following the signature specified by
+`SqlClientConstructor`.
+
+```ts
+export const Client = class extends Transactionable implements SqlClient<...> { // Transactionable is a class implementing `SqlTransactionable`
+  ...
+  // The constructor now has to satisfy `SqlClientConstructor`
+  constructor(
+    connectionUrl: string | URL,
+    options: ConnectionOptions & QueryOptions = {},
+  ) {
+    ...
+  }
+  ...
+} satisfies SqlClientConstructor<...>;
+
+// We need to also export the instance type of the client
+export type Client = InstanceType<typeof Client>;
+```
+
+#### ClientPool
+
+The ClientPool must have a constructor following the signature specified by
+`SqlClientPoolConstructor`.
+
+```ts
+const ClientPool = class extends Transactionable implements SqlClientPool<...> { // Transactionable is a class implementing `SqlTransactionable`
+  ...
+  // The constructor now has to satisfy `SqlClientPoolConstructor`
+  constructor(
+    connectionUrl: string | URL,
+    options: ConnectionOptions & QueryOptions = {},
+  ) {
+    ...
+  }
+  ...
+} satisfies SqlClientPoolConstructor<...>;
+
+// We need to also export the instance type of the client pool
+export type ClientPool = InstanceType<typeof ClientPool>;
+```

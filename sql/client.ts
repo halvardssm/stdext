@@ -68,3 +68,61 @@ export interface SqlClient<
   SqlEventable<EventTarget>,
   AsyncDisposable {
 }
+
+/**
+ * SqlClientConstructor
+ *
+ * The constructor for the SqlClient interface.
+ */
+export interface SqlClientConstructor<
+  EventTarget extends SqlEventTarget = SqlEventTarget,
+  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
+  ParameterType extends unknown = unknown,
+  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
+  Connection extends SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  > = SqlConnection<ConnectionOptions, ParameterType, QueryOptions>,
+  PreparedStatement extends SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
+  > = SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
+  >,
+  TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
+  Transaction extends SqlTransaction<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection,
+    PreparedStatement,
+    TransactionOptions
+  > = SqlTransaction<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection,
+    PreparedStatement,
+    TransactionOptions
+  >,
+> {
+  new (
+    connectionUrl: string | URL,
+    options?: ConnectionOptions & QueryOptions,
+  ): SqlClient<
+    EventTarget,
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection,
+    PreparedStatement,
+    TransactionOptions,
+    Transaction
+  >;
+}

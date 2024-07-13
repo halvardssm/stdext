@@ -454,27 +454,27 @@ class TestSqlEventTarget extends SqlEventTarget<
 > {
 }
 
-class TestSqlClient extends TestSqlTransactionable implements
-  Sql.SqlClient<
-    TestSqlEventTarget,
-    TestSqlConnectionOptions,
-    TestParameterType,
-    TestSqlQueryOptions,
-    TestSqlConnection,
-    TestSqlPreparedStatement,
-    TestSqlTransactionOptions,
-    TestSqlTransaction
-  > {
+const TestSqlClient = class extends TestSqlTransactionable
+  implements
+    Sql.SqlClient<
+      TestSqlEventTarget,
+      TestSqlConnectionOptions,
+      TestParameterType,
+      TestSqlQueryOptions,
+      TestSqlConnection,
+      TestSqlPreparedStatement,
+      TestSqlTransactionOptions,
+      TestSqlTransaction
+    > {
   declare readonly options:
     & TestSqlConnectionOptions
-    & TestSqlQueryOptions
-    & TestSqlTransactionOptions;
+    & TestSqlQueryOptions;
   eventTarget: TestSqlEventTarget;
   constructor(
-    connectionUrl: string,
-    options: TestSqlClient["options"] = {},
+    connectionUrl: string | URL,
+    options: TestSqlConnectionOptions & TestSqlQueryOptions = {},
   ) {
-    super(new TestSqlConnection(connectionUrl, options), options);
+    super(new TestSqlConnection(connectionUrl.toString(), options), options);
     this.eventTarget = new TestSqlEventTarget();
   }
   async connect(): Promise<void> {
@@ -489,7 +489,18 @@ class TestSqlClient extends TestSqlTransactionable implements
     );
     await this.connection.close();
   }
-}
+} satisfies Sql.SqlClientConstructor<
+  TestSqlEventTarget,
+  TestSqlConnectionOptions,
+  TestParameterType,
+  TestSqlQueryOptions,
+  TestSqlConnection,
+  TestSqlPreparedStatement,
+  TestSqlTransactionOptions,
+  TestSqlTransaction
+>;
+
+type TestSqlClient = InstanceType<typeof TestSqlClient>;
 
 interface TestSqlPoolClientOptions extends Sql.SqlPoolClientOptions {
 }
@@ -537,7 +548,7 @@ class TestSqlPoolClient extends TestSqlTransactionable
   }
 }
 
-class TestSqlClientPool implements
+const TestSqlClientPool = class implements
   Sql.SqlClientPool<
     TestSqlClientPoolOptions,
     TestParameterType,
@@ -562,10 +573,10 @@ class TestSqlClientPool implements
     return this._connected;
   }
   constructor(
-    connectionUrl: string,
+    connectionUrl: string | URL,
     options: TestSqlClientPoolOptions = {},
   ) {
-    this.connectionUrl = connectionUrl;
+    this.connectionUrl = connectionUrl.toString();
     this.options = options;
     this.deferredStack = new DeferredStack<TestSqlConnection>({
       maxSize: 3,
@@ -617,7 +628,19 @@ class TestSqlClientPool implements
   async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
   }
-}
+} satisfies Sql.SqlClientPoolConstructor<
+  TestSqlClientPoolOptions,
+  TestParameterType,
+  TestSqlQueryOptions,
+  TestSqlConnection,
+  TestSqlPreparedStatement,
+  TestSqlTransactionOptions,
+  TestSqlTransaction,
+  TestSqlPoolClient,
+  TestSqlEventTarget
+>;
+
+type TestSqlClientPool = InstanceType<typeof TestSqlClientPool>;
 
 const connectionUrl = "test";
 const options: TestSqlTransaction["options"] = { test: "test" };

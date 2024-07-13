@@ -192,3 +192,83 @@ export interface SqlClientPool<
    */
   acquire(): Promise<PoolClient>;
 }
+
+/**
+ * SqlClientPoolConstructor
+ *
+ * The constructor for the SqlClientPool interface.
+ */
+export interface SqlClientPoolConstructor<
+  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
+  ParameterType extends unknown = unknown,
+  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
+  Connection extends SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  > = SqlConnection<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions
+  >,
+  PreparedStatement extends SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
+  > = SqlPreparedStatement<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection
+  >,
+  TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
+  Transaction extends SqlTransaction<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection,
+    PreparedStatement,
+    TransactionOptions
+  > = SqlTransaction<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection,
+    PreparedStatement,
+    TransactionOptions
+  >,
+  PoolClient extends SqlPoolClient<
+    ConnectionOptions,
+    Connection,
+    ParameterType,
+    QueryOptions,
+    PreparedStatement,
+    TransactionOptions,
+    Transaction
+  > = SqlPoolClient<
+    ConnectionOptions,
+    Connection,
+    ParameterType,
+    QueryOptions,
+    PreparedStatement,
+    TransactionOptions,
+    Transaction
+  >,
+  EventTarget extends SqlEventTarget = SqlEventTarget,
+> {
+  new (
+    connectionUrl: string | URL,
+    options?: ConnectionOptions & QueryOptions,
+  ): SqlClientPool<
+    ConnectionOptions,
+    ParameterType,
+    QueryOptions,
+    Connection,
+    PreparedStatement,
+    TransactionOptions,
+    Transaction,
+    PoolClient,
+    EventTarget
+  >;
+}
