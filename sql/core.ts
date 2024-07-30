@@ -70,6 +70,16 @@ export interface SqlPreparedStatement<
   readonly sql: string;
 
   /**
+   * Whether the prepared statement has been deallocated or not.
+   */
+  deallocated: boolean;
+
+  /**
+   * Deallocate the prepared statement
+   */
+  deallocate(): Promise<void>;
+
+  /**
    * Executes the prepared statement
    *
    * @param params the parameters to bind to the SQL statement
@@ -386,7 +396,7 @@ export interface SqlTransaction<
   /**
    * Whether the connection is in an active transaction or not.
    */
-  get inTransaction(): boolean;
+  inTransaction: boolean;
 
   /**
    * Commit the transaction

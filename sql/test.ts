@@ -209,6 +209,11 @@ class TestSqlPreparedStatement extends TestSqlConnectable
     super(connection, options);
     this.sql = sql;
   }
+  deallocated = false;
+  deallocate(): Promise<void> {
+    this.deallocated = true;
+    return Promise.resolve();
+  }
   execute(
     params?: TestParameterType[] | undefined,
     options?: TestSqlQueryOptions | undefined,
