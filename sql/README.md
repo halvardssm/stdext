@@ -13,10 +13,10 @@ clients that can be used in Deno, Node and other JS runtimes.
 Minimal usage example:
 
 ```ts
-await using db = new Client(connectionUrl, connectionOptions);
-await db.connect();
-await db.execute("SOME INSERT QUERY");
-const res = await db.query("SELECT * FROM table");
+await using client = new Client(connectionUrl, connectionOptions);
+await client.connect();
+await client.execute("SOME INSERT QUERY");
+const res = await client.query("SELECT * FROM table");
 ```
 
 Both the `Client` and `ClientPool` need to be connected using `connect()` before
