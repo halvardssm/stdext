@@ -2,9 +2,10 @@ import {
   type Argon2Algorithm,
   type Argon2Options,
   instantiate,
+  type InstantiateResult,
 } from "./_wasm/lib/deno_stdext_crypto_hash_wasm_argon2.generated.mjs";
 
-const instance = instantiate();
+const instance: InstantiateResult["exports"] = instantiate();
 
 export type { Argon2Algorithm, Argon2Options };
 

@@ -8,8 +8,8 @@ import { generateHotp } from "./hotp.ts";
  */
 export function generateTotp(
   key: string | Uint8Array,
-  t0 = 0,
-  t = Date.now(),
+  t0: number = 0,
+  t: number = Date.now(),
 ): Promise<string> {
   const counter = Math.floor((t - t0) / 30000);
   return generateHotp(key, counter);
@@ -24,8 +24,8 @@ export function generateTotp(
 export async function verifyTotp(
   otp: string,
   key: string | Uint8Array,
-  t0 = 0,
-  t = Date.now(),
+  t0: number = 0,
+  t: number = Date.now(),
 ): Promise<boolean> {
   return otp === await generateTotp(key, t0, t);
 }

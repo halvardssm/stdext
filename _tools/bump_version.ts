@@ -18,7 +18,7 @@ async function updateMetaVersion(filepath: string, version: string) {
   );
 }
 
-const { workspaces } = meta;
+const { workspace: workspaces } = meta;
 
 const version = Deno.env.get("VERSION");
 
