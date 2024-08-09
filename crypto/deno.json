@@ -2,7 +2,13 @@
   "version": "0.0.5",
   "name": "@stdext/crypto",
   "exports": {
-    "./hash": "./hash.ts"
+    "./hash": "./hash.ts",
+    "./hash/argon2": "./hash/argon2.ts",
+    "./hash/bcrypt": "./hash/bcrypt.ts",
+    "./hash/scrypt": "./hash/scrypt.ts",
+    "./hotp": "./hotp.ts",
+    "./totp": "./totp.ts",
+    "./utils": "./utils.ts"
   },
   "tasks": {
     "build": "deno task build:argon2 && deno task build:bcrypt && deno task build:scrypt",
