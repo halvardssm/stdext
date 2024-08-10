@@ -1,7 +1,6 @@
 {
   "version": "0.0.5",
   "name": "@stdext/encoding",
-  "lock": false,
   "exports": {
     "./hex": "./hex.ts"
   }
