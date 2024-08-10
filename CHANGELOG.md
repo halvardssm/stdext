@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+- feat(crypto): added TOTP and HOTP
+- deprecated(http/header): Deprecated @stdext/http/header as it is added to
+  @std/http/header
+- deprecated(http/method): Deprecated @stdext/http/method as it is added to
+  @std/http/method
+
 ## [0.0.5] - 2024-05-06
 
 ### Changed
