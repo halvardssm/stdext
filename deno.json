@@ -20,9 +20,9 @@
   "workspace": [
     "./collections",
     "./crypto",
+    "./database",
     "./encoding",
-    "./http",
-    "./sql"
+    "./http"
   ],
   "exclude": [
     "./crypto/hash/_wasm/target",

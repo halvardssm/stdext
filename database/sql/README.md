@@ -1,4 +1,4 @@
-# @stdext/sql
+# @stdext/database/sql
 
 The SQL package contains a standard interface for SQL based databases
 
