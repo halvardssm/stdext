@@ -3,7 +3,12 @@
   "imports": {
     "@std/assert": "jsr:@std/assert@^1.0.2",
     "@std/path": "jsr:@std/path@^1.0.2",
-    "@std/encoding": "jsr:@std/encoding@^1.0.1"
+    "@std/encoding": "jsr:@std/encoding@^1.0.1",
+    "@stdext/collections": "jsr:@stdext/collections",
+    "@stdext/crypto": "jsr:@stdext/crypto",
+    "@stdext/database": "jsr:@stdext/database",
+    "@stdext/encoding": "jsr:@stdext/encoding",
+    "@stdext/http": "jsr:@stdext/http"
   },
   "tasks": {
     "bump_version": "deno run --allow-env=VERSION --allow-read=. --allow-write=. ./_tools/bump_version.ts",
