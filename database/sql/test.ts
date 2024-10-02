@@ -1,4 +1,4 @@
-import { DeferredStack } from "../collections/deferred_stack.ts";
+import { DeferredStack } from "@stdext/collections";
 import {
   type SqlConnectionEventInit,
   type SqlEvent,
