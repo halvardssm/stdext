@@ -1,9 +1,14 @@
 // deno-lint-ignore-file no-explicit-any
 import type {
-  SqlConnectable,
-  SqlConnection,
-  SqlConnectionOptions,
-} from "./connection.ts";
+  Driver,
+  DriverConnectable,
+  DriverConnectionOptions,
+  DriverInternalOptions,
+  DriverParameterType,
+  DriverQueryMeta,
+  DriverQueryOptions,
+  DriverQueryValues,
+} from "./driver.ts";
 
 /**
  * Row
@@ -31,16 +36,12 @@ export type SqlTransactionOptions = {
   rollbackTransactionOptions?: Record<string, unknown>;
 };
 
-/**
- * SqlQueryOptions
- *
- * Options to pass to the query methods.
- */
-export interface SqlQueryOptions extends SqlConnectionOptions {
-  /**
-   * A signal to abort the query.
-   */
-  signal?: AbortSignal;
+export interface TransactionInternalOptions<
+  ConnectionOptions extends DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions,
+  TransactionOptions extends SqlTransactionOptions,
+> extends DriverInternalOptions<ConnectionOptions, QueryOptions> {
+  transactionOptions: TransactionOptions;
 }
 
 /**
@@ -49,20 +50,34 @@ export interface SqlQueryOptions extends SqlConnectionOptions {
  * Represents a prepared statement to be executed separately from creation.
  */
 export interface SqlPreparedStatement<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Connection extends SqlConnection<
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
-  > = SqlConnection<
+    QueryValues,
+    QueryMeta
+  > = Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
+    QueryValues,
+    QueryMeta
   >,
-> extends SqlConnectable<ConnectionOptions, Connection> {
-  readonly options: ConnectionOptions & QueryOptions;
+> extends
+  DriverConnectable<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection
+  > {
+  readonly options: DriverInternalOptions<ConnectionOptions, QueryOptions>;
 
   /**
    * The SQL statement
@@ -72,7 +87,7 @@ export interface SqlPreparedStatement<
   /**
    * Whether the prepared statement has been deallocated or not.
    */
-  deallocated: boolean;
+  readonly deallocated: boolean;
 
   /**
    * Deallocate the prepared statement
@@ -168,20 +183,34 @@ export interface SqlPreparedStatement<
  * Represents an object that can execute SQL queries.
  */
 export interface SqlQueriable<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Connection extends SqlConnection<
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
-  > = SqlConnection<
+    QueryValues,
+    QueryMeta
+  > = Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
+    QueryValues,
+    QueryMeta
   >,
-> extends SqlConnectable<ConnectionOptions, Connection> {
-  readonly options: ConnectionOptions & QueryOptions;
+> extends
+  DriverConnectable<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection
+  > {
+  readonly options: DriverInternalOptions<ConnectionOptions, QueryOptions>;
 
   /**
    * Execute a SQL statement
@@ -305,31 +334,48 @@ export interface SqlQueriable<
  * Represents an object that can create a prepared statement.
  */
 export interface SqlPreparable<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Connection extends SqlConnection<
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
-  > = SqlConnection<
+    QueryValues,
+    QueryMeta
+  > = Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
+    QueryValues,
+    QueryMeta
   >,
   PreparedStatement extends SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   >,
 > extends
-  SqlQueriable<ConnectionOptions, ParameterType, QueryOptions, Connection> {
+  SqlQueriable<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection
+  > {
   /**
    * Create a prepared statement that can be executed multiple times.
    * This is useful when you want to execute the same SQL statement multiple times with different parameters.
@@ -351,7 +397,7 @@ export interface SqlPreparable<
   prepare(
     sql: string,
     options?: QueryOptions,
-  ): PreparedStatement;
+  ): Promise<PreparedStatement>;
 }
 
 /**
@@ -360,39 +406,55 @@ export interface SqlPreparable<
  * Represents a transaction.
  */
 export interface SqlTransaction<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Connection extends SqlConnection<
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
-  > = SqlConnection<
+    QueryValues,
+    QueryMeta
+  > = Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
+    QueryValues,
+    QueryMeta
   >,
   PreparedStatement extends SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
 > extends
   SqlPreparable<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
     PreparedStatement
   > {
-  readonly options: ConnectionOptions & QueryOptions;
+  readonly options: TransactionInternalOptions<
+    ConnectionOptions,
+    QueryOptions,
+    TransactionOptions
+  >;
   /**
    * Whether the connection is in an active transaction or not.
    */
@@ -434,41 +496,55 @@ export interface SqlTransaction<
  * and should not live after the related connection is closed.
  */
 export interface SqlTransactionable<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Connection extends SqlConnection<
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
-  > = SqlConnection<
+    QueryValues,
+    QueryMeta
+  > = Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
+    QueryValues,
+    QueryMeta
   >,
   PreparedStatement extends SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
   Transaction extends SqlTransaction<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
     PreparedStatement,
     TransactionOptions
   > = SqlTransaction<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
     PreparedStatement,
     TransactionOptions
@@ -476,12 +552,18 @@ export interface SqlTransactionable<
 > extends
   SqlPreparable<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
     PreparedStatement
   > {
-  readonly options: ConnectionOptions & QueryOptions;
+  readonly options: TransactionInternalOptions<
+    ConnectionOptions,
+    QueryOptions,
+    TransactionOptions
+  >;
   /**
    * Starts a transaction
    */

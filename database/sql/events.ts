@@ -1,8 +1,15 @@
 /**
  * Events
  */
-import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
-import type { SqlConnectable } from "./connection.ts";
+import type {
+  Driver,
+  DriverConnectionOptions,
+  DriverParameterType,
+  DriverQueryMeta,
+  DriverQueryOptions,
+  DriverQueryValues,
+} from "./driver.ts";
+import type { DriverConnectable } from "./driver.ts";
 
 /**
  * Event types
@@ -29,18 +36,35 @@ export type SqlPoolConnectionEventType =
  * SqlErrorEventInit
  */
 export interface SqlErrorEventInit<
-  Connectable extends SqlConnectable = SqlConnectable,
+  Connectable extends DriverConnectable = DriverConnectable,
 > extends ErrorEventInit {
   connectable?: Connectable;
 }
 
 /**
- * SqlConnectableEventInit
+ * DriverConnectableEventInit
  *
  * SQLx Connectable event init
  */
 export interface SqlConnectionEventInit<
-  Connection extends SqlConnection = SqlConnection,
+  DConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  DQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  DParameterType extends DriverParameterType = DriverParameterType,
+  DQueryValues extends DriverQueryValues = DriverQueryValues,
+  DQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
+    DConnectionOptions,
+    DQueryOptions,
+    DParameterType,
+    DQueryValues,
+    DQueryMeta
+  > = Driver<
+    DConnectionOptions,
+    DQueryOptions,
+    DParameterType,
+    DQueryValues,
+    DQueryMeta
+  >,
 > extends EventInit {
   connection: Connection;
 }
@@ -76,7 +100,39 @@ export class SqlEvent<
  * Gets dispatched when a connection is established
  */
 export class SqlConnectEvent<
-  EventInit extends SqlConnectionEventInit = SqlConnectionEventInit,
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta
+  > = Driver<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta
+  >,
+  EventInit extends SqlConnectionEventInit<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection
+  > = SqlConnectionEventInit<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection
+  >,
 > extends SqlEvent<"connect", EventInit> {
   constructor(eventInitDict: EventInit) {
     super("connect", eventInitDict);
@@ -126,9 +182,23 @@ export class SqlReleaseEvent<
  * The EventTarget to be used by SQLx
  */
 export class SqlEventTarget<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
-    ConnectionOptions
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta
+  > = Driver<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta
   >,
   EventType extends SqlPoolConnectionEventType = SqlPoolConnectionEventType,
   EventInit extends SqlConnectionEventInit<Connection> = SqlConnectionEventInit<

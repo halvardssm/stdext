@@ -1,16 +1,11 @@
 import { DeferredStack } from "@stdext/collections";
-import {
-  type SqlConnectionEventInit,
-  type SqlEvent,
-  SqlEventTarget,
-  type SqlPoolConnectionEventType,
-} from "./events.ts";
+import { deepMerge } from "@std/collections";
 import {
   testClientConnection,
   testClientPoolConnection,
+  testDriverConnection,
   testSqlClient,
   testSqlClientPool,
-  testSqlConnection,
   testSqlEventTarget,
   testSqlPoolClient,
   testSqlPreparedStatement,
@@ -18,114 +13,56 @@ import {
 } from "./testing.ts";
 import * as Sql from "./mod.ts";
 
-/**
- * Represents a database table for a test database
- */
-type TestDbTable = Array<Record<string, unknown>>;
-/**
- * Represents a database for testing
- */
-type TestDb = Record<string, TestDbTable>;
-
-const testDb: TestDb = {};
-
-const testDbQueryParser = (sql: string, parameters: string[] = []) => {
-  const replaceWildcards = (query: string, values: string[]) => {
-    for (const v of values) {
-      query = query.replace("?", v);
-    }
-
-    return query;
-  };
-
-  const querySegments = sql.toLowerCase().split(" ");
-  if (querySegments[0] === "create") {
-    if (querySegments[1] === "table") {
-      const tableName = querySegments[2];
-      testDb[tableName] = [];
-      return;
-    }
-  } else if (querySegments[0] === "drop") {
-    if (querySegments[1] === "table") {
-      const tableName = querySegments[2];
-      delete testDb[tableName];
-      return;
-    }
-  } else if (querySegments[0] === "insert") {
-    if (querySegments[1] === "into") {
-      const tableName = querySegments[2];
-      const values = querySegments[4];
-      const parsedValues = replaceWildcards(values, parameters);
-      const jsonValues = JSON.parse(parsedValues);
-      for (const v of jsonValues) {
-        testDb[tableName].push(v);
-      }
-      return jsonValues.length;
-    }
-  } else if (querySegments[0] === "select") {
-    if (querySegments[1] === "*") {
-      if (querySegments[2] === "from") {
-        const tableName = querySegments[3];
-        if (querySegments[4]) {
-          if (querySegments[4] === "where") {
-            const columnName = querySegments[5];
-            const value = parameters[0];
-            return testDb[tableName].filter((row) => row[columnName] === value);
-          }
-        } else {
-          return testDb[tableName];
-        }
-      }
-    }
-  } else if (querySegments[0] === "return") {
-    if (querySegments[1].startsWith("'")) {
-      return [{ result: querySegments[1].replace(/'/g, "") }];
-    } else {
-      return [{ result: JSON.parse(querySegments[1]) }];
-    }
-  } else if (querySegments[0] === "delete") {
-    if (querySegments[1] === "from") {
-      const tableName = querySegments[2];
-      if (querySegments[3] === "where") {
-        const columnName = querySegments[4];
-        const value = parameters[0];
-        testDb[tableName] = testDb[tableName].filter((row) =>
-          row[columnName] !== value
-        );
-      } else {
-        testDb[tableName] = [];
-      }
-      return;
-    }
-  }
+const testDbQueryParser = (sql: string) => {
+  return JSON.parse(sql);
 };
+
+type TestQueryValues = Sql.DriverQueryValues<string[]>;
+interface TestQueryMeta extends Sql.DriverQueryMeta {
+  test?: string;
+}
 
 type TestRow = Sql.Row<string>;
 type TestArrayRow = Sql.ArrayRow<string>;
 type TestParameterType = string;
 type TestSqlTransactionOptions = Sql.SqlTransactionOptions;
-interface TestSqlQueryOptions extends Sql.SqlQueryOptions {
+
+interface TestSqlQueryOptions extends Sql.DriverQueryOptions {
   test?: string;
 }
-interface TestSqlConnectionOptions extends Sql.SqlConnectionOptions {
+interface TestSqlConnectionOptions extends Sql.DriverConnectionOptions {
   test?: string;
 }
 interface TestSqlClientPoolOptions
   extends Sql.SqlClientPoolOptions, TestSqlConnectionOptions {
 }
-class TestSqlConnection implements Sql.SqlConnection<TestSqlConnectionOptions> {
-  connectionUrl: string;
-  options: TestSqlConnectionOptions;
+class TestDriver implements
+  Sql.Driver<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions,
+    TestParameterType,
+    TestQueryValues,
+    TestQueryMeta
+  > {
+  readonly connectionUrl: string;
+  readonly options: Sql.DriverInternalOptions<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions
+  >;
   _connected: boolean = false;
   constructor(
     connectionUrl: string,
-    options: TestSqlConnectionOptions = {},
+    options: TestDriver["options"],
   ) {
     this.connectionUrl = connectionUrl;
     this.options = options;
   }
   get connected(): boolean {
     return this._connected;
+  }
+  ping(): Promise<void> {
+    if (!this.connected) throw new Sql.SqlError("not connected");
+    return Promise.resolve();
   }
   connect(): Promise<void> {
     this._connected = true;
@@ -135,51 +72,53 @@ class TestSqlConnection implements Sql.SqlConnection<TestSqlConnectionOptions> {
     this._connected = false;
     return Promise.resolve();
   }
-  execute(
+
+  async *query<
+    Values extends TestQueryValues = TestQueryValues,
+    Meta extends Sql.DriverQueryMeta = Sql.DriverQueryMeta,
+  >(
     sql: string,
-    params?: unknown[] | undefined,
-    _options?: Sql.SqlQueryOptions | undefined,
-  ): Promise<number | undefined> {
-    const queryRes = testDbQueryParser(sql, params as string[]);
-    return Promise.resolve(queryRes);
-  }
-  async *queryMany<T extends TestRow = TestRow>(
-    sql: string,
-    params?: unknown[] | undefined,
-    _options?: Sql.SqlQueryOptions | undefined,
-  ): AsyncGenerator<T> {
-    const queryRes = testDbQueryParser(sql, params as string[]);
+    _params?: unknown[] | undefined,
+    _options?: Sql.DriverQueryOptions | undefined,
+  ): AsyncGenerator<Sql.DriverQueryNext<Values, Meta>> {
+    const queryRes = testDbQueryParser(sql);
     for (const row of queryRes) {
-      yield row;
+      const res: Sql.DriverQueryNext<Values, Meta> = {
+        columns: Object.keys(row),
+        values: Object.values(row) as Values,
+        meta: {} as Meta,
+      };
+
+      yield res;
     }
   }
-  async *queryManyArray<T extends TestArrayRow = TestArrayRow>(
-    sql: string,
-    params?: unknown[] | undefined,
-    _options?: Sql.SqlQueryOptions | undefined,
-  ): AsyncGenerator<T> {
-    const queryRes = testDbQueryParser(sql, params as string[]);
-    for (const row of queryRes) {
-      const values = Object.values(row);
-      yield values as T;
-    }
-  }
+
   async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
   }
 }
 
-class TestSqlConnectable
-  implements Sql.SqlConnectable<TestSqlConnectionOptions, TestSqlConnection> {
-  options: TestSqlConnectionOptions;
-  connection: TestSqlConnection;
+class TestSqlConnectable implements
+  Sql.DriverConnectable<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions,
+    TestParameterType,
+    TestQueryValues,
+    TestQueryMeta,
+    TestDriver
+  > {
+  readonly options: Sql.DriverInternalOptions<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions
+  >;
+  readonly connection: TestDriver;
   get connected(): boolean {
     return this.connection.connected;
   }
 
   constructor(
     connection: TestSqlConnectable["connection"],
-    options: TestSqlConnectable["options"] = {},
+    options: TestSqlConnectable["options"],
   ) {
     this.connection = connection;
     this.options = options;
@@ -193,18 +132,17 @@ class TestSqlPreparedStatement extends TestSqlConnectable
   implements
     Sql.SqlPreparedStatement<
       TestSqlConnectionOptions,
-      TestParameterType,
       TestSqlQueryOptions,
-      TestSqlConnection
+      TestParameterType,
+      TestQueryValues,
+      TestQueryMeta,
+      TestDriver
     > {
-  declare readonly options:
-    & TestSqlConnectionOptions
-    & TestSqlQueryOptions;
   sql: string;
   constructor(
     connection: TestSqlPreparedStatement["connection"],
     sql: string,
-    options: TestSqlPreparedStatement["options"] = {},
+    options: TestSqlPreparedStatement["options"],
   ) {
     super(connection, options);
     this.sql = sql;
@@ -215,10 +153,10 @@ class TestSqlPreparedStatement extends TestSqlConnectable
     return Promise.resolve();
   }
   execute(
-    params?: TestParameterType[] | undefined,
-    options?: TestSqlQueryOptions | undefined,
+    _params?: TestParameterType[] | undefined,
+    _options?: TestSqlQueryOptions | undefined,
   ): Promise<number | undefined> {
-    return this.connection.execute(this.sql, params, options);
+    return Promise.resolve(testDbQueryParser(this.sql));
   }
   query<T extends TestRow = TestRow>(
     params?: TestParameterType[] | undefined,
@@ -238,7 +176,9 @@ class TestSqlPreparedStatement extends TestSqlConnectable
     params?: TestParameterType[] | undefined,
     options?: TestSqlQueryOptions | undefined,
   ): AsyncGenerator<T> {
-    return this.connection.queryMany(this.sql, params, options);
+    return Sql.mapObjectIterable(
+      this.connection.query(this.sql, params, options),
+    );
   }
   queryArray<T extends TestArrayRow = TestArrayRow>(
     params?: TestParameterType[] | undefined,
@@ -258,32 +198,33 @@ class TestSqlPreparedStatement extends TestSqlConnectable
     params?: TestParameterType[] | undefined,
     options?: TestSqlQueryOptions | undefined,
   ): AsyncGenerator<T> {
-    return this.connection.queryManyArray(this.sql, params, options);
+    return Sql.mapArrayIterable(
+      this.connection.query(this.sql, params, options),
+    );
   }
 }
 
 class TestSqlQueriable extends TestSqlConnectable implements
   Sql.SqlQueriable<
     TestSqlConnectionOptions,
-    TestParameterType,
     TestSqlQueryOptions,
-    TestSqlConnection
+    TestParameterType,
+    TestQueryValues,
+    TestQueryMeta,
+    TestDriver
   > {
-  declare readonly options:
-    & TestSqlConnectionOptions
-    & TestSqlQueryOptions;
   constructor(
     connection: TestSqlQueriable["connection"],
-    options: TestSqlQueriable["options"] = {},
+    options: TestSqlQueriable["options"],
   ) {
     super(connection, options);
   }
   execute(
     sql: string,
-    params?: TestParameterType[] | undefined,
+    _params?: TestParameterType[] | undefined,
     _options?: TestSqlQueryOptions | undefined,
   ): Promise<number | undefined> {
-    return Promise.resolve(testDbQueryParser(sql, params));
+    return Promise.resolve(testDbQueryParser(sql));
   }
   query<T extends TestRow = TestRow>(
     sql: string,
@@ -306,7 +247,9 @@ class TestSqlQueriable extends TestSqlConnectable implements
     params?: TestParameterType[] | undefined,
     options?: TestSqlQueryOptions | undefined,
   ): AsyncGenerator<T> {
-    return this.connection.queryMany(sql, params, options);
+    return Sql.mapObjectIterable(
+      this.connection.query(sql, params, options),
+    );
   }
   queryArray<T extends TestArrayRow = TestArrayRow>(
     sql: string,
@@ -329,7 +272,9 @@ class TestSqlQueriable extends TestSqlConnectable implements
     params?: TestParameterType[] | undefined,
     options?: TestSqlQueryOptions | undefined,
   ): AsyncGenerator<T> {
-    return this.connection.queryManyArray(sql, params, options);
+    return Sql.mapArrayIterable(
+      this.connection.query(sql, params, options),
+    );
   }
   sql<T extends TestRow = TestRow>(
     strings: TemplateStringsArray,
@@ -348,22 +293,32 @@ class TestSqlQueriable extends TestSqlConnectable implements
 class TestSqlPreparable extends TestSqlQueriable implements
   Sql.SqlPreparable<
     TestSqlConnectionOptions,
-    TestParameterType,
     TestSqlQueryOptions,
-    TestSqlConnection,
+    TestParameterType,
+    TestQueryValues,
+    TestQueryMeta,
+    TestDriver,
     TestSqlPreparedStatement
   > {
   constructor(
     connection: TestSqlPreparable["connection"],
-    options: TestSqlPreparable["options"] = {},
+    options: TestSqlPreparable["options"],
   ) {
     super(connection, options);
   }
   prepare(
     sql: string,
     options?: TestSqlQueryOptions | undefined,
-  ): TestSqlPreparedStatement {
-    return new TestSqlPreparedStatement(this.connection, sql, options);
+  ): Promise<TestSqlPreparedStatement> {
+    return Promise.resolve(
+      new TestSqlPreparedStatement(
+        this.connection,
+        sql,
+        deepMerge<TestSqlPreparable["options"]>(this.options, {
+          queryOptions: options,
+        }),
+      ),
+    );
   }
 }
 
@@ -371,16 +326,19 @@ class TestSqlTransaction extends TestSqlPreparable
   implements
     Sql.SqlTransaction<
       TestSqlConnectionOptions,
-      TestParameterType,
       TestSqlQueryOptions,
-      TestSqlConnection,
+      TestParameterType,
+      TestQueryValues,
+      TestQueryMeta,
+      TestDriver,
       TestSqlPreparedStatement,
       TestSqlTransactionOptions
     > {
-  declare readonly options:
-    & TestSqlConnectionOptions
-    & TestSqlQueryOptions
-    & TestSqlTransactionOptions;
+  declare readonly options: Sql.TransactionInternalOptions<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions,
+    TestSqlTransactionOptions
+  >;
   _inTransaction: boolean = false;
   get inTransaction(): boolean {
     return this._inTransaction;
@@ -388,7 +346,7 @@ class TestSqlTransaction extends TestSqlPreparable
 
   constructor(
     connection: TestSqlTransaction["connection"],
-    options: TestSqlTransaction["options"] = {},
+    options: TestSqlTransaction["options"],
   ) {
     super(connection, options);
   }
@@ -414,18 +372,22 @@ class TestSqlTransactionable extends TestSqlPreparable
   implements
     Sql.SqlPreparable<
       TestSqlConnectionOptions,
-      TestParameterType,
       TestSqlQueryOptions,
-      TestSqlConnection,
+      TestParameterType,
+      TestQueryValues,
+      TestQueryMeta,
+      TestDriver,
       TestSqlPreparedStatement
     > {
-  declare readonly options:
-    & TestSqlConnectionOptions
-    & TestSqlQueryOptions
-    & TestSqlTransactionOptions;
+  declare readonly options: Sql.TransactionInternalOptions<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions,
+    TestSqlTransactionOptions
+  >;
+
   constructor(
     connection: TestSqlTransactionable["connection"],
-    options: TestSqlTransactionable["options"] = {},
+    options: TestSqlTransactionable["options"],
   ) {
     super(connection, options);
   }
@@ -445,41 +407,44 @@ class TestSqlTransactionable extends TestSqlPreparable
   }
 }
 
-type TestSqlConnectionEventInit = SqlConnectionEventInit<TestSqlConnection>;
+type TestSqlConnectionEventInit = Sql.SqlConnectionEventInit<TestDriver>;
 
-class TestSqlEventTarget extends SqlEventTarget<
+class TestSqlEventTarget extends Sql.SqlEventTarget<
   TestSqlConnectionOptions,
-  TestSqlConnection,
-  SqlPoolConnectionEventType,
+  TestSqlQueryOptions,
+  TestParameterType,
+  TestQueryValues,
+  TestQueryMeta,
+  TestDriver,
+  Sql.SqlPoolConnectionEventType,
   TestSqlConnectionEventInit,
-  SqlEvent,
+  Sql.SqlEvent,
   EventListenerOrEventListenerObject,
   AddEventListenerOptions,
   EventListenerOptions
 > {
 }
 
-const TestSqlClient = class extends TestSqlTransactionable
-  implements
-    Sql.SqlClient<
-      TestSqlEventTarget,
-      TestSqlConnectionOptions,
-      TestParameterType,
-      TestSqlQueryOptions,
-      TestSqlConnection,
-      TestSqlPreparedStatement,
-      TestSqlTransactionOptions,
-      TestSqlTransaction
-    > {
-  declare readonly options:
-    & TestSqlConnectionOptions
-    & TestSqlQueryOptions;
+class TestSqlClient extends TestSqlTransactionable implements
+  Sql.SqlClient<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions,
+    TestParameterType,
+    TestQueryValues,
+    TestQueryMeta,
+    TestDriver,
+    TestSqlPreparedStatement,
+    TestSqlTransactionOptions,
+    TestSqlTransaction,
+    TestSqlEventTarget
+  > {
   eventTarget: TestSqlEventTarget;
   constructor(
     connectionUrl: string | URL,
-    options: TestSqlConnectionOptions & TestSqlQueryOptions = {},
+    options: TestSqlTransactionable["options"],
   ) {
-    super(new TestSqlConnection(connectionUrl.toString(), options), options);
+    const driver = new TestDriver(connectionUrl.toString(), options);
+    super(driver, options);
     this.eventTarget = new TestSqlEventTarget();
   }
   async connect(): Promise<void> {
@@ -494,18 +459,7 @@ const TestSqlClient = class extends TestSqlTransactionable
     );
     await this.connection.close();
   }
-} satisfies Sql.SqlClientConstructor<
-  TestSqlEventTarget,
-  TestSqlConnectionOptions,
-  TestParameterType,
-  TestSqlQueryOptions,
-  TestSqlConnection,
-  TestSqlPreparedStatement,
-  TestSqlTransactionOptions,
-  TestSqlTransaction
->;
-
-type TestSqlClient = InstanceType<typeof TestSqlClient>;
+}
 
 interface TestSqlPoolClientOptions extends Sql.SqlPoolClientOptions {
 }
@@ -514,19 +468,23 @@ class TestSqlPoolClient extends TestSqlTransactionable
   implements
     Sql.SqlPoolClient<
       TestSqlConnectionOptions,
-      TestSqlConnection,
-      TestParameterType,
       TestSqlQueryOptions,
+      TestParameterType,
+      TestQueryValues,
+      TestQueryMeta,
+      TestDriver,
       TestSqlPreparedStatement,
       TestSqlTransactionOptions,
       TestSqlTransaction,
       TestSqlPoolClientOptions
     > {
-  declare readonly options:
-    & TestSqlConnectionOptions
-    & TestSqlQueryOptions
-    & TestSqlTransactionOptions
-    & TestSqlPoolClientOptions;
+  declare readonly options: Sql.PoolClientInternalOptions<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions,
+    TestSqlTransactionOptions,
+    TestSqlPoolClientOptions
+  >;
+
   #releaseFn?: () => Promise<void>;
 
   #disposed: boolean = false;
@@ -536,11 +494,11 @@ class TestSqlPoolClient extends TestSqlTransactionable
 
   constructor(
     connection: TestSqlPoolClient["connection"],
-    options: TestSqlPoolClient["options"] = {},
+    options: TestSqlPoolClient["options"],
   ) {
     super(connection, options);
-    if (this.options?.releaseFn) {
-      this.#releaseFn = this.options.releaseFn;
+    if (this.options?.poolClientOptions.releaseFn) {
+      this.#releaseFn = this.options?.poolClientOptions.releaseFn;
     }
   }
   async release() {
@@ -553,24 +511,29 @@ class TestSqlPoolClient extends TestSqlTransactionable
   }
 }
 
-const TestSqlClientPool = class implements
+class TestSqlClientPool implements
   Sql.SqlClientPool<
-    TestSqlClientPoolOptions,
-    TestParameterType,
+    TestSqlConnectionOptions,
     TestSqlQueryOptions,
-    TestSqlConnection,
+    TestParameterType,
+    TestQueryValues,
+    TestQueryMeta,
+    TestDriver,
     TestSqlPreparedStatement,
     TestSqlTransactionOptions,
     TestSqlTransaction,
-    TestSqlPoolClient,
-    TestSqlEventTarget
+    TestSqlPoolClientOptions,
+    TestSqlPoolClient
   > {
-  declare readonly options:
-    & TestSqlConnectionOptions
-    & TestSqlQueryOptions
-    & TestSqlTransactionOptions
-    & TestSqlClientPoolOptions;
-  deferredStack: DeferredStack<TestSqlConnection>;
+  declare readonly options: Sql.ClientPoolInternalOptions<
+    TestSqlConnectionOptions,
+    TestSqlQueryOptions,
+    TestSqlTransactionOptions,
+    TestSqlPoolClientOptions,
+    TestSqlClientPoolOptions
+  >;
+
+  deferredStack: DeferredStack<TestDriver>;
   eventTarget: TestSqlEventTarget;
   connectionUrl: string;
   _connected: boolean = false;
@@ -579,11 +542,11 @@ const TestSqlClientPool = class implements
   }
   constructor(
     connectionUrl: string | URL,
-    options: TestSqlClientPoolOptions = {},
+    options: TestSqlClientPool["options"],
   ) {
     this.connectionUrl = connectionUrl.toString();
     this.options = options;
-    this.deferredStack = new DeferredStack<TestSqlConnection>({
+    this.deferredStack = new DeferredStack<TestDriver>({
       maxSize: 3,
       removeFn: async (element) => {
         await element._value.close();
@@ -593,11 +556,11 @@ const TestSqlClientPool = class implements
   }
   async connect(): Promise<void> {
     for (let i = 0; i < this.deferredStack.maxSize; i++) {
-      const conn = new TestSqlConnection(
+      const conn = new TestDriver(
         this.connectionUrl,
         this.options,
       );
-      if (!this.options.lazyInitialization) {
+      if (!this.options.clientPoolOptions.lazyInitialization) {
         await conn.connect();
         this.eventTarget.dispatchEvent(
           new Sql.SqlConnectEvent({ connection: conn }),
@@ -619,39 +582,40 @@ const TestSqlClientPool = class implements
     this.eventTarget.dispatchEvent(
       new Sql.SqlAcquireEvent({ connection: el.value }),
     );
-    const c = new TestSqlPoolClient(el.value, {
-      ...this.options,
-      releaseFn: async () => {
-        this.eventTarget.dispatchEvent(
-          new Sql.SqlReleaseEvent({ connection: el._value }),
-        );
-        await el.release();
-      },
-    });
+    const c = new TestSqlPoolClient(
+      el.value,
+      deepMerge<TestSqlClientPool["options"]>(
+        this.options,
+        {
+          poolClientOptions: {
+            releaseFn: async () => {
+              this.eventTarget.dispatchEvent(
+                new Sql.SqlReleaseEvent({ connection: el._value }),
+              );
+              await el.release();
+            },
+          },
+        },
+      ),
+    );
     return c;
   }
   async [Symbol.asyncDispose](): Promise<void> {
     await this.close();
   }
-} satisfies Sql.SqlClientPoolConstructor<
-  TestSqlClientPoolOptions,
-  TestParameterType,
-  TestSqlQueryOptions,
-  TestSqlConnection,
-  TestSqlPreparedStatement,
-  TestSqlTransactionOptions,
-  TestSqlTransaction,
-  TestSqlPoolClient,
-  TestSqlEventTarget
->;
-
-type TestSqlClientPool = InstanceType<typeof TestSqlClientPool>;
+}
 
 const connectionUrl = "test";
-const options: TestSqlTransaction["options"] = { test: "test" };
+const options: TestSqlClientPool["options"] = {
+  clientPoolOptions: {},
+  connectionOptions: {},
+  poolClientOptions: {},
+  queryOptions: {},
+  transactionOptions: {},
+};
 const sql = "test";
 
-const connection = new TestSqlConnection(connectionUrl, options);
+const connection = new TestDriver(connectionUrl, options);
 const preparedStatement = new TestSqlPreparedStatement(
   connection,
   sql,
@@ -672,7 +636,7 @@ const expects = {
 
 Deno.test(`sql/type test`, async (t) => {
   await t.step("SqlConnection", () => {
-    testSqlConnection(connection, expects);
+    testDriverConnection(connection, expects);
   });
 
   await t.step(`sql/PreparedStatement`, () => {

@@ -1,10 +1,17 @@
-import type { SqlConnection, SqlConnectionOptions } from "./connection.ts";
+import type {
+  Driver,
+  DriverConnectionOptions,
+  DriverParameterType,
+  DriverQueryMeta,
+  DriverQueryOptions,
+  DriverQueryValues,
+} from "./driver.ts";
 import type {
   SqlPreparedStatement,
-  SqlQueryOptions,
   SqlTransaction,
   SqlTransactionable,
   SqlTransactionOptions,
+  TransactionInternalOptions,
 } from "./core.ts";
 import type { SqlEventable, SqlEventTarget } from "./events.ts";
 
@@ -20,12 +27,26 @@ export interface SqlPoolClientOptions {
   releaseFn?: () => Promise<void>;
 }
 
+export interface PoolClientInternalOptions<
+  ConnectionOptions extends DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions,
+  TransactionOptions extends SqlTransactionOptions,
+  PoolClientOptions extends SqlPoolClientOptions,
+> extends
+  TransactionInternalOptions<
+    ConnectionOptions,
+    QueryOptions,
+    TransactionOptions
+  > {
+  poolClientOptions: PoolClientOptions;
+}
+
 /**
  * SqlClientPoolOptions
  *
  * This represents the options for a connection pool.
  */
-export interface SqlClientPoolOptions extends SqlConnectionOptions {
+export interface SqlClientPoolOptions {
   /**
    * Whether to lazily initialize connections.
    *
@@ -40,6 +61,22 @@ export interface SqlClientPoolOptions extends SqlConnectionOptions {
   maxSize?: number;
 }
 
+export interface ClientPoolInternalOptions<
+  ConnectionOptions extends DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions,
+  TransactionOptions extends SqlTransactionOptions,
+  PoolClientOptions extends SqlPoolClientOptions,
+  ClientPoolOptions extends SqlClientPoolOptions,
+> extends
+  PoolClientInternalOptions<
+    ConnectionOptions,
+    QueryOptions,
+    TransactionOptions,
+    PoolClientOptions
+  > {
+  clientPoolOptions: ClientPoolOptions;
+}
+
 /**
  * SqlPoolClient
  *
@@ -48,61 +85,86 @@ export interface SqlClientPoolOptions extends SqlConnectionOptions {
  * they should use a class implementing this interface.
  */
 export interface SqlPoolClient<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  Connection extends SqlConnection<ConnectionOptions> = SqlConnection<
-    ConnectionOptions
-  >,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Prepared extends SqlPreparedStatement<
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta
+  > = Driver<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta
+  >,
+  PreparedStatement extends SqlPreparedStatement<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
   Transaction extends SqlTransaction<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
-    Prepared,
+    PreparedStatement,
     TransactionOptions
   > = SqlTransaction<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
-    Prepared,
+    PreparedStatement,
     TransactionOptions
   >,
   PoolClientOptions extends SqlPoolClientOptions = SqlPoolClientOptions,
 > extends
   SqlTransactionable<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
-    Prepared,
+    PreparedStatement,
     TransactionOptions,
     Transaction
   > {
   /**
    * The options used to create the pool client
    */
-  readonly options:
-    & ConnectionOptions
-    & QueryOptions
-    & PoolClientOptions;
+  readonly options: PoolClientInternalOptions<
+    ConnectionOptions,
+    QueryOptions,
+    TransactionOptions,
+    PoolClientOptions
+  >;
+
   /**
    * Whether the pool client is disposed and should not be available anymore
    */
-  disposed: boolean;
+  readonly disposed: boolean;
   /**
    * Release the connection to the pool
    */
@@ -117,75 +179,100 @@ export interface SqlPoolClient<
  * they should use a class implementing this interface.
  */
 export interface SqlClientPool<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Connection extends SqlConnection<
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
     ConnectionOptions,
-    ParameterType,
-    QueryOptions
-  > = SqlConnection<
-    ConnectionOptions,
-    ParameterType,
-    QueryOptions
-  >,
-  Prepared extends SqlPreparedStatement<
-    ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta
+  > = Driver<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta
+  >,
+  PreparedStatement extends SqlPreparedStatement<
+    ConnectionOptions,
+    QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
   Transaction extends SqlTransaction<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
-    Prepared,
+    PreparedStatement,
     TransactionOptions
   > = SqlTransaction<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
-    Prepared,
+    PreparedStatement,
     TransactionOptions
   >,
+  PoolClientOptions extends SqlPoolClientOptions = SqlPoolClientOptions,
   PoolClient extends SqlPoolClient<
     ConnectionOptions,
-    Connection,
-    ParameterType,
     QueryOptions,
-    Prepared,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection,
+    PreparedStatement,
     TransactionOptions,
-    Transaction
+    Transaction,
+    PoolClientOptions
   > = SqlPoolClient<
     ConnectionOptions,
-    Connection,
-    ParameterType,
     QueryOptions,
-    Prepared,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection,
+    PreparedStatement,
     TransactionOptions,
-    Transaction
+    Transaction,
+    PoolClientOptions
   >,
+  ClientPoolOptions extends SqlClientPoolOptions = SqlClientPoolOptions,
   EventTarget extends SqlEventTarget = SqlEventTarget,
 > extends
   SqlEventable<EventTarget>,
   Omit<
-    SqlConnection<
+    Driver<
       ConnectionOptions
     >,
-    "execute" | "queryMany" | "queryManyArray"
+    "query" | "ping"
   > {
-  readonly options:
-    & ConnectionOptions
-    & QueryOptions
-    & SqlClientPoolOptions;
+  readonly options: ClientPoolInternalOptions<
+    ConnectionOptions,
+    QueryOptions,
+    TransactionOptions,
+    PoolClientOptions,
+    ClientPoolOptions
+  >;
 
   /**
    * Acquire a connection from the pool
@@ -199,62 +286,84 @@ export interface SqlClientPool<
  * The constructor for the SqlClientPool interface.
  */
 export interface SqlClientPoolConstructor<
-  ConnectionOptions extends SqlConnectionOptions = SqlConnectionOptions,
-  ParameterType extends unknown = unknown,
-  QueryOptions extends SqlQueryOptions = SqlQueryOptions,
-  Connection extends SqlConnection<
+  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  ParameterType extends DriverParameterType = DriverParameterType,
+  QueryValues extends DriverQueryValues = DriverQueryValues,
+  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  Connection extends Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
-  > = SqlConnection<
+    QueryValues,
+    QueryMeta
+  > = Driver<
     ConnectionOptions,
+    QueryOptions,
     ParameterType,
-    QueryOptions
+    QueryValues,
+    QueryMeta
   >,
   PreparedStatement extends SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   > = SqlPreparedStatement<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection
   >,
   TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
   Transaction extends SqlTransaction<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
     PreparedStatement,
     TransactionOptions
   > = SqlTransaction<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
     PreparedStatement,
     TransactionOptions
   >,
+  PoolClientOptions extends SqlPoolClientOptions = SqlPoolClientOptions,
   PoolClient extends SqlPoolClient<
     ConnectionOptions,
-    Connection,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection,
     PreparedStatement,
     TransactionOptions,
-    Transaction
+    Transaction,
+    PoolClientOptions
   > = SqlPoolClient<
     ConnectionOptions,
-    Connection,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
+    Connection,
     PreparedStatement,
     TransactionOptions,
-    Transaction
+    Transaction,
+    PoolClientOptions
   >,
+  ClientPoolOptions extends SqlClientPoolOptions = SqlClientPoolOptions,
   EventTarget extends SqlEventTarget = SqlEventTarget,
 > {
   new (
@@ -262,13 +371,17 @@ export interface SqlClientPoolConstructor<
     options?: ConnectionOptions & QueryOptions,
   ): SqlClientPool<
     ConnectionOptions,
-    ParameterType,
     QueryOptions,
+    ParameterType,
+    QueryValues,
+    QueryMeta,
     Connection,
     PreparedStatement,
     TransactionOptions,
     Transaction,
+    PoolClientOptions,
     PoolClient,
+    ClientPoolOptions,
     EventTarget
   >;
 }

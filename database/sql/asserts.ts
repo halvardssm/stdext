@@ -1,9 +1,9 @@
 import { assertExists, assertInstanceOf, AssertionError } from "@std/assert";
 import {
+  type Driver,
+  type DriverConnectable,
   type SqlClient,
   type SqlClientPool,
-  type SqlConnectable,
-  type SqlConnection,
   SqlError,
   type SqlEventable,
   type SqlPoolClient,
@@ -125,7 +125,7 @@ export function assertIsAsyncDisposable(
  */
 export function isSqlConnection(
   value: unknown,
-): value is SqlConnection {
+): value is Driver {
   return isAsyncDisposable(value) && hasProperties(
     value,
     [
@@ -143,9 +143,9 @@ export function isSqlConnection(
 /**
  * Asserts that an object is an SqlConnection
  */
-export function assertIsSqlConnection(
+export function assertIsDriver(
   value: unknown,
-): asserts value is SqlConnection {
+): asserts value is Driver {
   assertIsAsyncDisposable(value);
   assertHasProperties(
     value,
@@ -154,19 +154,18 @@ export function assertIsSqlConnection(
       "connected",
       "connect",
       "close",
-      "execute",
-      "queryMany",
-      "queryManyArray",
+      "ping",
+      "query",
     ],
   );
 }
 
 /**
- * Check if an object is an SqlConnectable
+ * Check if an object is an DriverConnectable
  */
-export function isSqlConnectable(
+export function isDriverConnectable(
   value: unknown,
-): value is SqlConnectable {
+): value is DriverConnectable {
   return isAsyncDisposable(value) && hasProperties(
     value,
     [
@@ -177,11 +176,11 @@ export function isSqlConnectable(
 }
 
 /**
- * Asserts that an object is an SqlConnectable
+ * Asserts that an object is an DriverConnectable
  */
-export function assertIsSqlConnectable(
+export function assertIsDriverConnectable(
   value: unknown,
-): asserts value is SqlConnectable {
+): asserts value is DriverConnectable {
   assertIsAsyncDisposable(value);
   assertHasProperties(
     value,
@@ -190,7 +189,7 @@ export function assertIsSqlConnectable(
       "connected",
     ],
   );
-  assertIsSqlConnection(value.connection);
+  assertIsDriver(value.connection);
 }
 
 /**
@@ -199,7 +198,7 @@ export function assertIsSqlConnectable(
 export function isSqlPreparedStatement(
   value: unknown,
 ): value is SqlPreparedStatement {
-  return isSqlConnectable(value) && hasProperties(
+  return isDriverConnectable(value) && hasProperties(
     value,
     [
       "sql",
@@ -221,7 +220,7 @@ export function isSqlPreparedStatement(
 export function assertIsSqlPreparedStatement(
   value: unknown,
 ): asserts value is SqlPreparedStatement {
-  assertIsSqlConnectable(value);
+  assertIsDriverConnectable(value);
   assertHasProperties(
     value,
     [
@@ -244,7 +243,7 @@ export function assertIsSqlPreparedStatement(
 export function isSqlQueriable(
   value: unknown,
 ): value is SqlQueriable {
-  return isSqlConnectable(value) && hasProperties(
+  return isDriverConnectable(value) && hasProperties(
     value,
     [
       "options",
@@ -265,7 +264,7 @@ export function isSqlQueriable(
 export function assertIsSqlQueriable(
   value: unknown,
 ): asserts value is SqlQueriable {
-  assertIsSqlConnectable(value);
+  assertIsDriverConnectable(value);
   assertHasProperties(
     value,
     [
@@ -411,7 +410,7 @@ export function isSqlClient(value: unknown): value is SqlClient {
  * Asserts that an object is an SqlClient
  */
 export function assertIsSqlClient(value: unknown): asserts value is SqlClient {
-  assertIsSqlConnection(value);
+  isDriverConnectable(value);
   assertIsSqlQueriable(value);
   assertIsSqlTransactionable(value);
   assertIsSqlEventable(value);
@@ -424,7 +423,7 @@ export function assertIsSqlClient(value: unknown): asserts value is SqlClient {
 export function isSqlPoolClient(
   value: unknown,
 ): value is SqlPoolClient {
-  return isSqlConnectable(value) && isSqlTransactionable(value) &&
+  return isDriverConnectable(value) && isSqlTransactionable(value) &&
     hasProperties(value, [
       "options",
       "disposed",
@@ -438,7 +437,7 @@ export function isSqlPoolClient(
 export function assertIsSqlPoolClient(
   value: unknown,
 ): asserts value is SqlPoolClient {
-  assertIsSqlConnectable(value);
+  assertIsDriverConnectable(value);
   assertIsSqlTransactionable(value);
   assertHasProperties(value, [
     "options",
