@@ -1,7 +1,7 @@
 /**
  * SqlError
  *
- * Base SQLx Error
+ * Base Error
  */
 export class SqlError extends Error {
   constructor(message: string) {

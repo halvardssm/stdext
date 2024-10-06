@@ -1,4 +1,4 @@
-import { testDriverConnectable, testDriverConnection } from "./testing.ts";
+import { testDriver, testDriverConnectable } from "./testing.ts";
 import type {
   Driver,
   DriverConnectable,
@@ -28,7 +28,7 @@ interface TestDriverQueryOptions extends DriverQueryOptions {
   test?: string;
 }
 
-class TestDriverConnection implements
+class TestDriver implements
   Driver<
     TestDriverConnectionOptions,
     TestDriverQueryOptions,
@@ -44,7 +44,7 @@ class TestDriverConnection implements
   _connected: boolean = false;
   constructor(
     connectionUrl: string,
-    options: TestDriverConnection["options"],
+    options: TestDriver["options"],
   ) {
     this.connectionUrl = connectionUrl;
     this.options = options;
@@ -101,10 +101,10 @@ class TestDriverConnectable implements
     TestDriverParameterType,
     TestDriverQueryValues,
     TestDriverQueryMeta,
-    TestDriverConnection
+    TestDriver
   > {
-  options: TestDriverConnection["options"];
-  connection: TestDriverConnection;
+  options: TestDriver["options"];
+  connection: TestDriver;
   get connected(): boolean {
     return this.connection.connected;
   }
@@ -122,13 +122,13 @@ class TestDriverConnectable implements
 }
 
 const connectionUrl = "test";
-const options: TestDriverConnection["options"] = {
+const options: TestDriver["options"] = {
   connectionOptions: {},
   queryOptions: {},
 };
 const sql = "test";
 
-const connection = new TestDriverConnection(connectionUrl, options);
+const connection = new TestDriver(connectionUrl, options);
 const connectable = new TestDriverConnectable(
   connection,
   connection.options,
@@ -147,11 +147,11 @@ const _testingDriverQueryValues: DriverQueryValues<["asdf"]> = ["asdf", "qwer"];
 
 Deno.test(`DriverConnection`, async (t) => {
   await t.step("test suite", () => {
-    testDriverConnection(connection, expects);
+    testDriver(connection, expects);
   });
 
   await t.step("ping will throw if not connected", async () => {
-    await using conn = new TestDriverConnection(connectionUrl, options);
+    await using conn = new TestDriver(connectionUrl, options);
 
     await conn.connect();
     assert(conn.connected);
@@ -159,13 +159,13 @@ Deno.test(`DriverConnection`, async (t) => {
 
     await conn.close();
     assertFalse(connection.connected);
-    assertRejects(async () => {
+    await assertRejects(async () => {
       await conn.ping();
     });
   });
 
   await t.step("can query using loop", async () => {
-    await using conn = new TestDriverConnection(connectionUrl, options);
+    await using conn = new TestDriver(connectionUrl, options);
     await conn.connect();
     assert(conn.connected);
     const rows: DriverQueryNext[] = [];
@@ -176,7 +176,7 @@ Deno.test(`DriverConnection`, async (t) => {
   });
 
   await t.step("can query using collect", async () => {
-    await using conn = new TestDriverConnection(connectionUrl, options);
+    await using conn = new TestDriver(connectionUrl, options);
     await conn.connect();
     assert(conn.connected);
     const rows: DriverQueryNext[] = await Array.fromAsync(

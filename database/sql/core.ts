@@ -25,59 +25,62 @@ export type Row<T = unknown> = Record<string, T>;
 export type ArrayRow<T = unknown> = T[];
 
 /**
- * SqlTransactionOptions
+ * TransactionOptions
  *
  * Core transaction options
  * Used to type the options for the transaction methods
  */
-export type SqlTransactionOptions = {
+export type TransactionOptions = {
   beginTransactionOptions?: Record<string, unknown>;
   commitTransactionOptions?: Record<string, unknown>;
   rollbackTransactionOptions?: Record<string, unknown>;
 };
 
+/**
+ * Internal Transaction options
+ */
 export interface TransactionInternalOptions<
-  ConnectionOptions extends DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions,
-  TransactionOptions extends SqlTransactionOptions,
-> extends DriverInternalOptions<ConnectionOptions, QueryOptions> {
-  transactionOptions: TransactionOptions;
+  IConnectionOptions extends DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions,
+  ITransactionOptions extends TransactionOptions,
+> extends DriverInternalOptions<IConnectionOptions, IQueryOptions> {
+  transactionOptions: ITransactionOptions;
 }
 
 /**
- * SqlPreparedQueriable
+ * PreparedQueriable
  *
  * Represents a prepared statement to be executed separately from creation.
  */
-export interface SqlPreparedStatement<
-  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  ParameterType extends DriverParameterType = DriverParameterType,
-  QueryValues extends DriverQueryValues = DriverQueryValues,
-  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  Connection extends Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+export interface PreparedStatement<
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  IParameterType extends DriverParameterType = DriverParameterType,
+  IQueryValues extends DriverQueryValues = DriverQueryValues,
+  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  IDriver extends Driver<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   > = Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   >,
 > extends
   DriverConnectable<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
   > {
-  readonly options: DriverInternalOptions<ConnectionOptions, QueryOptions>;
+  readonly options: DriverInternalOptions<IConnectionOptions, IQueryOptions>;
 
   /**
    * The SQL statement
@@ -102,8 +105,8 @@ export interface SqlPreparedStatement<
    * @returns the number of affected rows if any
    */
   execute(
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<number | undefined>;
   /**
    * Query the database with the prepared statement
@@ -113,8 +116,8 @@ export interface SqlPreparedStatement<
    * @returns the rows returned by the query as object entries
    */
   query<T extends Row<any> = Row<any>>(
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<T[]>;
   /**
    * Query the database with the prepared statement, and return at most one row
@@ -124,8 +127,8 @@ export interface SqlPreparedStatement<
    * @returns the row returned by the query as an object entry, or undefined if no row is returned
    */
   queryOne<T extends Row<any> = Row<any>>(
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<T | undefined>;
   /**
    * Query the database with the prepared statement, and return an iterator.
@@ -136,8 +139,8 @@ export interface SqlPreparedStatement<
    * @returns the rows returned by the query as object entries
    */
   queryMany<T extends Row<any> = Row<any>>(
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): AsyncGenerator<T>;
   /**
    * Query the database with the prepared statement
@@ -147,8 +150,8 @@ export interface SqlPreparedStatement<
    * @returns the rows returned by the query as array entries
    */
   queryArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<T[]>;
   /**
    * Query the database with the prepared statement, and return at most one row
@@ -159,8 +162,8 @@ export interface SqlPreparedStatement<
    * @returns the row returned by the query as an array entry, or undefined if no row is returned
    */
   queryOneArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<T | undefined>;
 
   /**
@@ -172,45 +175,45 @@ export interface SqlPreparedStatement<
    * @returns the rows returned by the query as array entries
    */
   queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): AsyncGenerator<T>;
 }
 
 /**
- * SqlQueriable
+ * Queriable
  *
  * Represents an object that can execute SQL queries.
  */
-export interface SqlQueriable<
-  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  ParameterType extends DriverParameterType = DriverParameterType,
-  QueryValues extends DriverQueryValues = DriverQueryValues,
-  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  Connection extends Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+export interface Queriable<
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  IParameterType extends DriverParameterType = DriverParameterType,
+  IQueryValues extends DriverQueryValues = DriverQueryValues,
+  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  IDriver extends Driver<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   > = Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   >,
 > extends
   DriverConnectable<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
   > {
-  readonly options: DriverInternalOptions<ConnectionOptions, QueryOptions>;
+  readonly options: DriverInternalOptions<IConnectionOptions, IQueryOptions>;
 
   /**
    * Execute a SQL statement
@@ -222,8 +225,8 @@ export interface SqlQueriable<
    */
   execute(
     sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<number | undefined>;
   /**
    * Query the database
@@ -235,8 +238,8 @@ export interface SqlQueriable<
    */
   query<T extends Row<any> = Row<any>>(
     sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<T[]>;
   /**
    * Query the database and return at most one row
@@ -248,8 +251,8 @@ export interface SqlQueriable<
    */
   queryOne<T extends Row<any> = Row<any>>(
     sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<T | undefined>;
   /**
    * Query the database and return an iterator.
@@ -262,8 +265,8 @@ export interface SqlQueriable<
    */
   queryMany<T extends Row<any> = Row<any>>(
     sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): AsyncGenerator<T>;
   /**
    * Query the database
@@ -275,8 +278,8 @@ export interface SqlQueriable<
    */
   queryArray<T extends ArrayRow<any> = ArrayRow<any>>(
     sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<T[]>;
   /**
    * Query the database and return at most one row
@@ -288,8 +291,8 @@ export interface SqlQueriable<
    */
   queryOneArray<T extends ArrayRow<any> = ArrayRow<any>>(
     sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): Promise<T | undefined>;
 
   /**
@@ -303,8 +306,8 @@ export interface SqlQueriable<
    */
   queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
     sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): AsyncGenerator<T>;
 
   /**
@@ -314,7 +317,7 @@ export interface SqlQueriable<
    */
   sql<T extends Row<any> = Row<any>>(
     strings: TemplateStringsArray,
-    ...parameters: ParameterType[]
+    ...parameters: IParameterType[]
   ): Promise<T[]>;
 
   /**
@@ -324,57 +327,57 @@ export interface SqlQueriable<
    */
   sqlArray<T extends ArrayRow<any> = ArrayRow<any>>(
     strings: TemplateStringsArray,
-    ...parameters: ParameterType[]
+    ...parameters: IParameterType[]
   ): Promise<T[]>;
 }
 
 /**
- * SqlPreparable
+ * Preparable
  *
  * Represents an object that can create a prepared statement.
  */
-export interface SqlPreparable<
-  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  ParameterType extends DriverParameterType = DriverParameterType,
-  QueryValues extends DriverQueryValues = DriverQueryValues,
-  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  Connection extends Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+export interface Preparable<
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  IParameterType extends DriverParameterType = DriverParameterType,
+  IQueryValues extends DriverQueryValues = DriverQueryValues,
+  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  IDriver extends Driver<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   > = Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   >,
-  PreparedStatement extends SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
-  > = SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
+  IPreparedStatement extends PreparedStatement<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
+  > = PreparedStatement<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
   >,
 > extends
-  SqlQueriable<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
+  Queriable<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
   > {
   /**
    * Create a prepared statement that can be executed multiple times.
@@ -396,64 +399,64 @@ export interface SqlPreparable<
    */
   prepare(
     sql: string,
-    options?: QueryOptions,
-  ): Promise<PreparedStatement>;
+    options?: IQueryOptions,
+  ): Promise<IPreparedStatement>;
 }
 
 /**
- * SqlTransaction
+ * Transaction
  *
  * Represents a transaction.
  */
-export interface SqlTransaction<
-  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  ParameterType extends DriverParameterType = DriverParameterType,
-  QueryValues extends DriverQueryValues = DriverQueryValues,
-  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  Connection extends Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+export interface Transaction<
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  IParameterType extends DriverParameterType = DriverParameterType,
+  IQueryValues extends DriverQueryValues = DriverQueryValues,
+  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  IDriver extends Driver<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   > = Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   >,
-  PreparedStatement extends SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
-  > = SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
+  IPreparedStatement extends PreparedStatement<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
+  > = PreparedStatement<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
   >,
-  TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
+  ITransactionOptions extends TransactionOptions = TransactionOptions,
 > extends
-  SqlPreparable<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement
+  Preparable<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver,
+    IPreparedStatement
   > {
   readonly options: TransactionInternalOptions<
-    ConnectionOptions,
-    QueryOptions,
-    TransactionOptions
+    IConnectionOptions,
+    IQueryOptions,
+    ITransactionOptions
   >;
   /**
    * Whether the connection is in an active transaction or not.
@@ -464,13 +467,13 @@ export interface SqlTransaction<
    * Commit the transaction
    */
   commitTransaction(
-    options?: TransactionOptions["commitTransactionOptions"],
+    options?: ITransactionOptions["commitTransactionOptions"],
   ): Promise<void>;
   /**
    * Rollback the transaction
    */
   rollbackTransaction(
-    options?: TransactionOptions["rollbackTransactionOptions"],
+    options?: ITransactionOptions["rollbackTransactionOptions"],
   ): Promise<void>;
   /**
    * Create a save point
@@ -487,7 +490,7 @@ export interface SqlTransaction<
 }
 
 /**
- * SqlTransactionable
+ * Transactionable
  *
  * Represents an object that can create a transaction and a prepared statement.
  *
@@ -495,81 +498,81 @@ export interface SqlTransaction<
  * A prepared statement should in most cases be unique to a connection,
  * and should not live after the related connection is closed.
  */
-export interface SqlTransactionable<
-  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  ParameterType extends DriverParameterType = DriverParameterType,
-  QueryValues extends DriverQueryValues = DriverQueryValues,
-  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  Connection extends Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+export interface Transactionable<
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  IParameterType extends DriverParameterType = DriverParameterType,
+  IQueryValues extends DriverQueryValues = DriverQueryValues,
+  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  IDriver extends Driver<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   > = Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   >,
-  PreparedStatement extends SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
-  > = SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
+  IPreparedStatement extends PreparedStatement<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
+  > = PreparedStatement<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
   >,
-  TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
-  Transaction extends SqlTransaction<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions
-  > = SqlTransaction<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions
+  ITransactionOptions extends TransactionOptions = TransactionOptions,
+  ITransaction extends Transaction<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver,
+    IPreparedStatement,
+    ITransactionOptions
+  > = Transaction<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver,
+    IPreparedStatement,
+    ITransactionOptions
   >,
 > extends
-  SqlPreparable<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement
+  Preparable<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver,
+    IPreparedStatement
   > {
   readonly options: TransactionInternalOptions<
-    ConnectionOptions,
-    QueryOptions,
-    TransactionOptions
+    IConnectionOptions,
+    IQueryOptions,
+    ITransactionOptions
   >;
   /**
    * Starts a transaction
    */
   beginTransaction(
-    options?: TransactionOptions["beginTransactionOptions"],
-  ): Promise<Transaction>;
+    options?: ITransactionOptions["beginTransactionOptions"],
+  ): Promise<ITransaction>;
 
   /**
    * Transaction wrapper
@@ -583,6 +586,6 @@ export interface SqlTransactionable<
    * @returns the result of the callback function
    */
   transaction<T>(
-    fn: (t: Transaction) => Promise<T>,
+    fn: (t: ITransaction) => Promise<T>,
   ): Promise<T>;
 }

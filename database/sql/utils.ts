@@ -41,38 +41,3 @@ export async function* mapObjectIterable<
     yield getObjectFromRow<Output, Row>(row);
   }
 }
-
-// export function getObjectsFromRows<
-//   Output extends Record<string, unknown> = Record<string, unknown>,
-//   Row extends DriverQueryNext = DriverQueryNext,
-// >(rows: Row[]): Output[] {
-//   return rows.map(getObjectFromRow<Output, Row>);
-// }
-
-// export function getObjectsFromIterable<
-//   Output extends Record<string, unknown> = Record<string, unknown>,
-//   Row extends DriverQueryNext = DriverQueryNext,
-// >(q: AsyncIterable<Row>): Promise<Output[]> {
-//   return Array.fromAsync(mapObjectIterable<Output,Row>(q));
-// }
-
-// export async function getFirstFromIterable<
-//   Row extends DriverQueryNext = DriverQueryNext,
-// >(q: AsyncIterable<Row>): Promise<Row | null> {
-//   const res = await Array.fromAsync(q);
-
-//   return res[0] ?? null;
-// }
-
-// export async function getFirstObjectFromIterable<
-//   Output extends Record<string, unknown> = Record<string, unknown>,
-//   Row extends DriverQueryNext = DriverQueryNext,
-// >(q: AsyncIterable<Row>): Promise<Output | null> {
-//   const res = await getFirstFromIterable(q);
-
-//   if (!res) {
-//     return null;
-//   }
-
-//   return getObjectFromRow<Output, Row>(res);
-// }

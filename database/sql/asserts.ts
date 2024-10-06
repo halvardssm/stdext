@@ -1,17 +1,15 @@
 import { assertExists, assertInstanceOf, AssertionError } from "@std/assert";
-import {
-  type Driver,
-  type DriverConnectable,
-  type SqlClient,
-  type SqlClientPool,
-  SqlError,
-  type SqlEventable,
-  type SqlPoolClient,
-  type SqlPreparedStatement,
-  type SqlQueriable,
-  type SqlTransaction,
-  type SqlTransactionable,
-} from "./mod.ts";
+import type { Driver, DriverConnectable } from "./driver.ts";
+import type { Client } from "./client.ts";
+import type {
+  PreparedStatement,
+  Queriable,
+  Transaction,
+  Transactionable,
+} from "./core.ts";
+import type { Eventable } from "./events.ts";
+import type { ClientPool, PoolClient } from "./pool.ts";
+import { SqlError } from "./errors.ts";
 
 /**
  * Check if an object has a property
@@ -121,9 +119,9 @@ export function assertIsAsyncDisposable(
 }
 
 /**
- * Check if an object is an SqlConnection
+ * Check if an object is a Driver
  */
-export function isSqlConnection(
+export function isDriver(
   value: unknown,
 ): value is Driver {
   return isAsyncDisposable(value) && hasProperties(
@@ -141,7 +139,7 @@ export function isSqlConnection(
 }
 
 /**
- * Asserts that an object is an SqlConnection
+ * Asserts that an object is a Driver
  */
 export function assertIsDriver(
   value: unknown,
@@ -172,7 +170,7 @@ export function isDriverConnectable(
       "connection",
       "connected",
     ],
-  ) && isSqlConnection(value.connection);
+  ) && isDriver(value.connection);
 }
 
 /**
@@ -193,11 +191,11 @@ export function assertIsDriverConnectable(
 }
 
 /**
- * Check if an object is an SqlPreparedStatement
+ * Check if an object is an PreparedStatement
  */
-export function isSqlPreparedStatement(
+export function isPreparedStatement(
   value: unknown,
-): value is SqlPreparedStatement {
+): value is PreparedStatement {
   return isDriverConnectable(value) && hasProperties(
     value,
     [
@@ -215,11 +213,11 @@ export function isSqlPreparedStatement(
 }
 
 /**
- * Asserts that an object is an SqlPreparedStatement
+ * Asserts that an object is an PreparedStatement
  */
-export function assertIsSqlPreparedStatement(
+export function assertIsPreparedStatement(
   value: unknown,
-): asserts value is SqlPreparedStatement {
+): asserts value is PreparedStatement {
   assertIsDriverConnectable(value);
   assertHasProperties(
     value,
@@ -238,11 +236,11 @@ export function assertIsSqlPreparedStatement(
 }
 
 /**
- * Check if an object is an SqlQueriable
+ * Check if an object is an Queriable
  */
-export function isSqlQueriable(
+export function isQueriable(
   value: unknown,
-): value is SqlQueriable {
+): value is Queriable {
   return isDriverConnectable(value) && hasProperties(
     value,
     [
@@ -259,11 +257,11 @@ export function isSqlQueriable(
 }
 
 /**
- * Asserts that an object is an SqlQueriable
+ * Asserts that an object is an Queriable
  */
-export function assertIsSqlQueriable(
+export function assertIsQueriable(
   value: unknown,
-): asserts value is SqlQueriable {
+): asserts value is Queriable {
   assertIsDriverConnectable(value);
   assertHasProperties(
     value,
@@ -281,12 +279,12 @@ export function assertIsSqlQueriable(
 }
 
 /**
- * Check if an object is an SqlTransaction
+ * Check if an object is an Transaction
  */
-export function isSqlPreparable(
+export function isPreparable(
   value: unknown,
-): value is SqlQueriable {
-  return isSqlQueriable(value) && hasProperties(
+): value is Queriable {
+  return isQueriable(value) && hasProperties(
     value,
     [
       "prepare",
@@ -295,12 +293,12 @@ export function isSqlPreparable(
 }
 
 /**
- * Asserts that an object is an SqlTransaction
+ * Asserts that an object is an Transaction
  */
-export function assertIsSqlPreparable(
+export function assertIsPreparable(
   value: unknown,
-): asserts value is SqlQueriable {
-  assertIsSqlQueriable(value);
+): asserts value is Queriable {
+  assertIsQueriable(value);
   assertHasProperties(
     value,
     [
@@ -310,12 +308,12 @@ export function assertIsSqlPreparable(
 }
 
 /**
- * Check if an object is an SqlTransaction
+ * Check if an object is an Transaction
  */
-export function isSqlTransaction(
+export function isTransaction(
   value: unknown,
-): value is SqlTransaction {
-  return isSqlPreparable(value) && hasProperties(
+): value is Transaction {
+  return isPreparable(value) && hasProperties(
     value,
     [
       "inTransaction",
@@ -328,12 +326,12 @@ export function isSqlTransaction(
 }
 
 /**
- * Asserts that an object is an SqlTransaction
+ * Asserts that an object is an Transaction
  */
-export function assertIsSqlTransaction(
+export function assertIsTransaction(
   value: unknown,
-): asserts value is SqlTransaction {
-  assertIsSqlPreparable(value);
+): asserts value is Transaction {
+  assertIsPreparable(value);
   assertHasProperties(
     value,
     [
@@ -347,12 +345,12 @@ export function assertIsSqlTransaction(
 }
 
 /**
- * Check if an object is an SqlTransactionable
+ * Check if an object is an Transactionable
  */
-export function isSqlTransactionable(
+export function isTransactionable(
   value: unknown,
-): value is SqlTransactionable {
-  return isSqlPreparable(value) && hasProperties(
+): value is Transactionable {
+  return isPreparable(value) && hasProperties(
     value,
     [
       "beginTransaction",
@@ -362,12 +360,12 @@ export function isSqlTransactionable(
 }
 
 /**
- * Asserts that an object is an SqlTransactionable
+ * Asserts that an object is an Transactionable
  */
-export function assertIsSqlTransactionable(
+export function assertIsTransactionable(
   value: unknown,
-): asserts value is SqlTransactionable {
-  assertIsSqlPreparable(value);
+): asserts value is Transactionable {
+  assertIsPreparable(value);
   assertHasProperties(
     value,
     [
@@ -378,52 +376,52 @@ export function assertIsSqlTransactionable(
 }
 
 /**
- * Check if an object is an SqlEventable
+ * Check if an object is an Eventable
  */
-export function isSqlEventable(
+export function isEventable(
   value: unknown,
-): value is SqlEventable {
+): value is Eventable {
   return hasProperties(value, ["eventTarget"]) &&
     value.eventTarget instanceof EventTarget;
 }
 
 /**
- * Asserts that an object is an SqlEventable
+ * Asserts that an object is an Eventable
  */
-export function assertIsSqlEventable(
+export function assertIsEventable(
   value: unknown,
-): asserts value is SqlEventable {
+): asserts value is Eventable {
   assertHasProperties(value, ["eventTarget"]);
   assertInstanceOf(value.eventTarget, EventTarget);
 }
 
 /**
- * Check if an object is an SqlClient
+ * Check if an object is an Client
  */
-export function isSqlClient(value: unknown): value is SqlClient {
-  return isSqlConnection(value) && isSqlQueriable(value) &&
-    isSqlTransactionable(value) && isSqlEventable(value) &&
+export function isClient(value: unknown): value is Client {
+  return isDriver(value) && isQueriable(value) &&
+    isTransactionable(value) && isEventable(value) &&
     hasProperties(value, ["options"]);
 }
 
 /**
- * Asserts that an object is an SqlClient
+ * Asserts that an object is an Client
  */
-export function assertIsSqlClient(value: unknown): asserts value is SqlClient {
+export function assertIsClient(value: unknown): asserts value is Client {
   isDriverConnectable(value);
-  assertIsSqlQueriable(value);
-  assertIsSqlTransactionable(value);
-  assertIsSqlEventable(value);
+  assertIsQueriable(value);
+  assertIsTransactionable(value);
+  assertIsEventable(value);
   assertHasProperties(value, ["options"]);
 }
 
 /**
- * Check if an object is an SqlPoolClient
+ * Check if an object is an PoolClient
  */
-export function isSqlPoolClient(
+export function isPoolClient(
   value: unknown,
-): value is SqlPoolClient {
-  return isDriverConnectable(value) && isSqlTransactionable(value) &&
+): value is PoolClient {
+  return isDriverConnectable(value) && isTransactionable(value) &&
     hasProperties(value, [
       "options",
       "disposed",
@@ -432,13 +430,13 @@ export function isSqlPoolClient(
 }
 
 /**
- * Asserts that an object is an SqlPoolClient
+ * Asserts that an object is an PoolClient
  */
-export function assertIsSqlPoolClient(
+export function assertIsPoolClient(
   value: unknown,
-): asserts value is SqlPoolClient {
+): asserts value is PoolClient {
   assertIsDriverConnectable(value);
-  assertIsSqlTransactionable(value);
+  assertIsTransactionable(value);
   assertHasProperties(value, [
     "options",
     "disposed",
@@ -447,12 +445,12 @@ export function assertIsSqlPoolClient(
 }
 
 /**
- * Check if an object is an SqlClientPool
+ * Check if an object is an ClientPool
  */
-export function isSqlClientPool(
+export function isClientPool(
   value: unknown,
-): value is SqlClientPool {
-  return isSqlEventable(value) && isAsyncDisposable(value) &&
+): value is ClientPool {
+  return isEventable(value) && isAsyncDisposable(value) &&
     hasProperties(value, [
       "connectionUrl",
       "options",
@@ -465,12 +463,12 @@ export function isSqlClientPool(
 }
 
 /**
- * Asserts that an object is an SqlClientPool
+ * Asserts that an object is an ClientPool
  */
-export function assertIsSqlClientPool(
+export function assertIsClientPool(
   value: unknown,
-): asserts value is SqlClientPool {
-  assertIsSqlEventable(value);
+): asserts value is ClientPool {
+  assertIsEventable(value);
   assertIsAsyncDisposable(value);
   assertHasProperties(value, [
     "connectionUrl",

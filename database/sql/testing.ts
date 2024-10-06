@@ -6,52 +6,52 @@ import {
   assertRejects,
 } from "@std/assert";
 import {
+  assertIsClient,
+  assertIsClientPool,
   assertIsDriver,
   assertIsDriverConnectable,
-  assertIsSqlClient,
-  assertIsSqlClientPool,
-  assertIsSqlEventable,
-  assertIsSqlPoolClient,
-  assertIsSqlPreparable,
-  assertIsSqlPreparedStatement,
-  assertIsSqlQueriable,
-  assertIsSqlTransaction,
-  assertIsSqlTransactionable,
+  assertIsEventable,
+  assertIsPoolClient,
+  assertIsPreparable,
+  assertIsPreparedStatement,
+  assertIsQueriable,
+  assertIsTransaction,
+  assertIsTransactionable,
+  type Client,
+  type ClientPool,
   type DriverConnectable,
-  type SqlClient,
-  type SqlClientPool,
-  type SqlPoolClient,
-  type SqlPreparedStatement,
-  type SqlQueriable,
-  type SqlTransaction,
-  type SqlTransactionable,
+  type PoolClient,
+  type PreparedStatement,
+  type Queriable,
+  type Transaction,
+  type Transactionable,
 } from "./mod.ts";
 import { deepMerge } from "@std/collections";
 
 // deno-lint-ignore no-explicit-any
 export type AnyConstructor<T, A extends any[] = any[]> = new (...args: A) => T;
 export type ClientConstructorArguments<
-  Client extends DriverConnectable = DriverConnectable,
+  IClient extends DriverConnectable = DriverConnectable,
 > = [
   string,
-  Client["options"],
+  IClient["options"],
 ];
 export type ClientPoolConstructorArguments<
-  Client extends SqlClientPool = SqlClientPool,
-> = [string, Client["options"]];
+  IClient extends ClientPool = ClientPool,
+> = [string, IClient["options"]];
 export type ClientConstructor<
-  Client extends DriverConnectable = DriverConnectable,
-> = AnyConstructor<Client, ClientConstructorArguments<Client>>;
+  IClient extends DriverConnectable = DriverConnectable,
+> = AnyConstructor<IClient, ClientConstructorArguments<IClient>>;
 export type ClientPoolConstructor<
-  Client extends SqlClientPool = SqlClientPool,
-> = AnyConstructor<Client, ClientPoolConstructorArguments<Client>>;
+  IClient extends ClientPool = ClientPool,
+> = AnyConstructor<IClient, ClientPoolConstructorArguments<IClient>>;
 
 /**
- * Test the SqlConnection class
- * @param value The SqlClient
+ * Test the Driver class
+ * @param value The Client
  * @param expects The values to test against
  */
-export function testDriverConnection(
+export function testDriver(
   value: unknown,
   expects: {
     connectionUrl: string;
@@ -62,14 +62,14 @@ export function testDriverConnection(
 }
 
 /**
- * Tests the connection of a SqlClient
+ * Tests the connection of a Client
  */
-export async function testDriverConnectionConstructor<
-  Client extends SqlClient = SqlClient,
+export async function testDriverConstructor<
+  IClient extends Client = Client,
 >(
   t: Deno.TestContext,
-  Client: ClientConstructor<Client>,
-  clientArguments: ClientConstructorArguments<Client>,
+  Client: ClientConstructor<IClient>,
+  clientArguments: ClientConstructorArguments<IClient>,
 ): Promise<void> {
   await t.step("testConnectAndClose", async (t) => {
     await t.step("should connect and close with using", async () => {
@@ -134,171 +134,171 @@ export function testDriverConnectable(
 ) {
   assertIsDriverConnectable(value);
   assertEquals(value.options, expects.options);
-  testDriverConnection(value.connection, expects);
+  testDriver(value.connection, expects);
 }
 
 /**
- * Test the SqlPreparedStatement class
- * @param value The SqlPreparedStatement
+ * Test the PreparedStatement class
+ * @param value The PreparedStatement
  * @param expects The values to test against
  */
-export function testSqlPreparedStatement(
+export function testPreparedStatement(
   value: unknown,
   expects: {
     connectionUrl: string;
-    options: SqlPreparedStatement["options"];
+    options: PreparedStatement["options"];
     sql: string;
   },
 ) {
-  assertIsSqlPreparedStatement(value);
+  assertIsPreparedStatement(value);
   testDriverConnectable(value, expects);
   assertEquals(value.sql, expects.sql);
 }
 
 /**
- * Test the SqlQueriable class
- * @param value The SqlQueriable
+ * Test the Queriable class
+ * @param value The Queriable
  * @param expects The values to test against
  */
-export function _testSqlQueriable(
+export function testQueriable(
   value: unknown,
   expects: {
     connectionUrl: string;
-    options: SqlQueriable["options"];
+    options: Queriable["options"];
   },
 ) {
-  assertIsSqlQueriable(value);
+  assertIsQueriable(value);
   testDriverConnectable(value, expects);
 }
 
 /**
- * Test the SqlPreparable class
- * @param value The SqlPreparable
+ * Test the Preparable class
+ * @param value The Preparable
  * @param expects The values to test against
  */
-export function _testSqlPreparable(
+export function testPreparable(
   value: unknown,
   expects: {
     connectionUrl: string;
-    options: SqlQueriable["options"];
+    options: Queriable["options"];
   },
 ) {
-  assertIsSqlPreparable(value);
-  _testSqlQueriable(value, expects);
+  assertIsPreparable(value);
+  testQueriable(value, expects);
 }
 
 /**
- * Test the SqlTransaction class
- * @param value The SqlTransaction
+ * Test the Transaction class
+ * @param value The Transaction
  * @param expects The values to test against
  */
-export function testSqlTransaction(
+export function testTransaction(
   value: unknown,
   expects: {
     connectionUrl: string;
-    options: SqlTransaction["options"];
+    options: Transaction["options"];
   },
 ) {
-  assertIsSqlTransaction(value);
-  _testSqlPreparable(value, expects);
+  assertIsTransaction(value);
+  testPreparable(value, expects);
 }
 
 /**
- * Test the SqlTransactionable class
- * @param value The SqlTransactionable
+ * Test the Transactionable class
+ * @param value The Transactionable
  * @param expects The values to test against
  */
-export function _testSqlTransactionable(
+export function testTransactionable(
   value: unknown,
   expects: {
     connectionUrl: string;
-    options: SqlTransactionable["options"];
+    options: Transactionable["options"];
   },
 ) {
-  assertIsSqlTransactionable(value);
-  _testSqlPreparable(value, expects);
+  assertIsTransactionable(value);
+  testPreparable(value, expects);
 }
 
 /**
- * Test the SqlEventTarget class
- * @param value The SqlEventTarget
+ * Test the EventTarget class
+ * @param value The EventTarget
  */
-export function testSqlEventTarget(
+export function testEventTarget(
   value: unknown,
 ) {
   assertInstanceOf(value, EventTarget);
 }
 
 /**
- * Test the SqlEventable class
- * @param value The SqlEventable
+ * Test the Eventable class
+ * @param value The Eventable
  */
-export function _testSqlEventable(
+export function testEventable(
   value: unknown,
 ) {
-  assertIsSqlEventable(value);
-  testSqlEventTarget(value.eventTarget);
+  assertIsEventable(value);
+  testEventTarget(value.eventTarget);
 }
 
 /**
- * Test the SqlClient class
- * @param value The SqlClient
+ * Test the Client class
+ * @param value The Client
  * @param expects The values to test against
  */
-export function testSqlClient(
+export function testClient(
   value: unknown,
   expects: {
     connectionUrl: string;
-    options: SqlClient["options"];
+    options: Client["options"];
   },
 ) {
-  assertIsSqlClient(value);
-  _testSqlTransactionable(value, expects);
-  _testSqlEventable(value);
+  assertIsClient(value);
+  testTransactionable(value, expects);
+  testEventable(value);
 }
 
 /**
- * Test the SqlPoolClient class
- * @param value The SqlPoolClient
+ * Test the PoolClient class
+ * @param value The PoolClient
  * @param expects The values to test against
  */
-export function testSqlPoolClient(
+export function testPoolClient(
   value: unknown,
   expects: {
     connectionUrl: string;
-    options: SqlPoolClient["options"];
+    options: PoolClient["options"];
   },
 ) {
-  assertIsSqlPoolClient(value);
-  _testSqlTransactionable(value, expects);
+  assertIsPoolClient(value);
+  testTransactionable(value, expects);
 }
 
 /**
- * Test the SqlClientPool class
- * @param value The SqlClientPool
+ * Test the ClientPool class
+ * @param value The ClientPool
  * @param expects The values to test against
  */
-export function testSqlClientPool(
+export function testClientPool(
   value: unknown,
   expects: {
     connectionUrl: string;
-    options: SqlClientPool["options"];
+    options: ClientPool["options"];
   },
 ) {
-  assertIsSqlClientPool(value);
-  _testSqlEventable(value);
+  assertIsClientPool(value);
+  testEventable(value);
   assertEquals(value.connectionUrl, expects.connectionUrl);
 }
 
 /**
- * Tests the connection of a SqlClient
+ * Tests the connection of a Client
  */
 export async function testClientConnection<
-  Client extends SqlClient = SqlClient,
+  IClient extends Client = Client,
 >(
   t: Deno.TestContext,
-  Client: ClientConstructor<Client>,
-  clientArguments: ClientConstructorArguments<Client>,
+  Client: ClientConstructor<IClient>,
+  clientArguments: ClientConstructorArguments<IClient>,
 ): Promise<void> {
   await t.step("testConnectAndClose", async (t) => {
     await t.step("should connect and close with using", async () => {
@@ -350,14 +350,14 @@ export async function testClientConnection<
 }
 
 /**
- * Tests the connection of a SqlClientPool
+ * Tests the connection of a ClientPool
  */
 export async function testClientPoolConnection<
-  Client extends SqlClientPool = SqlClientPool,
+  IClient extends ClientPool = ClientPool,
 >(
   t: Deno.TestContext,
-  Client: ClientPoolConstructor<Client>,
-  clientArguments: ClientPoolConstructorArguments<Client>,
+  Client: ClientPoolConstructor<IClient>,
+  clientArguments: ClientPoolConstructorArguments<IClient>,
 ): Promise<void> {
   await t.step("testConnectAndClose", async (t) => {
     await t.step("should connect and close", async () => {
@@ -370,7 +370,7 @@ export async function testClientPoolConnection<
       await db.close();
     });
     await t.step("should connect and close with using", async () => {
-      const opts = deepMerge<Client["options"]>(
+      const opts = deepMerge<IClient["options"]>(
         clientArguments[1],
         // deno-lint-ignore ban-ts-comment
         // @ts-ignore
@@ -437,11 +437,11 @@ export async function testClientPoolConnection<
 }
 
 export async function testClientSanity<
-  Client extends SqlClient = SqlClient,
+  IClient extends Client = Client,
 >(
   t: Deno.TestContext,
-  Client: ClientConstructor<Client>,
-  clientArguments: ClientConstructorArguments<Client>,
+  Client: ClientConstructor<IClient>,
+  clientArguments: ClientConstructorArguments<IClient>,
 ): Promise<void> {
   await testClientConnection(t, Client, clientArguments);
 
@@ -451,14 +451,14 @@ export async function testClientSanity<
 
   // Testing prepared statements
 
-  const stmt1 = client.prepare("select 1 as one;");
+  const stmt1 = await client.prepare("select 1 as one;");
 
-  assertIsSqlPreparedStatement(stmt1);
+  assertIsPreparedStatement(stmt1);
   assertFalse(stmt1.deallocated);
 
-  const stmt2 = client.prepare("select 1 as one;");
+  const stmt2 = await client.prepare("select 1 as one;");
 
-  assertIsSqlPreparedStatement(stmt2);
+  assertIsPreparedStatement(stmt2);
   assertFalse(stmt2.deallocated);
 
   await stmt1.execute();
@@ -466,7 +466,7 @@ export async function testClientSanity<
 
   assert(stmt1.deallocated);
 
-  assertRejects(async () => {
+  await assertRejects(async () => {
     await stmt1.execute();
   });
 
@@ -475,7 +475,7 @@ export async function testClientSanity<
 
   assert(stmt2.deallocated);
 
-  assertRejects(async () => {
+  await assertRejects(async () => {
     await stmt2.execute();
   });
 
@@ -483,7 +483,7 @@ export async function testClientSanity<
 
   const transaction = await client.beginTransaction();
 
-  assert(transaction.inTransaction);
+  assert(transaction.inTransaction, "Transaction is not in transaction");
 
   await transaction.execute("select 1 as one;");
 
@@ -491,7 +491,7 @@ export async function testClientSanity<
 
   assertFalse(transaction.inTransaction);
 
-  assertRejects(async () => {
+  await assertRejects(async () => {
     await transaction.execute("select 1 as one;");
   });
 }

@@ -1,4 +1,10 @@
 import type {
+  PreparedStatement,
+  Transaction,
+  Transactionable,
+  TransactionOptions,
+} from "./core.ts";
+import type {
   Driver,
   DriverConnectionOptions,
   DriverParameterType,
@@ -6,184 +12,91 @@ import type {
   DriverQueryOptions,
   DriverQueryValues,
 } from "./driver.ts";
-import type {
-  SqlPreparedStatement,
-  SqlTransaction,
-  SqlTransactionable,
-  SqlTransactionOptions,
-} from "./core.ts";
-import type { SqlEventable, SqlEventTarget } from "./events.ts";
+import type { Eventable, SqlEventTarget } from "./events.ts";
 
 /**
- * SqlClient
+ * Client
  *
  * This represents a database client. When you need a single connection
  * to the database, you will in most cases use this interface.
  */
-export interface SqlClient<
-  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  ParameterType extends DriverParameterType = DriverParameterType,
-  QueryValues extends DriverQueryValues = DriverQueryValues,
-  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  Connection extends Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+export interface Client<
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  IParameterType extends DriverParameterType = DriverParameterType,
+  IQueryValues extends DriverQueryValues = DriverQueryValues,
+  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  IDriver extends Driver<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   > = Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   >,
-  PreparedStatement extends SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
-  > = SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
+  IPreparedStatement extends PreparedStatement<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
+  > = PreparedStatement<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver
   >,
-  TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
-  Transaction extends SqlTransaction<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions
-  > = SqlTransaction<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions
+  ITransactionOptions extends TransactionOptions = TransactionOptions,
+  ITransaction extends Transaction<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver,
+    IPreparedStatement,
+    ITransactionOptions
+  > = Transaction<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver,
+    IPreparedStatement,
+    ITransactionOptions
   >,
-  EventTarget extends SqlEventTarget = SqlEventTarget,
+  IEventTarget extends SqlEventTarget = SqlEventTarget,
 > extends
   Pick<
     Driver<
-      ConnectionOptions,
-      QueryOptions,
-      ParameterType,
-      QueryValues,
-      QueryMeta
+      IConnectionOptions,
+      IQueryOptions,
+      IParameterType,
+      IQueryValues,
+      IQueryMeta
     >,
     "close" | "connect" | "connected"
   >,
-  SqlTransactionable<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions,
-    Transaction
+  Transactionable<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta,
+    IDriver,
+    IPreparedStatement,
+    ITransactionOptions,
+    ITransaction
   >,
-  SqlEventable<EventTarget>,
+  Eventable<IEventTarget>,
   AsyncDisposable {
-}
-
-/**
- * SqlClientConstructor
- *
- * The constructor for the SqlClient interface.
- */
-export interface SqlClientConstructor<
-  ConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  ParameterType extends DriverParameterType = DriverParameterType,
-  QueryValues extends DriverQueryValues = DriverQueryValues,
-  QueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  Connection extends Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
-  > = Driver<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta
-  >,
-  PreparedStatement extends SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
-  > = SqlPreparedStatement<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection
-  >,
-  TransactionOptions extends SqlTransactionOptions = SqlTransactionOptions,
-  Transaction extends SqlTransaction<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions
-  > = SqlTransaction<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions
-  >,
-  Client extends SqlClient<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions,
-    Transaction
-  > = SqlClient<
-    ConnectionOptions,
-    QueryOptions,
-    ParameterType,
-    QueryValues,
-    QueryMeta,
-    Connection,
-    PreparedStatement,
-    TransactionOptions,
-    Transaction
-  >,
-> {
-  new (
-    connectionUrl: string | URL,
-    options?: Client["options"],
-  ): Client;
 }

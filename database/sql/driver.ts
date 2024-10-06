@@ -69,12 +69,15 @@ export type DriverQueryNext<
   meta: Meta;
 };
 
+/**
+ * Internal Driver Options
+ */
 export interface DriverInternalOptions<
-  ConnectionOptions extends DriverConnectionOptions,
-  QueryOptions extends DriverQueryOptions,
+  IConnectionOptions extends DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions,
 > {
-  connectionOptions: ConnectionOptions;
-  queryOptions: QueryOptions;
+  connectionOptions: IConnectionOptions;
+  queryOptions: IQueryOptions;
   // deno-lint-ignore no-explicit-any
   [key: string | symbol | number]: any;
 }
@@ -92,11 +95,11 @@ export interface DriverInternalOptions<
  *  - connectionOptions?: DriverConnectionOptions;
  */
 export interface Driver<
-  DConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  DQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  DParameterType extends DriverParameterType = DriverParameterType,
-  DQueryValues extends DriverQueryValues = DriverQueryValues,
-  DQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  IParameterType extends DriverParameterType = DriverParameterType,
+  IQueryValues extends DriverQueryValues = DriverQueryValues,
+  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
 > extends AsyncDisposable {
   /**
    * Connection URL
@@ -106,7 +109,7 @@ export interface Driver<
   /**
    * Connection options
    */
-  readonly options: DriverInternalOptions<DConnectionOptions, DQueryOptions>;
+  readonly options: DriverInternalOptions<IConnectionOptions, IQueryOptions>;
 
   /**
    * Whether the connection is connected to the database
@@ -139,12 +142,12 @@ export interface Driver<
    * @returns the rows returned by the query
    */
   query<
-    Values extends DQueryValues = DQueryValues,
-    Meta extends DQueryMeta = DQueryMeta,
+    Values extends IQueryValues = IQueryValues,
+    Meta extends IQueryMeta = IQueryMeta,
   >(
     sql: string,
-    params?: DParameterType[],
-    options?: DQueryOptions,
+    params?: IParameterType[],
+    options?: IQueryOptions,
   ): AsyncGenerator<DriverQueryNext<Values, Meta>>;
 }
 
@@ -154,27 +157,27 @@ export interface Driver<
  * The base interface for everything that interracts with the connection like querying.
  */
 export interface DriverConnectable<
-  DConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  DQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  DParameterType extends DriverParameterType = DriverParameterType,
-  DQueryValues extends DriverQueryValues = DriverQueryValues,
-  DQueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  DConnection extends Driver<
-    DConnectionOptions,
-    DQueryOptions,
-    DParameterType,
-    DQueryValues,
-    DQueryMeta
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
+  IParameterType extends DriverParameterType = DriverParameterType,
+  IQueryValues extends DriverQueryValues = DriverQueryValues,
+  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
+  IDriver extends Driver<
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   > = Driver<
-    DConnectionOptions,
-    DQueryOptions,
-    DParameterType,
-    DQueryValues,
-    DQueryMeta
+    IConnectionOptions,
+    IQueryOptions,
+    IParameterType,
+    IQueryValues,
+    IQueryMeta
   >,
-> extends AsyncDisposable, Pick<DConnection, "options"> {
+> extends AsyncDisposable, Pick<IDriver, "options"> {
   /**
    * The connection to the database
    */
-  readonly connection: DConnection;
+  readonly connection: IDriver;
 }
