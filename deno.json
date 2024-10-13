@@ -8,6 +8,7 @@
     "@stdext/crypto": "jsr:@stdext/crypto",
     "@stdext/encoding": "jsr:@stdext/encoding",
     "@stdext/http": "jsr:@stdext/http",
+    "@stdext/lexer": "jsr:@stdext/lexer",
     "@stdext/types": "jsr:@stdext/types"
   },
   "tasks": {
@@ -26,6 +27,7 @@
     "./crypto",
     "./encoding",
     "./http",
+    "./lexer",
     "./types"
   ],
   "exclude": [
