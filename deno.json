@@ -9,6 +9,7 @@
     "@stdext/crypto": "jsr:@stdext/crypto",
     "@stdext/encoding": "jsr:@stdext/encoding",
     "@stdext/http": "jsr:@stdext/http",
+    "@stdext/json": "jsr:@stdext/json",
     "@stdext/lexer": "jsr:@stdext/lexer",
     "@stdext/types": "jsr:@stdext/types"
   },
@@ -29,6 +30,7 @@
     "./crypto",
     "./encoding",
     "./http",
+    "./json",
     "./lexer",
     "./types"
   ],

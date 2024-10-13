@@ -1,3 +1,5 @@
+import { isNumeric } from "@stdext/assert";
+
 /**
  * The token object
  */
@@ -22,7 +24,7 @@ export type StringTokenizerToken<Type = string, Value = string> = {
 export type StringTokenizerKeyMatcher =
   | string
   | RegExp
-  | ((value: string, index: number) => boolean);
+  | ((value: string, index: number, data: string) => boolean);
 
 /**
  * The return type can be either a token or an touple with the token as the
@@ -40,8 +42,8 @@ export type StringTokenizerKeyMatcher =
  */
 export type StringTokenizerHandlerReturnType<Type = string, Value = string> =
   | StringTokenizerToken<Type, Value>
-  | [StringTokenizerToken<Type, Value>]
-  | [StringTokenizerToken<Type, Value>, number | undefined];
+  | number
+  | [StringTokenizerToken<Type, Value> | undefined, number | undefined];
 
 /**
  * Handler for the matched token
@@ -154,12 +156,19 @@ export class StringTokenizer<Type = string, Value = string> {
       let increment = 1;
 
       if (Array.isArray(token)) {
-        tokens.push(token[0]);
+        if (token[0] !== undefined) {
+          tokens.push(token[0]);
+        }
+
         if (token[1] !== undefined) {
           increment = token[1];
         }
       } else {
-        tokens.push(token);
+        if (isNumeric(token)) {
+          increment = token;
+        } else {
+          tokens.push(token);
+        }
       }
 
       this.#incrementIndex(increment);
@@ -176,7 +185,7 @@ export class StringTokenizer<Type = string, Value = string> {
         matcher.key instanceof RegExp &&
           matcher.key.test(this.#currentChar) ||
         typeof matcher.key === "function" &&
-          matcher.key(this.#currentChar, this.#index)
+          matcher.key(this.#currentChar, this.#index, this.#data)
       ) {
         return matcher.handler(
           this.#currentChar,
