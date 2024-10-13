@@ -5,6 +5,7 @@
     "@std/encoding": "jsr:@std/encoding@^1.0.1",
     "@std/json": "jsr:@std/json@^1.0.0",
     "@std/path": "jsr:@std/path@^1.0.2",
+    "@stdext/assert": "jsr:@stdext/assert",
     "@stdext/crypto": "jsr:@stdext/crypto",
     "@stdext/encoding": "jsr:@stdext/encoding",
     "@stdext/http": "jsr:@stdext/http",
@@ -24,6 +25,7 @@
     "format:check": "deno fmt --check && deno task --cwd crypto format:check"
   },
   "workspace": [
+    "./assert",
     "./crypto",
     "./encoding",
     "./http",
