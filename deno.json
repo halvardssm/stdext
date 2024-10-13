@@ -2,8 +2,13 @@
   "lock": false,
   "imports": {
     "@std/assert": "jsr:@std/assert@^1.0.2",
+    "@std/encoding": "jsr:@std/encoding@^1.0.1",
+    "@std/json": "jsr:@std/json@^1.0.0",
     "@std/path": "jsr:@std/path@^1.0.2",
-    "@std/encoding": "jsr:@std/encoding@^1.0.1"
+    "@stdext/crypto": "jsr:@stdext/crypto",
+    "@stdext/encoding": "jsr:@stdext/encoding",
+    "@stdext/http": "jsr:@stdext/http",
+    "@stdext/types": "jsr:@stdext/types"
   },
   "tasks": {
     "bump_version": "deno run --allow-env=VERSION --allow-read=. --allow-write=. ./_tools/bump_version.ts",
@@ -20,7 +25,8 @@
   "workspace": [
     "./crypto",
     "./encoding",
-    "./http"
+    "./http",
+    "./types"
   ],
   "exclude": [
     "./crypto/hash/_wasm/target"
