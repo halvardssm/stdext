@@ -14,16 +14,16 @@
     "@stdext/types": "jsr:@stdext/types"
   },
   "tasks": {
-    "bump_version": "deno run --allow-env=VERSION --allow-read=. --allow-write=. ./_tools/bump_version.ts",
     "check": "deno task format:check && deno lint && deno check **/*.ts",
     "test": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks",
     "cov:gen": "deno coverage coverage --lcov --output=cov.lcov",
-    "build": "deno task build:wasm",
-    "build:check": "deno task build:wasm:check",
-    "build:wasm": "deno task --cwd crypto build",
-    "build:wasm:check": "deno task --cwd crypto build:check",
-    "format": "deno fmt && deno task --cwd crypto format",
-    "format:check": "deno fmt --check && deno task --cwd crypto format:check"
+    "build:wasm": "sh -c 'for p in $(deno task echo:wasm_paths); do cd $p && deno task build:wasm; done'",
+    "build:wasm:check": "sh -c 'for p in $(deno task echo:wasm_paths); do cd $p && deno task build:wasm:check; done'",
+    "format:wasm": "sh -c 'for p in $(deno task echo:wasm_paths); do cd $p && deno task format:wasm; done'",
+    "format:wasm:check": "sh -c 'for p in $(deno task echo:wasm_paths); do cd $p && deno task format:wasm:check; done'",
+    "format": "deno fmt && deno task format:wasm",
+    "format:check": "deno fmt --check && deno task format:wasm:check",
+    "echo:wasm_paths": "deno eval 'import(\"./deno.json\", {with:{type:\"json\"}}).then((mod)=>console.info(mod.default.wasm_paths.join(\" \")))'"
   },
   "workspace": [
     "./assert",
@@ -34,7 +34,11 @@
     "./lexer",
     "./types"
   ],
+  "wasm_paths": [
+    "./crypto"
+  ],
   "exclude": [
-    "./crypto/hash/_wasm/target"
+    "./crypto/hash/_wasm/target",
+    "./coverage"
   ]
 }
