@@ -1,5 +1,7 @@
 # @stdext/crypto
 
+Extends [@std/crypto](https://jsr.io/@std/crypto)
+
 The Crypto package contains utilities for encryption and decryption as well as
 hashing.
 
