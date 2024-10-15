@@ -4,35 +4,44 @@
     "@std/assert": "jsr:@std/assert@^1",
     "@std/collections": "jsr:@std/collections@^1",
     "@std/encoding": "jsr:@std/encoding@^1",
+    "@std/json": "jsr:@std/json@^1",
     "@std/path": "jsr:@std/path@^1",
+    "@std/toml": "jsr:@std/toml@^1",
+    "@stdext/assert": "jsr:@stdext/assert",
     "@stdext/collections": "jsr:@stdext/collections",
     "@stdext/crypto": "jsr:@stdext/crypto",
     "@stdext/database": "jsr:@stdext/database",
     "@stdext/encoding": "jsr:@stdext/encoding",
-    "@stdext/http": "jsr:@stdext/http"
+    "@stdext/http": "jsr:@stdext/http",
+    "@stdext/json": "jsr:@stdext/json",
+    "@stdext/lexer": "jsr:@stdext/lexer",
+    "@stdext/types": "jsr:@stdext/types"
   },
   "tasks": {
-    "bump_version": "deno run --allow-env=VERSION --allow-read=. --allow-write=. ./_tools/bump_version.ts",
     "check": "deno task format:check && deno lint && deno check **/*.ts",
     "test": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks",
     "test:inspect": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks --inspect-wait",
     "cov:gen": "deno coverage coverage --lcov --output=cov.lcov",
-    "build": "deno task build:wasm",
-    "build:check": "deno task build:wasm:check",
-    "build:wasm": "deno task --cwd crypto build",
-    "build:wasm:check": "deno task --cwd crypto build:check",
-    "format": "deno fmt && deno task --cwd crypto format",
-    "format:check": "deno fmt --check && deno task --cwd crypto format:check"
+    "build:wasm": "deno run --allow-read --allow-run _tools/build_wasm.ts",
+    "build:wasm:check": "deno task build:wasm --check",
+    "format:wasm": "cd _wasm && cargo fmt --all",
+    "format:wasm:check": "cd _wasm && cargo fmt --all -- --check",
+    "format": "deno fmt && deno task format:wasm",
+    "format:check": "deno fmt --check && deno task format:wasm:check"
   },
   "workspace": [
+    "./assert",
     "./collections",
     "./crypto",
     "./database",
     "./encoding",
-    "./http"
+    "./http",
+    "./json",
+    "./lexer",
+    "./types"
   ],
   "exclude": [
-    "./crypto/hash/_wasm/target",
-    "coverage"
+    "./_wasm/target",
+    "./coverage"
   ]
 }

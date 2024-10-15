@@ -3,7 +3,7 @@ import {
   type Argon2Options,
   instantiate,
   type InstantiateResult,
-} from "./_wasm/lib/deno_stdext_crypto_hash_wasm_argon2.generated.mjs";
+} from "../_wasm/crypto_hash_argon2.generated.mjs";
 
 const instance: InstantiateResult["exports"] = instantiate();
 
