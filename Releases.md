@@ -1,6 +1,6 @@
 ### 2024.10.15
 
-#### @stdext/assert 0.0.1 (patch)
+#### @stdext/assert 0.0.2 (patch)
 
 - feat(assert): updated readme
 
@@ -16,15 +16,15 @@
 
 - feat(http): updated readme
 
-#### @stdext/json 0.0.1 (patch)
+#### @stdext/json 0.0.2 (patch)
 
 - feat(json): updated readme
 
-#### @stdext/lexer 0.0.1 (patch)
+#### @stdext/lexer 0.0.2 (patch)
 
 - feat(lexer): updated readme
 
-#### @stdext/types 0.0.1 (patch)
+#### @stdext/types 0.0.2 (patch)
 
 - feat(types): updated readme
 
