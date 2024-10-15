@@ -1,5 +1,7 @@
 # @stdext/http
 
+Extends [@std/http](https://jsr.io/@std/http)
+
 The HTTP package contains utilities for fetch and HTTP functions
 
 ## Entrypoints
