@@ -1,5 +1,7 @@
 # @stdext/json
 
+Extends [@std/json](https://jsr.io/@std/json)
+
 The json package, contains helpers for json parsing, querying (jsonpath) and
 processing
 
