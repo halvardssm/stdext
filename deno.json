@@ -1,10 +1,11 @@
 {
   "lock": false,
   "imports": {
-    "@std/assert": "jsr:@std/assert@^1.0.2",
-    "@std/encoding": "jsr:@std/encoding@^1.0.1",
-    "@std/json": "jsr:@std/json@^1.0.0",
-    "@std/path": "jsr:@std/path@^1.0.2",
+    "@std/assert": "jsr:@std/assert@^1",
+    "@std/encoding": "jsr:@std/encoding@^1",
+    "@std/json": "jsr:@std/json@^1",
+    "@std/path": "jsr:@std/path@^1",
+    "@std/toml": "jsr:@std/toml@^1",
     "@stdext/assert": "jsr:@stdext/assert",
     "@stdext/crypto": "jsr:@stdext/crypto",
     "@stdext/encoding": "jsr:@stdext/encoding",
@@ -17,13 +18,12 @@
     "check": "deno task format:check && deno lint && deno check **/*.ts",
     "test": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks",
     "cov:gen": "deno coverage coverage --lcov --output=cov.lcov",
-    "build:wasm": "sh -c 'for p in $(deno task echo:wasm_paths); do cd $p && deno task build:wasm; done'",
-    "build:wasm:check": "sh -c 'for p in $(deno task echo:wasm_paths); do cd $p && deno task build:wasm:check; done'",
-    "format:wasm": "sh -c 'for p in $(deno task echo:wasm_paths); do cd $p && deno task format:wasm; done'",
-    "format:wasm:check": "sh -c 'for p in $(deno task echo:wasm_paths); do cd $p && deno task format:wasm:check; done'",
+    "build:wasm": "deno run --allow-read --allow-run _tools/build_wasm.ts",
+    "build:wasm:check": "deno task build:wasm --check",
+    "format:wasm": "cd _wasm && cargo fmt --all",
+    "format:wasm:check": "cd _wasm && cargo fmt --all -- --check",
     "format": "deno fmt && deno task format:wasm",
-    "format:check": "deno fmt --check && deno task format:wasm:check",
-    "echo:wasm_paths": "deno eval 'import(\"./deno.json\", {with:{type:\"json\"}}).then((mod)=>console.info(mod.default.wasm_paths.join(\" \")))'"
+    "format:check": "deno fmt --check && deno task format:wasm:check"
   },
   "workspace": [
     "./assert",
@@ -34,11 +34,8 @@
     "./lexer",
     "./types"
   ],
-  "wasm_paths": [
-    "./crypto"
-  ],
   "exclude": [
-    "./crypto/hash/_wasm/target",
+    "./_wasm/target",
     "./coverage"
   ]
 }

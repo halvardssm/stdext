@@ -10,4 +10,4 @@ html_cov/
 cov.lcov
 coverage/
 docs/
-crypto/hash/_wasm/target
+_wasm/target

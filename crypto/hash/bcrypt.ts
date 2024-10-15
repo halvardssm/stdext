@@ -2,7 +2,7 @@ import {
   type BcryptOptions,
   instantiate,
   type InstantiateResult,
-} from "./_wasm/lib/deno_stdext_crypto_hash_wasm_bcrypt.generated.mjs";
+} from "../_wasm/crypto_hash_bcrypt.generated.mjs";
 
 const instance: InstantiateResult["exports"] = instantiate();
 

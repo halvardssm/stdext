@@ -1,5 +1,5 @@
 [package]
-name = "deno_stdext_crypto_hash_wasm_bcrypt"
+name = "crypto_hash_bcrypt"
 version.workspace = true
 edition.workspace = true
 

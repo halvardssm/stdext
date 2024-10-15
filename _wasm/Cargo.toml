@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-  "argon2",
-  "bcrypt",
-  "scrypt"
+  "crypto_hash_argon2",
+  "crypto_hash_bcrypt",
+  "crypto_hash_scrypt",
+  "json_jsonpath"
 ]
 
 [workspace.package]
@@ -14,6 +15,8 @@ edition = "2021"
 wasm-bindgen = "0.2.92"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.4"
+serde_json = "1"
+serde_json_path = "0.6"
 getrandom = { version = "0.2", features = ["js"] }
 rand_core = { version = "0.6", features = ["std"] }
 js-sys = "0.3"

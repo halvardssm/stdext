@@ -1,5 +1,5 @@
 [package]
-name = "deno_stdext_crypto_hash_wasm_argon2"
+name = "json_jsonpath"
 version.workspace = true
 edition.workspace = true
 
@@ -10,7 +10,5 @@ crate-type = ["cdylib"]
 wasm-bindgen.workspace = true
 serde.workspace = true
 serde-wasm-bindgen.workspace = true
-getrandom.workspace = true
-argon2.workspace = true
-rand_core.workspace = true
-js-sys.workspace = true
+serde_json.workspace = true
+serde_json_path.workspace = true

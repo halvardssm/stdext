@@ -1,1 +1,1 @@
-export { JSONPath } from "./jsonpath.ts";
+export * from "./jsonpath.ts";
