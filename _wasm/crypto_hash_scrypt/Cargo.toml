@@ -1,0 +1,14 @@
+[package]
+name = "crypto_hash_scrypt"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen.workspace = true
+serde.workspace = true
+serde-wasm-bindgen.workspace = true
+getrandom.workspace = true
+scrypt.workspace = true
