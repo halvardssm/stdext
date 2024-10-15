@@ -34,7 +34,7 @@ export interface JSONPathResult<JsonValue = any> {
 
 /**
 * JSONPath
-* 
+*
 * @example
 * ```ts
 * const jp = new JSONPath({a: "b"})

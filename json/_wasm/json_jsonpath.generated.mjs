@@ -4,7 +4,7 @@
 // deno-fmt-ignore-file
 /// <reference types="./json_jsonpath.generated.d.mts" />
 
-// source-hash: 7e71960193884e92c495c3345fbee5264a8c2f92
+// source-hash: a4c19a39ce309845f08e5db46e004956e864944c
 let wasm;
 
 const heap = new Array(128).fill(undefined);
