@@ -157,7 +157,7 @@ class TestPreparedStatement extends TestSqlConnectable
   }
   deallocated = false;
 
-  get connection(): TestDriver {
+  override get connection(): TestDriver {
     if (this.deallocated) throw new Sql.SqlError("deallocated");
     return this._connection;
   }
@@ -217,7 +217,7 @@ class TestPreparedStatement extends TestSqlConnectable
       this.connection.query(this.sql, params, options),
     );
   }
-  [Symbol.asyncDispose](): Promise<void> {
+  override [Symbol.asyncDispose](): Promise<void> {
     return this.deallocate();
   }
 }
@@ -362,7 +362,7 @@ class TestTransaction extends TestSqlPreparable implements
     return this._inTransaction;
   }
 
-  get connection(): TestDriver {
+  override get connection(): TestDriver {
     if (!this.inTransaction) {
       throw new Sql.SqlError("not in transaction");
     }
@@ -532,7 +532,7 @@ class TestPoolClient extends TestTransactionable implements
     await this.#releaseFn?.();
   }
 
-  [Symbol.asyncDispose](): Promise<void> {
+  override [Symbol.asyncDispose](): Promise<void> {
     return this.release();
   }
 }

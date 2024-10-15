@@ -105,7 +105,7 @@ export async function testDriverConstructor<
         await db.connect();
         await db.close();
       } catch (e) {
-        error = e;
+        error = e as Error;
       }
 
       assert(
@@ -334,7 +334,7 @@ export async function testClientConnection<
         await db.connect();
         await db.close();
       } catch (e) {
-        error = e;
+        error = e as Error;
       }
 
       assert(
@@ -419,7 +419,7 @@ export async function testClientPoolConnection<
         await db.connect();
         await db.close();
       } catch (e) {
-        error = e;
+        error = e as Error;
       }
 
       assertEquals(

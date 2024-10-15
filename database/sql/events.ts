@@ -183,7 +183,7 @@ export class SqlEventTarget<
    *
    * @inheritdoc
    */
-  addEventListener(
+  override addEventListener(
     type: IEventType,
     listener: IListener | null,
     options?: boolean | IListenerOptions,
@@ -196,7 +196,7 @@ export class SqlEventTarget<
    *
    * @inheritdoc
    */
-  dispatchEvent(event: IEvent): boolean {
+  override dispatchEvent(event: IEvent): boolean {
     return super.dispatchEvent(event);
   }
 
@@ -205,7 +205,7 @@ export class SqlEventTarget<
    *
    * @inheritdoc
    */
-  removeEventListener(
+  override removeEventListener(
     type: IEventType,
     callback: IListener | null,
     options?: boolean | IRemoveListenerOptions,
