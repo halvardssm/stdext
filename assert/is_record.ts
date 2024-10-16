@@ -1,15 +1,11 @@
 import { AssertionError } from "@std/assert";
-import { objectToStringEquals } from "./utils.ts";
+import { isObject } from "./is_object.ts";
 
 /**
  * Checks if a value is a Record<string, unknown>
  */
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  if (!objectToStringEquals("Object", value)) {
-    return false;
-  }
-
-  if (typeof value !== "object") {
+  if (!isObject(value)) {
     return false;
   }
 
@@ -29,8 +25,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function assertIsRecord(
   value: unknown,
+  msg?: string,
 ): asserts value is Record<string, unknown> {
   if (!isRecord(value)) {
-    throw new AssertionError(`Value is not a Record, was '${value}'`);
+    const msgSuffix = msg ? `: ${msg}` : ".";
+    const message = `Value is not a Record, was '${value}'${msgSuffix}`;
+    throw new AssertionError(message);
   }
 }
