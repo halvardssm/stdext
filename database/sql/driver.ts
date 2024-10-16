@@ -73,8 +73,8 @@ export type DriverQueryNext<
  * Internal Driver Options
  */
 export interface DriverInternalOptions<
-  IConnectionOptions extends DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions,
+  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
+  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
 > {
   connectionOptions: IConnectionOptions;
   queryOptions: IQueryOptions;
@@ -104,7 +104,7 @@ export interface Driver<
   /**
    * Connection URL
    */
-  readonly connectionUrl: string;
+  readonly connectionUrl: string | URL;
 
   /**
    * Connection options
@@ -149,6 +149,16 @@ export interface Driver<
     params?: IParameterType[],
     options?: IQueryOptions,
   ): AsyncGenerator<DriverQueryNext<Values, Meta>>;
+}
+
+/**
+ * The driver constructor
+ */
+export interface DriverConstructor<
+  IDriver extends Driver = Driver,
+  IOptions extends IDriver["options"] = IDriver["options"],
+> {
+  new (connectionUrl: string, options: IOptions): IDriver;
 }
 
 /**

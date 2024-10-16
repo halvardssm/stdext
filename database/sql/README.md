@@ -30,40 +30,38 @@ See the [examples](#examples) section for more usage.
 ### Client
 
 The Client provides a database client with the following methods (see
-[SqlClient](./client.ts)):
+[Client](./client.ts)):
 
-- `connect` (See [SqlConnection](./connection.ts)): Creates a connection to the
-  database
-- `close` (See [SqlConnection](./connection.ts)): Closes the connection to the
-  database
-- `execute` (See [SqlQueriable](./core.ts)): Executes a SQL statement
-- `query` (See [SqlQueriable](./core.ts)): Queries the database and returns an
+- `connect` (See [Driver](./driver.ts)): Creates a connection to the database
+- `close` (See [Driver](./driver.ts)): Closes the connection to the database
+- `execute` (See [Queriable](./core.ts)): Executes a SQL statement
+- `query` (See [Queriable](./core.ts)): Queries the database and returns an
   array of object
-- `queryOne` (See [SqlQueriable](./core.ts)): Queries the database and returns
-  at most one entry as an object
-- `queryMany` (See [SqlQueriable](./core.ts)): Queries the database with an
-  async generator and yields each entry as an object. This is good for when you
-  want to iterate over a massive amount of rows.
-- `queryArray` (See [SqlQueriable](./core.ts)): Queries the database and returns
-  an array of arrays
-- `queryOneArray` (See [SqlQueriable](./core.ts)): Queries the database and
-  returns at most one entry as an array
-- `queryManyArray` (See [SqlQueriable](./core.ts)): Queries the database with an
+- `queryOne` (See [Queriable](./core.ts)): Queries the database and returns at
+  most one entry as an object
+- `queryMany` (See [Queriable](./core.ts)): Queries the database with an async
+  generator and yields each entry as an object. This is good for when you want
+  to iterate over a massive amount of rows.
+- `queryArray` (See [Queriable](./core.ts)): Queries the database and returns an
+  array of arrays
+- `queryOneArray` (See [Queriable](./core.ts)): Queries the database and returns
+  at most one entry as an array
+- `queryManyArray` (See [Queriable](./core.ts)): Queries the database with an
   async generator and yields each entry as an array. This is good for when you
   want to iterate over a massive amount of rows.
-- `sql` (See [SqlQueriable](./core.ts)): Allows you to create a query using
+- `sql` (See [Queriable](./core.ts)): Allows you to create a query using
   template literals, and returns the entries as an array of objects. This is a
   wrapper around `query`
-- `sqlArray` (See [SqlQueriable](./core.ts)): Allows you to create a query using
+- `sqlArray` (See [Queriable](./core.ts)): Allows you to create a query using
   template literals, and returns the entries as an array of arrays. This is a
   wrapper around `queryArray`
-- `prepare` (See [SqlPreparable](./core.ts)): Returns a prepared statement class
+- `prepare` (See [Preparable](./core.ts)): Returns a prepared statement class
   that contains a subset of the Queriable functions (see
-  [SqlPreparedQueriable](./core.ts))
-- `beginTransaction` (See [SqlTransactionable](./core.ts)): Returns a
-  transaction class that contains implements the queriable functions, as well as
-  transaction related functions (see [SqlTransactionQueriable](./core.ts))
-- `transaction` (See [SqlTransactionable](./core.ts)): A wrapper function for
+  [PreparedQueriable](./core.ts))
+- `beginTransaction` (See [Transactionable](./core.ts)): Returns a transaction
+  class that contains implements the queriable functions, as well as transaction
+  related functions (see [TransactionQueriable](./core.ts))
+- `transaction` (See [Transactionable](./core.ts)): A wrapper function for
   transactions, handles the logic of beginning, committing and rollback a
   transaction.
 
@@ -79,14 +77,13 @@ The following events can be subscribed to according to the specs (see
 ### ClientPool
 
 The ClientPool provides a database client pool (a pool of clients) with the
-following methods (see [SqlClientPool](./pool.ts)):
+following methods (see [ClientPool](./pool.ts)):
 
-- `connect` (See [SqlConnection](./core.ts)): Creates the connection classes and
-  adds them to a connection pool, and optionally connects them to the database
-- `close` (See [SqlConnection](./core.ts)): Closes all connections in the pool
-- `acquire` (See [SqlPoolable](./core.ts)): Retrieves a
-  [SqlPoolClient](./pool.ts) (a subset of [Client](#client)), and connects if
-  not already connected
+- `connect` (See [Driver](./driver.ts)): Creates the connection classes and adds
+  them to a connection pool, and optionally connects them to the database
+- `close` (See [Driver](./driver.ts)): Closes all connections in the pool
+- `acquire` (See [Poolable](./core.ts)): Retrieves a [PoolClient](./pool.ts) (a
+  subset of [Client](#client)), and connects if not already connected
 
 #### Events
 
@@ -207,6 +204,12 @@ const transaction = await client.beginTransaction();
 await transaction.execute("SOME INSERT QUERY");
 await transaction.commitTransaction();
 // `transaction` can no longer be used, and a new transaction needs to be created
+
+// OR
+
+await using transaction = await client.beginTransaction();
+await transaction.execute("SOME INSERT QUERY");
+// If commit is not called and the resource is cleaned up, rollback will be called automatically
 ```
 
 Transaction wrapper
@@ -223,10 +226,20 @@ console.log(res);
 Prepared statement
 
 ```ts
-const prepared = db.prepare("SOME PREPARED STATEMENT");
+const prepared = await db.prepare("SOME PREPARED STATEMENT");
 await prepared.query([...params]);
 console.log(res);
 // [{ col1: "some value" }]
+await prepared.dealocate();
+// `prepared` can no longer be used, and a new prepared statement needs to be created
+
+// OR
+
+await using prepared = await db.prepare("SOME PREPARED STATEMENT");
+await prepared.query([...params]);
+console.log(res);
+// [{ col1: "some value" }]
+// If dealocate is not called and the resource is cleaned up, dealocate will be called automatically
 ```
 
 ## Implementation
@@ -237,21 +250,28 @@ console.log(res);
 To be fully compliant with the specs, you will need to implement the following
 classes for your database driver:
 
-- `Connection` ([SqlConnection](./connection.ts)): This represents the
-  connection to the database. This should preferably only contain the
-  functionality of containing a connection, and provide a minimum set of query
-  methods to be used to query the database
-- `PreparedStatement` ([SqlPreparedStatement](./core.ts)): This represents a
+- `Driver` ([Driver](./driver.ts)): This represents the connection to the
+  database. This should preferably only contain the functionality of containing
+  a connection, and provide a minimum set of methods to be used to call the
+  database
+- `PreparedStatement` ([PreparedStatement](./core.ts)): This represents a
   prepared statement. All queriable methods must be implemented
-- `Transaction` ([SqlTransaction](./core.ts)): This represents a transaction.
-  All queriable methods must be implemented
-- `Client` ([SqlClient](./client.ts)): This represents a database client
-- `ClientPool` ([SqlClientPool](./pool.ts)): This represents a pool of clients
-- `PoolClient` ([SqlPoolClient](./pool.ts)): This represents a client to be
+- `Transaction` ([Transaction](./core.ts)): This represents a transaction. All
+  queriable methods must be implemented
+- `Client` ([Client](./client.ts)): This represents a database client
+- `ClientPool` ([ClientPool](./pool.ts)): This represents a pool of clients
+- `PoolClient` ([PoolClient](./pool.ts)): This represents a client to be
   provided by a pool
 
 It is also however advisable to create additional helper classes for easier
-inheritance. See [test.ts](./test.ts) for a minimum but functional example of
+inheritance.
+
+There are also some utility functions available in [utils.ts](./utils.ts) to
+work with the iterables.
+
+### Testing
+
+See the bottom of [test.ts](./test.ts) for a minimum but functional example of
 how to implement these interfaces into intermediate classes.
 
 ### Inheritance graph
@@ -282,21 +302,20 @@ the constructor.
 
 #### Client
 
-The Client must have a constructor following the signature specified by
-`SqlClientConstructor`.
+The Client must have a constructor signature as follows.
 
 ```ts
-export const Client = class extends Transactionable implements SqlClient<...> { // Transactionable is a class implementing `SqlTransactionable`
+class DbClient extends Transactionable implements Client<...> { // Transactionable is a class implementing `Transactionable`
   ...
-  // The constructor now has to satisfy `SqlClientConstructor`
+  // The constructor now has to satisfy the following signature
   constructor(
     connectionUrl: string | URL,
-    options: ConnectionOptions & QueryOptions = {},
+    options: Client["options"],
   ) {
     ...
   }
   ...
-} satisfies SqlClientConstructor<...>;
+} satisfies ClientConstructor<...>;
 
 // We need to also export the instance type of the client
 export type Client = InstanceType<typeof Client>;
@@ -305,12 +324,12 @@ export type Client = InstanceType<typeof Client>;
 #### ClientPool
 
 The ClientPool must have a constructor following the signature specified by
-`SqlClientPoolConstructor`.
+`ClientPoolConstructor`.
 
 ```ts
-const ClientPool = class extends Transactionable implements SqlClientPool<...> { // Transactionable is a class implementing `SqlTransactionable`
+const ClientPool = class extends Transactionable implements ClientPool<...> { // Transactionable is a class implementing `Transactionable`
   ...
-  // The constructor now has to satisfy `SqlClientPoolConstructor`
+  // The constructor now has to satisfy `ClientPoolConstructor`
   constructor(
     connectionUrl: string | URL,
     options: ConnectionOptions & QueryOptions = {},
@@ -318,7 +337,7 @@ const ClientPool = class extends Transactionable implements SqlClientPool<...> {
     ...
   }
   ...
-} satisfies SqlClientPoolConstructor<...>;
+} satisfies ClientPoolConstructor<...>;
 
 // We need to also export the instance type of the client pool
 export type ClientPool = InstanceType<typeof ClientPool>;

@@ -20,6 +20,7 @@ import {
   type Client,
   type ClientPool,
   type DriverConnectable,
+  type DriverConstructor,
   type PoolClient,
   type PreparedStatement,
   type Queriable,
@@ -27,9 +28,9 @@ import {
   type Transactionable,
 } from "./mod.ts";
 import { deepMerge } from "@std/collections";
+import type { AnyConstructor } from "@stdext/types";
+import { assertIsConnectionUrl, assertIsDriverOptions } from "./asserts.ts";
 
-// deno-lint-ignore no-explicit-any
-export type AnyConstructor<T, A extends any[] = any[]> = new (...args: A) => T;
 export type ClientConstructorArguments<
   IClient extends DriverConnectable = DriverConnectable,
 > = [
@@ -54,7 +55,7 @@ export type ClientPoolConstructor<
 export function testDriver(
   value: unknown,
   expects: {
-    connectionUrl: string;
+    connectionUrl: string | URL;
   },
 ) {
   assertIsDriver(value);
@@ -62,24 +63,133 @@ export function testDriver(
 }
 
 /**
+ * Test the Driver class
+ * @param value The Client
+ * @param expects The values to test against
+ */
+export function testDriverConstructor<
+  IDriverConstructor extends DriverConstructor = DriverConstructor,
+>(
+  DriverC: IDriverConstructor,
+  args: ConstructorParameters<IDriverConstructor>,
+) {
+  assert(
+    args.length < 3,
+    "Number of arguments for the driver constructor has to be max 2.",
+  );
+  assertIsConnectionUrl(args[0]);
+  assertIsDriverOptions(args[1]);
+  // @ts-expect-error: ts inference
+  const d = new DriverC(...args);
+  testDriver(d, { connectionUrl: args[0] });
+}
+
+/**
+ * Test the Driver class
+ * @param value The Client
+ * @param expects The values to test against
+ */
+export async function testDriverConstructorIntegration<
+  IDriverConstructor extends DriverConstructor = DriverConstructor,
+>(
+  t: Deno.TestContext,
+  D: IDriverConstructor,
+  args: ConstructorParameters<IDriverConstructor>,
+) {
+  testDriverConstructor(D, args);
+
+  await t.step("testConnectAndClose", async (t) => {
+    await t.step("should connect and close with using", async () => {
+      // @ts-expect-error: ts-inference
+      await using d = new D(...args);
+
+      await d.connect();
+    });
+
+    await t.step("should connect and close", async () => {
+      // @ts-expect-error: ts-inference
+      const d = new D(...args);
+
+      await d.connect();
+      await d.close();
+    });
+
+    await t.step("ping should work while connected", async () => {
+      // @ts-expect-error: ts-inference
+      await using d = new D(...args);
+
+      await d.connect();
+      assert(d.connected);
+
+      await d.ping();
+
+      await d.close();
+
+      assertFalse(d.connected);
+
+      await assertRejects(async () => {
+        await d.ping();
+      });
+    });
+  });
+}
+
+/**
+ * Test the DriverConnectable class
+ * @param value The DriverConnectable
+ * @param expects The values to test against
+ */
+export function testDriverConnectable(
+  value: unknown,
+  expects: {
+    connectionUrl: string;
+    options: DriverConnectable["options"];
+  },
+) {
+  assertIsDriverConnectable(value);
+  assertEquals(value.options, expects.options);
+  testDriver(value.connection, expects);
+}
+
+/**
  * Tests the connection of a Client
  */
-export async function testDriverConstructor<
+export function testClientConstructor<
+  IClient extends Client = Client,
+>(
+  ClientC: ClientConstructor<IClient>,
+  args: ClientConstructorArguments<IClient>,
+): void {
+  assert(
+    args.length < 3,
+    "Number of arguments for the client constructor has to be max 2.",
+  );
+  assertIsConnectionUrl(args[0]);
+  assertEquals(typeof args[1], "object");
+  const d = new ClientC(...args);
+  testClient(d, { connectionUrl: args[0], options: args[1] });
+}
+/**
+ * Tests the connection of a Client
+ */
+export async function testClientConstructorIntegration<
   IClient extends Client = Client,
 >(
   t: Deno.TestContext,
   Client: ClientConstructor<IClient>,
-  clientArguments: ClientConstructorArguments<IClient>,
+  args: ClientConstructorArguments<IClient>,
 ): Promise<void> {
+  testClientConstructor(Client, args);
+
   await t.step("testConnectAndClose", async (t) => {
     await t.step("should connect and close with using", async () => {
-      await using db = new Client(...clientArguments);
+      await using db = new Client(...args);
 
       await db.connect();
     });
 
     await t.step("should connect and close", async () => {
-      const db = new Client(...clientArguments);
+      const db = new Client(...args);
 
       await db.connect();
 
@@ -87,7 +197,7 @@ export async function testDriverConstructor<
     });
 
     await t.step("should connect and close with events", async () => {
-      const db = new Client(...clientArguments);
+      const db = new Client(...args);
 
       let connectListenerCalled = false;
       let closeListenerCalled = false;
@@ -118,23 +228,6 @@ export async function testDriverConstructor<
       );
     });
   });
-}
-
-/**
- * Test the DriverConnectable class
- * @param value The DriverConnectable
- * @param expects The values to test against
- */
-export function testDriverConnectable(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: DriverConnectable["options"];
-  },
-) {
-  assertIsDriverConnectable(value);
-  assertEquals(value.options, expects.options);
-  testDriver(value.connection, expects);
 }
 
 /**
@@ -372,8 +465,7 @@ export async function testClientPoolConnection<
     await t.step("should connect and close with using", async () => {
       const opts = deepMerge<IClient["options"]>(
         clientArguments[1],
-        // deno-lint-ignore ban-ts-comment
-        // @ts-ignore
+        // @ts-expect-error: ts-inference
         {
           clientPoolOptions: {
             lazyInitialization: true,
@@ -456,7 +548,7 @@ export async function testClientSanity<
   assertIsPreparedStatement(stmt1);
   assertFalse(stmt1.deallocated);
 
-  const stmt2 = await client.prepare("select 1 as one;");
+  await using stmt2 = await client.prepare("select 1 as one;");
 
   assertIsPreparedStatement(stmt2);
   assertFalse(stmt2.deallocated);
@@ -471,27 +563,26 @@ export async function testClientSanity<
   });
 
   await stmt2.execute();
-  await stmt2.deallocate();
-
-  assert(stmt2.deallocated);
-
-  await assertRejects(async () => {
-    await stmt2.execute();
-  });
 
   // Testing transactions
 
-  const transaction = await client.beginTransaction();
+  const transaction1 = await client.beginTransaction();
 
-  assert(transaction.inTransaction, "Transaction is not in transaction");
+  assert(transaction1.inTransaction, "Transaction is not in transaction");
 
-  await transaction.execute("select 1 as one;");
+  await transaction1.execute("select 1 as one;");
 
-  await transaction.commitTransaction();
-
-  assertFalse(transaction.inTransaction);
+  await transaction1.commitTransaction();
 
   await assertRejects(async () => {
-    await transaction.execute("select 1 as one;");
+    await transaction2.execute("select 1 as one;");
   });
+
+  assertFalse(transaction1.inTransaction);
+
+  await using transaction2 = await client.beginTransaction();
+
+  assert(transaction2.inTransaction, "Transaction is not in transaction");
+
+  await transaction2.execute("select 1 as one;");
 }

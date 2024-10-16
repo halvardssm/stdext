@@ -3,6 +3,7 @@ import { deepMerge } from "@std/collections";
 import {
   testClient,
   testClientConnection,
+  testClientConstructorIntegration,
   testClientPool,
   testClientPoolConnection,
   testClientSanity,
@@ -692,14 +693,14 @@ Deno.test(`sql static test`, async (t) => {
 
 Deno.test(`sql connection test`, async (t) => {
   await t.step("Client", async (t) => {
-    await testClientConnection<TestClient>(
+    await testClientConnection(
       t,
       TestClient,
       [connectionUrl, options],
     );
   });
   await t.step("Client", async (t) => {
-    await testClientPoolConnection<TestClientPool>(
+    await testClientPoolConnection(
       t,
       TestClientPool,
       [connectionUrl, options],
@@ -709,7 +710,13 @@ Deno.test(`sql connection test`, async (t) => {
 
 Deno.test(`sql sanity test`, async (t) => {
   await t.step("Client", async (t) => {
-    await testClientSanity<TestClient>(
+    await t.step("test suite", async (t) => {
+      await testClientConstructorIntegration(t, TestClient, [
+        connectionUrl,
+        options,
+      ]);
+    });
+    await testClientSanity(
       t,
       TestClient,
       [connectionUrl, options],

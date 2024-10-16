@@ -10,8 +10,7 @@ export function getObjectFromRow<
   const rowObject: Output = {} as Output;
 
   for (let i = 0; i < row.columns.length; i++) {
-    // deno-lint-ignore ban-ts-comment
-    // @ts-ignore
+    // @ts-expect-error: ts-inference
     rowObject[row.columns[i]] = row.values[i];
   }
 

@@ -1,4 +1,7 @@
-import { testDriver, testDriverConnectable } from "./testing.ts";
+import {
+  testDriverConnectable,
+  testDriverConstructorIntegration,
+} from "./testing.ts";
 import type {
   Driver,
   DriverConnectable,
@@ -11,11 +14,12 @@ import type {
   DriverQueryValues,
 } from "./driver.ts";
 import { SqlError } from "./errors.ts";
-import { assert, assertEquals, assertFalse, assertRejects } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 
 const testDbQueryParser = (sql: string) => {
   return JSON.parse(sql);
 };
+
 type TestDriverParameterType = DriverParameterType<string>;
 type TestDriverQueryValues = DriverQueryValues<Array<string>>;
 interface TestDriverQueryMeta extends DriverQueryMeta {
@@ -36,14 +40,14 @@ class TestDriver implements
     TestDriverQueryValues,
     TestDriverQueryMeta
   > {
-  connectionUrl: string;
+  connectionUrl: string | URL;
   options: DriverInternalOptions<
     TestDriverConnectionOptions,
     TestDriverQueryOptions
   >;
   _connected: boolean = false;
   constructor(
-    connectionUrl: string,
+    connectionUrl: string | URL,
     options: TestDriver["options"],
   ) {
     this.connectionUrl = connectionUrl;
@@ -128,12 +132,6 @@ const options: TestDriver["options"] = {
 };
 const sql = "test";
 
-const connection = new TestDriver(connectionUrl, options);
-const connectable = new TestDriverConnectable(
-  connection,
-  connection.options,
-);
-
 const expects = {
   connectionUrl,
   options,
@@ -145,23 +143,12 @@ const expects = {
 // @ts-expect-error: qwer is not allowed
 const _testingDriverQueryValues: DriverQueryValues<["asdf"]> = ["asdf", "qwer"];
 
-Deno.test(`DriverConnection`, async (t) => {
-  await t.step("test suite", () => {
-    testDriver(connection, expects);
-  });
-
-  await t.step("ping will throw if not connected", async () => {
-    await using conn = new TestDriver(connectionUrl, options);
-
-    await conn.connect();
-    assert(conn.connected);
-    await conn.ping();
-
-    await conn.close();
-    assertFalse(connection.connected);
-    await assertRejects(async () => {
-      await conn.ping();
-    });
+Deno.test(`Driver`, async (t) => {
+  await t.step("test suite", async (t) => {
+    await testDriverConstructorIntegration(t, TestDriver, [
+      connectionUrl,
+      options,
+    ]);
   });
 
   await t.step("can query using loop", async () => {
@@ -187,6 +174,12 @@ Deno.test(`DriverConnection`, async (t) => {
 });
 
 Deno.test(`DriverConnectable`, async (t) => {
+  const connection = new TestDriver(connectionUrl, options);
+  const connectable = new TestDriverConnectable(
+    connection,
+    connection.options,
+  );
+
   await t.step("test suite", () => {
     testDriverConnectable(connectable, expects);
   });

@@ -1,5 +1,9 @@
-import { assertExists, assertInstanceOf, AssertionError } from "@std/assert";
-import type { Driver, DriverConnectable } from "./driver.ts";
+import { assertInstanceOf, AssertionError } from "@std/assert";
+import type {
+  Driver,
+  DriverConnectable,
+  DriverInternalOptions,
+} from "./driver.ts";
 import type { Client } from "./client.ts";
 import type {
   PreparedStatement,
@@ -10,72 +14,59 @@ import type {
 import type { Eventable } from "./events.ts";
 import type { ClientPool, PoolClient } from "./pool.ts";
 import { SqlError } from "./errors.ts";
+import {
+  assertObjectHasPropertiesDeep,
+  isString,
+  objectHasProperties,
+  objectHasPropertiesDeep,
+} from "@stdext/assert";
 
 /**
- * Check if an object has a property
+ * Check if a value is a connectionUrl
  */
-function hasProperty<T>(obj: T, property: string | symbol | number): boolean {
-  let currentProto = obj;
-
-  while (currentProto !== null && currentProto !== undefined) {
-    if (Object.hasOwn(currentProto, property)) {
-      return true;
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(currentProto, property);
-    if (descriptor !== undefined) {
-      return true;
-    }
-    currentProto = Object.getPrototypeOf(currentProto);
-  }
-
-  return false;
+export function isConnectionUrl(value: unknown): value is string | URL {
+  return isString(value) || value instanceof URL;
 }
 
 /**
- * Check if an object has properties
+ * Assert that a value is a connectionUrl
  */
-export function hasProperties<T extends string | symbol>(
+export function assertIsConnectionUrl(
   value: unknown,
-  properties: Array<T>,
-): value is { [K in T]: unknown } {
-  assertExists(value);
-
-  const missing: Array<T> = [];
-
-  for (const property of properties) {
-    if (
-      !hasProperty(value as { [K in T]: unknown }, property)
-    ) {
-      missing.push(property);
-    }
-  }
-
-  return missing.length === 0;
-}
-
-/**
- * Check if an object has properties and throws if not
- */
-export function assertHasProperties<T extends string | symbol>(
-  value: unknown,
-  properties: Array<T>,
-): asserts value is { [K in T]: unknown } {
-  assertExists(value);
-
-  const missing: Array<T> = [];
-
-  for (const property of properties) {
-    if (
-      !hasProperty(value as { [K in T]: unknown }, property)
-    ) {
-      missing.push(property);
-    }
-  }
-
-  if (missing.length) {
+): asserts value is string | URL {
+  if (!isConnectionUrl(value)) {
     throw new AssertionError(
-      `Object is missing properties: ${
-        missing.map((e) => e.toString()).join(", ")
+      `The given value is not a valid connection url, must be 'string' or 'URL', but was '${value}'`,
+    );
+  }
+}
+
+/**
+ * Check if a value is driver options
+ */
+export function isDriverOptions<
+  T extends DriverInternalOptions = DriverInternalOptions,
+>(value: unknown, otherKeys: string[] = []): value is T {
+  const driverOptionsKeys = ["connectionOptions", "queryOptions", ...otherKeys];
+
+  return objectHasProperties(value, driverOptionsKeys);
+}
+
+/**
+ * Assert that a value is driver options
+ */
+export function assertIsDriverOptions<
+  T extends DriverInternalOptions = DriverInternalOptions,
+>(
+  value: unknown,
+  otherKeys: string[] = [],
+): asserts value is T {
+  const driverOptionsKeys = ["connectionOptions", "queryOptions", ...otherKeys];
+
+  if (!isDriverOptions(value, otherKeys)) {
+    throw new AssertionError(
+      `The given value is not valid driver options, must contain the following keys ${
+        driverOptionsKeys.map(String).join(",")
       }`,
     );
   }
@@ -101,7 +92,7 @@ export function assertIsSqlError(err: unknown): asserts err is SqlError {
 export function isAsyncDisposable(
   value: unknown,
 ): value is AsyncDisposable {
-  return hasProperties(value, [Symbol.asyncDispose]);
+  return objectHasPropertiesDeep(value, [Symbol.asyncDispose]);
 }
 
 /**
@@ -110,7 +101,7 @@ export function isAsyncDisposable(
 export function assertIsAsyncDisposable(
   value: unknown,
 ): asserts value is AsyncDisposable {
-  assertHasProperties(
+  assertObjectHasPropertiesDeep(
     value,
     [
       Symbol.asyncDispose,
@@ -124,7 +115,7 @@ export function assertIsAsyncDisposable(
 export function isDriver(
   value: unknown,
 ): value is Driver {
-  return isAsyncDisposable(value) && hasProperties(
+  return isAsyncDisposable(value) && objectHasPropertiesDeep(
     value,
     [
       "options",
@@ -145,7 +136,7 @@ export function assertIsDriver(
   value: unknown,
 ): asserts value is Driver {
   assertIsAsyncDisposable(value);
-  assertHasProperties(
+  assertObjectHasPropertiesDeep(
     value,
     [
       "options",
@@ -164,7 +155,7 @@ export function assertIsDriver(
 export function isDriverConnectable(
   value: unknown,
 ): value is DriverConnectable {
-  return isAsyncDisposable(value) && hasProperties(
+  return isAsyncDisposable(value) && objectHasPropertiesDeep(
     value,
     [
       "connection",
@@ -180,7 +171,7 @@ export function assertIsDriverConnectable(
   value: unknown,
 ): asserts value is DriverConnectable {
   assertIsAsyncDisposable(value);
-  assertHasProperties(
+  assertObjectHasPropertiesDeep(
     value,
     [
       "connection",
@@ -196,7 +187,7 @@ export function assertIsDriverConnectable(
 export function isPreparedStatement(
   value: unknown,
 ): value is PreparedStatement {
-  return isDriverConnectable(value) && hasProperties(
+  return isDriverConnectable(value) && objectHasPropertiesDeep(
     value,
     [
       "sql",
@@ -219,7 +210,7 @@ export function assertIsPreparedStatement(
   value: unknown,
 ): asserts value is PreparedStatement {
   assertIsDriverConnectable(value);
-  assertHasProperties(
+  assertObjectHasPropertiesDeep(
     value,
     [
       "sql",
@@ -241,7 +232,7 @@ export function assertIsPreparedStatement(
 export function isQueriable(
   value: unknown,
 ): value is Queriable {
-  return isDriverConnectable(value) && hasProperties(
+  return isDriverConnectable(value) && objectHasPropertiesDeep(
     value,
     [
       "options",
@@ -263,7 +254,7 @@ export function assertIsQueriable(
   value: unknown,
 ): asserts value is Queriable {
   assertIsDriverConnectable(value);
-  assertHasProperties(
+  assertObjectHasPropertiesDeep(
     value,
     [
       "options",
@@ -284,7 +275,7 @@ export function assertIsQueriable(
 export function isPreparable(
   value: unknown,
 ): value is Queriable {
-  return isQueriable(value) && hasProperties(
+  return isQueriable(value) && objectHasPropertiesDeep(
     value,
     [
       "prepare",
@@ -299,7 +290,7 @@ export function assertIsPreparable(
   value: unknown,
 ): asserts value is Queriable {
   assertIsQueriable(value);
-  assertHasProperties(
+  assertObjectHasPropertiesDeep(
     value,
     [
       "prepare",
@@ -313,7 +304,7 @@ export function assertIsPreparable(
 export function isTransaction(
   value: unknown,
 ): value is Transaction {
-  return isPreparable(value) && hasProperties(
+  return isPreparable(value) && objectHasPropertiesDeep(
     value,
     [
       "inTransaction",
@@ -332,7 +323,7 @@ export function assertIsTransaction(
   value: unknown,
 ): asserts value is Transaction {
   assertIsPreparable(value);
-  assertHasProperties(
+  assertObjectHasPropertiesDeep(
     value,
     [
       "inTransaction",
@@ -350,7 +341,7 @@ export function assertIsTransaction(
 export function isTransactionable(
   value: unknown,
 ): value is Transactionable {
-  return isPreparable(value) && hasProperties(
+  return isPreparable(value) && objectHasPropertiesDeep(
     value,
     [
       "beginTransaction",
@@ -366,7 +357,7 @@ export function assertIsTransactionable(
   value: unknown,
 ): asserts value is Transactionable {
   assertIsPreparable(value);
-  assertHasProperties(
+  assertObjectHasPropertiesDeep(
     value,
     [
       "beginTransaction",
@@ -381,7 +372,7 @@ export function assertIsTransactionable(
 export function isEventable(
   value: unknown,
 ): value is Eventable {
-  return hasProperties(value, ["eventTarget"]) &&
+  return objectHasPropertiesDeep(value, ["eventTarget"]) &&
     value.eventTarget instanceof EventTarget;
 }
 
@@ -391,7 +382,7 @@ export function isEventable(
 export function assertIsEventable(
   value: unknown,
 ): asserts value is Eventable {
-  assertHasProperties(value, ["eventTarget"]);
+  assertObjectHasPropertiesDeep(value, ["eventTarget"]);
   assertInstanceOf(value.eventTarget, EventTarget);
 }
 
@@ -401,7 +392,7 @@ export function assertIsEventable(
 export function isClient(value: unknown): value is Client {
   return isDriver(value) && isQueriable(value) &&
     isTransactionable(value) && isEventable(value) &&
-    hasProperties(value, ["options"]);
+    objectHasPropertiesDeep(value, ["options"]);
 }
 
 /**
@@ -412,7 +403,7 @@ export function assertIsClient(value: unknown): asserts value is Client {
   assertIsQueriable(value);
   assertIsTransactionable(value);
   assertIsEventable(value);
-  assertHasProperties(value, ["options"]);
+  assertObjectHasPropertiesDeep(value, ["options"]);
 }
 
 /**
@@ -422,7 +413,7 @@ export function isPoolClient(
   value: unknown,
 ): value is PoolClient {
   return isDriverConnectable(value) && isTransactionable(value) &&
-    hasProperties(value, [
+    objectHasPropertiesDeep(value, [
       "options",
       "disposed",
       "release",
@@ -437,7 +428,7 @@ export function assertIsPoolClient(
 ): asserts value is PoolClient {
   assertIsDriverConnectable(value);
   assertIsTransactionable(value);
-  assertHasProperties(value, [
+  assertObjectHasPropertiesDeep(value, [
     "options",
     "disposed",
     "release",
@@ -451,7 +442,7 @@ export function isClientPool(
   value: unknown,
 ): value is ClientPool {
   return isEventable(value) && isAsyncDisposable(value) &&
-    hasProperties(value, [
+    objectHasPropertiesDeep(value, [
       "connectionUrl",
       "options",
       "connected",
@@ -470,7 +461,7 @@ export function assertIsClientPool(
 ): asserts value is ClientPool {
   assertIsEventable(value);
   assertIsAsyncDisposable(value);
-  assertHasProperties(value, [
+  assertObjectHasPropertiesDeep(value, [
     "connectionUrl",
     "options",
     "connected",
