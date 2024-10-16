@@ -11,8 +11,13 @@ export function isNumeric(value: unknown): value is number {
 /**
  * Asserts that a value is a number and not NaN
  */
-export function assertIsNumeric(value: unknown): asserts value is number {
+export function assertIsNumeric(
+  value: unknown,
+  msg?: string,
+): asserts value is number {
   if (!isNumeric(value)) {
-    throw new AssertionError(`Value is not a numeric, was '${value}'`);
+    const msgSuffix = msg ? `: ${msg}` : ".";
+    const message = `Value is not a numeric, was '${value}'${msgSuffix}`;
+    throw new AssertionError(message);
   }
 }

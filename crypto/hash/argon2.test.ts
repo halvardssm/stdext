@@ -22,8 +22,7 @@ Deno.test("hash() and verify() with argon2d", () => {
 });
 
 Deno.test("hash() and verify() with wrong algorithm", () => {
-  // deno-lint-ignore ban-ts-comment
-  // @ts-ignore
+  // @ts-expect-error: ts-inference
   const o = { algorithm: "asdfasdf" } as Argon2Options;
   const h = hash("password", o);
   assertMatch(h, /^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);

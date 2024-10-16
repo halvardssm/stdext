@@ -10,8 +10,13 @@ export function isNumber(value: unknown): value is number {
 /**
  * Asserts that a value is a number
  */
-export function assertIsNumber(value: unknown): asserts value is number {
+export function assertIsNumber(
+  value: unknown,
+  msg?: string,
+): asserts value is number {
   if (!isNumber(value)) {
-    throw new AssertionError(`Value is not a number, was '${value}'`);
+    const msgSuffix = msg ? `: ${msg}` : ".";
+    const message = `Value is not a number, was '${value}'${msgSuffix}`;
+    throw new AssertionError(message);
   }
 }

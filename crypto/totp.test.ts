@@ -5,7 +5,6 @@ const secret = "OCOMBLGUREYUXFQJIL75FQFCKYFCKLQP";
 const t = 1704067200000;
 
 Deno.test("generateTotp()", async () => {
-  console.log();
   assertEquals(await generateTotp(secret, 0, t), "342743");
   assertEquals(await generateTotp(secret, 944996400, t), "149729");
   assertEquals(await generateTotp(secret, 976618800, t), "372018");

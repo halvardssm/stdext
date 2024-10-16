@@ -2,12 +2,15 @@
   "lock": false,
   "imports": {
     "@std/assert": "jsr:@std/assert@^1",
+    "@std/collections": "jsr:@std/collections@^1",
     "@std/encoding": "jsr:@std/encoding@^1",
     "@std/json": "jsr:@std/json@^1",
     "@std/path": "jsr:@std/path@^1",
     "@std/toml": "jsr:@std/toml@^1",
     "@stdext/assert": "jsr:@stdext/assert@^0",
+    "@stdext/collections": "jsr:@stdext/collections@^0",
     "@stdext/crypto": "jsr:@stdext/crypto@^0",
+    "@stdext/database": "jsr:@stdext/database@^0",
     "@stdext/encoding": "jsr:@stdext/encoding@^0",
     "@stdext/http": "jsr:@stdext/http@^0",
     "@stdext/json": "jsr:@stdext/json@^0",
@@ -17,6 +20,7 @@
   "tasks": {
     "check": "deno task format:check && deno lint && deno check **/*.ts",
     "test": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks",
+    "test:inspect": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks --inspect-wait",
     "cov:gen": "deno coverage coverage --lcov --output=cov.lcov",
     "build:wasm": "deno run --allow-read --allow-run _tools/build_wasm.ts",
     "build:wasm:check": "deno task build:wasm --check",
@@ -27,7 +31,9 @@
   },
   "workspace": [
     "./assert",
+    "./collections",
     "./crypto",
+    "./database",
     "./encoding",
     "./http",
     "./json",
