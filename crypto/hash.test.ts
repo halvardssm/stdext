@@ -2,11 +2,9 @@ import { assert, assertMatch, assertThrows } from "@std/assert";
 import { hash, verify } from "./hash.ts";
 
 Deno.test("hash() and verify() with unsupported", () => {
-  // deno-lint-ignore ban-ts-comment
-  // @ts-ignore
+  // @ts-expect-error: ts-inference
   assertThrows(() => hash("unsupported", "password"));
-  // deno-lint-ignore ban-ts-comment
-  // @ts-ignore
+  // @ts-expect-error: ts-inference
   assertThrows(() => verify("unsupported", "password", ""));
 });
 
