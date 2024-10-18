@@ -44,16 +44,24 @@ console.log(dump(buffer));
 
 ## Packages
 
+- [assert](https://jsr.io/@stdext/assert): The assert package, contains
+  validators and assertions
 - [collections](https://jsr.io/@stdext/collections): The collections package
   contains commonly used utilities and structures
 - [crypto](https://jsr.io/@stdext/crypto): The crypto package contains utility
   for crypto and hashing
+- [database](https://jsr.io/@stdext/database): The database package contains
+  interfaces and helpers for interracting with databases
 - [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
   utility for text encoding.
 - [http](https://jsr.io/@stdext/http): The http package contains utility for
   fetching and http servers
-- [sql](https://jsr.io/@stdext/sql): The SQL package contains a standard
-  interface for SQL based databases
+- [json](https://jsr.io/@stdext/json): The json package, contains helpers for
+  json parsing, querying (jsonpath) and processing
+- [lexer](https://jsr.io/@stdext/lexer): The lexer package contains general
+  purpose lexers/tokenizers
+- [types](https://jsr.io/@stdext/types): The types package, contains general
+  purpose type helpers
 
 ## Versioning
 
@@ -71,6 +79,21 @@ implemented.
 
 For modules that use Rust to compile to WASM, we allow the usage of third-party
 crates if necessary, but this will be considered on a case-by-case basis.
+
+## WASM
+
+All wasm code is generated from the rust workspace in the [\_wasm](./_wasm)
+folder.
+
+To generate the wasm code:
+
+```sh
+deno task build:wasm
+```
+
+This will call the [build_wasm.ts](./_tools/build_wasm.ts) script and will place
+each generated lib in its respective package based on its prefix. See script for
+more details.
 
 ## Deprecation Policy
 

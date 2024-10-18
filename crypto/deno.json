@@ -1,21 +1,26 @@
 {
-  "version": "0.0.5",
+  "version": "0.0.6",
   "name": "@stdext/crypto",
   "exports": {
-    "./hash": "./hash.ts"
+    "./hash": "./hash.ts",
+    "./hash/argon2": "./hash/argon2.ts",
+    "./hash/bcrypt": "./hash/bcrypt.ts",
+    "./hash/scrypt": "./hash/scrypt.ts",
+    "./hotp": "./hotp.ts",
+    "./totp": "./totp.ts",
+    "./utils": "./utils.ts"
   },
   "tasks": {
-    "build": "deno task build:argon2 && deno task build:bcrypt && deno task build:scrypt",
-    "build:check": "deno task build:argon2:check && deno task build:bcrypt:check && deno task build:scrypt:check",
-    "build:wasm": "deno task --cwd hash/_wasm wasmbuild --js-ext mjs --sync",
-    "build:argon2": "deno task build:wasm --project deno_stdext_crypto_hash_wasm_argon2",
-    "build:argon2:check": "deno task build:argon2 --check",
-    "build:bcrypt": "deno task build:wasm --project deno_stdext_crypto_hash_wasm_bcrypt",
-    "build:bcrypt:check": "deno task build:bcrypt --check",
-    "build:scrypt": "deno task build:wasm --project deno_stdext_crypto_hash_wasm_scrypt",
-    "build:scrypt:check": "deno task build:scrypt --check",
-    "wasmbuild": "deno run -A jsr:@deno/wasmbuild@0.17.1",
-    "format": "cd hash/_wasm && cargo fmt --all",
-    "format:check": "cd hash/_wasm && cargo fmt --all -- --check"
-  }
+    "wasmbuild": "deno run -A jsr:@deno/wasmbuild@0.17.1 --js-ext mjs --sync",
+    "format:wasm": "cd hash/_wasm && cargo fmt --all",
+    "format:wasm:check": "cd hash/_wasm && cargo fmt --all -- --check",
+    "echo:wasm_projects": "deno eval 'import(\"./deno.json\", {with:{type:\"json\"}}).then((mod)=>console.info(mod.default.wasm_projects.join(\" \")))'",
+    "build:wasm": "sh -c 'for p in $(deno task echo:wasm_projects); do deno task --cwd hash/_wasm wasmbuild --project $p; done'",
+    "build:wasm:check": "sh -c 'for p in $(deno task echo:wasm_projects); do deno task --cwd hash/_wasm wasmbuild --project $p --check; done'"
+  },
+  "wasm_projects": [
+    "deno_stdext_crypto_hash_wasm_argon2",
+    "deno_stdext_crypto_hash_wasm_bcrypt",
+    "deno_stdext_crypto_hash_wasm_scrypt"
+  ]
 }

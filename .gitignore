@@ -1,6 +1,7 @@
 .DS_Store
 .idea
-.vscode/settings.json
+.vscode/*
+!.vscode/settings.json
 .fleet
 .vim
 **/cov/
@@ -9,4 +10,4 @@ html_cov/
 cov.lcov
 coverage/
 docs/
-crypto/hash/_wasm/target
+_wasm/target

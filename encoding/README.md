@@ -1,5 +1,7 @@
 # @stdext/encoding
 
+Extends [@std/encoding](https://jsr.io/@std/encoding)
+
 The encoding package contains helpers for text encoding.
 
 ## Entrypoints

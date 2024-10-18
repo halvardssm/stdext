@@ -1,0 +1,16 @@
+[package]
+name = "crypto_hash_argon2"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen.workspace = true
+serde.workspace = true
+serde-wasm-bindgen.workspace = true
+getrandom.workspace = true
+argon2.workspace = true
+rand_core.workspace = true
+js-sys.workspace = true

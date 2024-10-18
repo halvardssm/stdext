@@ -1,0 +1,10 @@
+{
+  "version": "0.0.2",
+  "name": "@stdext/assert",
+  "exports": {
+    ".": "./mod.ts",
+    "./is_number": "./is_number.ts",
+    "./is_record": "./is_record.ts",
+    "./is_string": "./is_string.ts"
+  }
+}

@@ -4,12 +4,14 @@
  * This module is generated from {@link https://www.iana.org/assignments/http-methods/http-methods.xhtml#methods | IANA Hypertext Transfer Protocol (HTTP) Method Registry}
  *
  * @module
+ * @deprecated (0.0.5) Use @std/http/method instead, see DEPRECATION.md for more info
  */
 
 /**
  * HTTP Methods as defined by RFC 9110
  *
  * @see {@link https://www.iana.org/go/rfc9110 | RFC9110, Section 9.3}
+ * @deprecated (0.0.5) Use @std/http/method instead, see DEPRECATION.md for more info
  */
 export const HttpMethodRfc9110 = {
   /**
@@ -69,6 +71,9 @@ export const HttpMethodRfc9110 = {
   Trace: "TRACE",
 };
 
+/**
+ * @deprecated (0.0.5) Use @std/http/method instead, see DEPRECATION.md for more info
+ */
 export type HttpMethodRfc9110 =
   typeof HttpMethodRfc9110[keyof typeof HttpMethodRfc9110];
 
@@ -76,6 +81,7 @@ export type HttpMethodRfc9110 =
  * HTTP Methods as defined by IANA Hypertext Transfer Protocol (HTTP) Method Registry
  *
  * @see {@link https://www.iana.org/assignments/http-methods/http-methods.xhtml#methods | IANA Hypertext Transfer Protocol (HTTP) Method Registry}
+ * @deprecated (0.0.5) Use @std/http/method instead, see DEPRECATION.md for more info
  */
 export const HttpMethodIana = {
   /**
@@ -337,6 +343,9 @@ export const HttpMethodIana = {
   VersionControl: "VERSION-CONTROL",
 } as const;
 
+/**
+ * @deprecated (0.0.5) Use @std/http/method instead, see DEPRECATION.md for more info
+ */
 export type HttpMethodIana = typeof HttpMethodIana[keyof typeof HttpMethodIana];
 
 /**
@@ -344,10 +353,14 @@ export type HttpMethodIana = typeof HttpMethodIana[keyof typeof HttpMethodIana];
  *
  * @see {@link https://www.iana.org/go/rfc9110 | RFC9110, Section 9.3}
  * @see {@link https://www.iana.org/assignments/http-methods/http-methods.xhtml#methods | IANA Hypertext Transfer Protocol (HTTP) Method Registry}
+ * @deprecated (0.0.5) Use @std/http/method instead, see DEPRECATION.md for more info
  */
 export const HttpMethod = {
   ...HttpMethodRfc9110,
   ...HttpMethodIana,
 } as const;
 
+/**
+ * @deprecated (0.0.5) Use @std/http/method instead, see DEPRECATION.md for more info
+ */
 export type HttpMethod = typeof HttpMethod[keyof typeof HttpMethod];

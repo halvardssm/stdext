@@ -1,0 +1,8 @@
+{
+  "version": "0.0.2",
+  "name": "@stdext/lexer",
+  "exports": {
+    ".": "./mod.ts",
+    "./string_tokenizer": "./string_tokenizer.ts"
+  }
+}
