@@ -16,7 +16,11 @@ Similar effort has been made in the
 [Go ecosystem](https://pkg.go.dev/database/sql), and can therefore be used for
 guidance.
 
-Link to the specs: https://github.com/halvardssm/deno_stdext/tree/feat/sql
+Although the spec is shown using TypeScript, there is no requirement to import
+any types, or classes as long as the specs are followed. With the release, or
+shortly after, a repo will be specified/available on GitHub which will contain
+types, helper utilities, and a test suite. This will be published on
+[JSR](https://jsr.io/), and potentially also on [NPM](https://www.npmjs.com/).
 
 ## Purpose
 
@@ -213,79 +217,252 @@ facilitating smoother development and integration processes.
 
 The following section contains the main interfaces introduced in this RFC.
 
-### Concept
+This spec defines two main APIs, the low level API provides the bare minimum of
+connecting and querying the database, while the high level API provides high
+level methods for querying, prepared statements and transactions.
 
-#### Initiation of client
+- The low level interface will be named as `Driver`.
+- The high level interface will be named `Client`.
 
-There are two types of clients, a Client used for a single connection, and a
-ClientPool for when a pool of clients is needed. Both of these provide the same
-base signature, although the `options` argument differs slightly in signature.
+The separation between `Driver` and `Client` is so that they can be implemented
+in separation and also be exchangeable. A `Driver` can have many `Clients`
+supporting it, and a `Client` can have many supported `Drivers`.
 
-A client class takes two arguments, the first is a `connectionUrl` in the form
-of a `string` or `URL`, and the second is an optional `options` object. After
-instantiating a client, the connection needs to be established using the
-`connect` method available on the client.
+A `Client` will use the `Driver` for querying the database, and provide higher
+level and more specified methods.
+
+> All methods per spec can be either async or sync. The respective
+> implementations decide which to implement. The following examples shows async.
+
+### Driver API
+
+The `Driver` provides the low level connection to a database.
+
+The constructor have the following signature:
 
 ```ts
-const client = new Client(connectionUrl, connectionOptions);
-await client.connect();
+interface DriverConstructor {
+  new (
+    // Can be either/or a string/URL depending on the implementation
+    connectionUrl: string | URL,
+    // Can be required depending on the implementation
+    options?: DriverOptions,
+  ): Driver;
+}
 ```
 
-When a connection is no longer needed, it must be closed by the `close` method.
+- The `connectionUrl` can be either/or a string/URL. This is left up to the
+  database implementations. It can not be a Record, and if aditional connection
+  options have to be passed, it can be done passing it as URL Parameters or
+  using `options.connectionOptions`.
+- The `options` is an object that can be extended by the database
+  implementations. This is where all aditional configuration options are placed.
+  See below for signature.
 
 ```ts
-await client.close();
+type DriverOptions = {
+  connectionOptions?: {};
+  queryOptions?: {};
+};
 ```
 
-The client interface also utilizes the proposed
+- The `connectionOptions` is by spec an empty placeholder that can be extended
+  by the respective implementations. It contains additional configuration for
+  connecting to the database.
+- The `queryOptions` is by spec an empty placeholder that can be extended by the
+  respective implementations. It contains base configurations that will be
+  passed to the queries, and merged with the method level query options. It is
+  up to the database implementations how this should be done. An example of
+  possible configuration is query hooks to transform the query before execution
+  or transform a result such as mapping of types depending on a column.
+- The `DriverOptions` can also be extended to fit the needs of the database
+  implementation.
+
+#### Initialization & Explicit Resource Management
+
+The `Driver` can be initialized normally and also by using explicit resource
+management.
+
+```ts
+const driver = new Driver(connectionUrl, connectionOptions);
+await driver.connect();
+// When a connection is no longer needed, it must be closed by the `close` method.
+await driver.close();
+```
+
+The driver interface also utilizes the proposed
 [Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management)
 to automatically dispose of the connection.
 
 ```ts
-await using client = new Client(connectionUrl, connectionOptions);
-await client.connect();
+await using driver = new Driver(connectionUrl, connectionOptions);
+await driver.connect();
 // no need to close the connection at the end
 ```
 
-The `ClientPool` works in a similar way. The clients can either be eagerly or
-lazily connected when calling the `connect` method. The `PoolClient`s can then
-be acquired when needed.
+#### Properties
+
+The `Driver` implements the following properties:
 
 ```ts
-const pool = new ClientPool(connectionUrl, connectionOptions);
-await pool.connect();
-const client = await pool.acquire(); // returns a PoolClient class (subset of Client interface)
+interface Driver {
+  readonly connectionUrl: string | URL;
+  readonly options: DriverOptions;
+  readonly connected: boolean;
+  connect(): Promise<void> | void;
+  close(): Promise<void> | void;
+  ping(): Promise<void> | void;
+  query(
+    sql: string,
+    params?: ParameterType[] | Record<string, ParameterType>,
+    options?: QueryOptions,
+  ): AsyncGenerator<DriverQueryNext> | Generator<DriverQueryNext>;
+}
 ```
 
-After a client is no longer needed, it must be released back to the pool using
-the `release` method.
+- `connected`: Indicates if the connection has been started with the database.
+- `connect`: Initializes the connection to the database.
+- `close`: Close the connection to the database
+- `ping`: Pings the database connection to check that it's alive, otherwise
+  throws (See [errors](#errors) for more information).
+- `query`: Queries the database. It takes three arguments and returns a
+  Generator
+  - `sql` is the sql string
+  - `params` is the parameters to pass if using variables in the sql string.
+    Depending on the implementation, it can take an array or a record.
+  - `options` is the query options, it will be combined with the query options
+    given to the driver options (if given).
+
+The `ParameterType` depends on the implementation and must at least include
+`string`, but it is recommended that it should cover all primitives as well as
+common objects such as Date.
 
 ```ts
-await client.release();
+// At minimum
+type ParameterType = string;
+
+// Example of well implemented
+type ParameterType =
+  | string
+  | number
+  | bigint
+  | boolean
+  | null
+  | undefined
+  | Date
+  | Uint8Array;
 ```
 
-When the pool is no longer needed, it must be closed by the `close` method. The
-`close` method will close all the connections in the pool.
+Going forward, we will use the following type as a shorthand for the parameter
+argument and the return type.
 
 ```ts
-await client.close();
+type Parameters = ParameterType[] | Record<string, ParameterType>;
+type ReturnValue = unknown;
 ```
 
-Using
-[Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management),
-no manual release or close is needed.
+The `DriverQueryNext` is the result object from the database, it represents a
+returned row.
 
 ```ts
-await using pool = new ClientPool(connectionUrl, connectionOptions);
-await pool.connect();
-await using client = await pool.acquire();
-// no need to release the client at the end
-// no need to close the pool at the end
+export type DriverQueryNext = {
+  columns: string[];
+  values: ReturnValue[];
+  meta: {};
+};
 ```
 
-#### Querying the database
+- `columns` is the column headers in the same order as the values.
+- `values` is the values in the same order as the columns, the type should be
+  defined by the database.
+- `meta` contains additional information regarding the query, such as execution
+  time etc. The content depends on the implementation and the database.
+
+### Client API
+
+The `Client` provides the high level connection to a database.
+
+It follows the same constructor signature as defined for the
+[Driver](#driver-api). However, it is not required to have the same signature
+for the `Driver` and the `Client`, this is left up to the implementations.
+
+The `Client` also shares its use of
+[Explicit Resource Management](#initialization--explicit-resource-management)
+with the `Driver`, and also implements all of the properties from the `Driver`,
+except for `query`.
+
+The `query` property is the only exception as this is a low level method and can
+be accessed using the `driver` property.
+
+#### Properties
+
+```ts
+interface Client extends Queriable, Preparable, Transactionable {
+  ... // other properties defined by the Driver
+  readonly driver: Driver;
+  ... // other properties defined further down
+}
+```
+
+- The `driver` property, contains an instance of the low level driver. The
+  average developer would not need to access this, but it can be useful for
+  advanced usecases.
+
+The driver also contains aditional properties for different usecases
+
+##### Queriable
 
 The client provides the following methods for querying.
+
+```ts
+interface Queriable {
+  execute(
+    sql: string,
+    params?: Parameters,
+    options?: IQueryOptions,
+  ): Promise<number | undefined> | number | undefined;
+  query(
+    sql: string,
+    params?: Parameters,
+    options?: IQueryOptions,
+  ): Promise<ReturnValue[]> | ReturnValue[];
+  queryOne(
+    sql: string,
+    params?: Parameters,
+    options?: IQueryOptions,
+  ): Promise<ReturnValue | undefined> | ReturnValue | undefined;
+  queryMany(
+    sql: string,
+    params?: Parameters,
+    options?: IQueryOptions,
+  ): AsyncGenerator<ReturnValue> | Generator<ReturnValue>;
+  queryArray(
+    sql: string,
+    params?: Parameters,
+    options?: IQueryOptions,
+  ): Promise<ReturnValue[]> | ReturnValue[];
+  queryOneArray(
+    sql: string,
+    params?: Parameters,
+    options?: IQueryOptions,
+  ): Promise<ReturnValue | undefined> | ReturnValue | undefined;
+  queryManyArray(
+    sql: string,
+    params?: Parameters,
+    options?: IQueryOptions,
+  ): AsyncGenerator<ReturnValue> | Generator<ReturnValue>;
+  sql(
+    strings: TemplateStringsArray,
+    ...parameters: ParameterType[] | Record<string, ParameterType>
+  ): Promise<ReturnValue[]> | ReturnValue[];
+  sqlArray(
+    strings: TemplateStringsArray,
+    ...parameters: ParameterType[] | Record<string, ParameterType>
+  ): Promise<ReturnValue[]> | ReturnValue[];
+}
+```
+
+See [Driver Properties](#properties) for the argument descriptions.
 
 - `execute`: Executes a SQL statement
 - `query`: Queries the database and returns an array of object
@@ -306,642 +483,261 @@ The client provides the following methods for querying.
 
 See the [examples](#examples) section for sample usage.
 
-#### Prepared statement
+##### Prepared statement
 
-A prepared statement can also be created with the provided method.
+Transactions implement
+[Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management).
+A prepared statement can be created with the provided method.
+
+```ts
+interface Preparable extends Queriable {
+  prepare(
+    sql: string,
+    options?: QueryOptions,
+  ): Promise<PreparedStatement> | PreparedStatement;
+}
+```
 
 - `prepare`: Returns a `PreparedStatement` class
 
 The `PreparedStatement` class provides a subset of the client methods for
 querying.
 
-- `execute`: Executes a SQL statement
-- `query`: Queries the database and returns an array of object
-- `queryOne`: Queries the database and returns at most one entry as an object
-- `queryMany`: Queries the database with an async generator and yields each
-  entry as an object. This is good for when you want to iterate over a massive
-  amount of rows.
-- `queryArray`: Queries the database and returns an array of arrays
-- `queryOneArray`: Queries the database and returns at most one entry as an
-  array
-- `queryManyArray`: Queries the database with an async generator and yields each
-  entry as an array. This is good for when you want to iterate over a massive
-  amount of rows.
-
-See the [examples](#examples) section for sample usage.
-
-#### Transaction
-
-Transactions are also supported by using the provided methods
-
-- `beginTransaction`: Returns a `Transaction` class that implements the
-  queriable functions, as well as transaction related functions
-- `transaction`: A wrapper function for transactions, handles the logic of
-  beginning, committing and rollback a transaction.
-
-The `Transaction` class provides a subset of the client methods for querying,
-and also provides the `prepare` method.
-
-See the [examples](#examples) section for sample usage.
-
-### Interfaces
-
-The interfaces for each class are specified as follows.
-
-> To see the full specification, take a look at the
-> [code](https://github.com/halvardssm/deno_stdext/tree/feat/sql/sql).
-
 ```ts
 interface PreparedStatement {
-  /**
-   * Deallocate the prepared statement
-   */
+  readonly sql: string;
+  readonly deallocated: boolean;
   deallocate(): Promise<void>;
-
-  /**
-   * Executes the prepared statement
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the number of affected rows if any
-   */
   execute(
-    params?: ParameterType[],
+    params?: Parameters,
     options?: QueryOptions,
-  ): Promise<number | undefined>;
-  /**
-   * Query the database with the prepared statement
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  query<T extends Row<any> = Row<any>>(
-    params?: ParameterType[],
+  ): Promise<number | undefined> | number | undefined;
+  query(
+    params?: Parameters,
     options?: QueryOptions,
-  ): Promise<T[]>;
-  /**
-   * Query the database with the prepared statement, and return at most one row
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an object entry, or undefined if no row is returned
-   */
-  queryOne<T extends Row<any> = Row<any>>(
-    params?: ParameterType[],
+  ): Promise<ReturnValue[]> | ReturnValue[];
+  queryOne(
+    params?: Parameters,
     options?: QueryOptions,
-  ): Promise<T | undefined>;
-  /**
-   * Query the database with the prepared statement, and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  queryMany<T extends Row<any> = Row<any>>(
-    params?: ParameterType[],
+  ): Promise<ReturnValue | undefined> | ReturnValue | undefined;
+  queryMany(
+    params?: Parameters,
     options?: QueryOptions,
-  ): AsyncGenerator<T>;
-  /**
-   * Query the database with the prepared statement
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: ParameterType[],
+  ): AsyncGenerator<ReturnValue> | Generator<ReturnValue>;
+  queryArray(
+    params?: Parameters,
     options?: QueryOptions,
-  ): Promise<T[]>;
-  /**
-   * Query the database with the prepared statement, and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an array entry, or undefined if no row is returned
-   */
-  queryOneArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: ParameterType[],
+  ): Promise<ReturnValue[]> | ReturnValue[];
+  queryOneArray(
+    params?: Parameters,
     options?: QueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database with the prepared statement, and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: ParameterType[],
+  ): Promise<ReturnValue | undefined> | ReturnValue | undefined;
+  queryManyArray(
+    params?: Parameters,
     options?: QueryOptions,
-  ): AsyncGenerator<T>;
+  ): AsyncGenerator<ReturnValue> | Generator<ReturnValue>;
 }
+```
 
-interface Transaction {
-  /**
-   * Commit the transaction
-   */
-  commitTransaction(
-    options?: TransactionOptions["commitTransactionOptions"],
-  ): Promise<void>;
+See [Queriable](#queriable) for the query descriptions.
 
-  /**
-   * Rollback the transaction
-   */
-  rollbackTransaction(
-    options?: TransactionOptions["rollbackTransactionOptions"],
-  ): Promise<void>;
+- `sql` is the sql string for the prepared statement
+- `deallocated` signifies if the prepared statement was dealocated
+- `dealocate` dealocates a prepared statement, once a prepared statement is
+  dealocated, it can no longer be used, and be removed from scope to be GCd.
 
-  /**
-   * Create a save point
-   *
-   * @param name the name of the save point
-   */
-  createSavepoint(name?: string): Promise<void>;
+See the [examples](#examples) section for sample usage.
 
-  /**
-   * Release a save point
-   *
-   * @param name the name of the save point
-   */
-  releaseSavepoint(name?: string): Promise<void>;
+##### Transaction
 
-  /**
-   * Execute a SQL statement
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the number of affected rows if any
-   */
-  execute(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<number | undefined>;
+Transactions implement
+[Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management).
+A transaction can be created with the provided methods.
 
-  /**
-   * Query the database
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  query<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T[]>;
-
-  /**
-   * Query the database and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an object entry, or undefined if no row is returned
-   */
-  queryOne<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  queryMany<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): AsyncGenerator<T>;
-
-  /**
-   * Query the database
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T[]>;
-
-  /**
-   * Query the database and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an array entry, or undefined if no row is returned
-   */
-  queryOneArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): AsyncGenerator<T>;
-
-  /**
-   * Query the database using tagged template
-   *
-   * @returns the rows returned by the query as object entries
-   */
-  sql<T extends Row<any> = Row<any>>(
-    strings: TemplateStringsArray,
-    ...parameters: ParameterType[]
-  ): Promise<T[]>;
-
-  /**
-   * Query the database using tagged template
-   *
-   * @returns the rows returned by the query as array entries
-   */
-  sqlArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    strings: TemplateStringsArray,
-    ...parameters: ParameterType[]
-  ): Promise<T[]>;
-
-  /**
-   * Create a prepared statement that can be executed multiple times.
-   * This is useful when you want to execute the same SQL statement multiple times with different parameters.
-   *
-   * @param sql the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns a prepared statement
-   */
-  prepare(sql: string, options?: QueryOptions): PreparedStatement;
+```ts
+interface Transactionable {
+  beginTransaction(
+    options?: TransactionOption,
+  ): Promise<Transaction> | Transaction;
+  transaction(
+    fn: (t: Transaction) => Promise<ReturnValue> | ReturnValue,
+    options?: TransactionOption,
+  ): Promise<ReturnValue> | ReturnValue;
 }
+```
 
-interface Client {
+- `beginTransaction` Returns a `Transaction` class
+- `transaction` A wrapper function for transactions, handles the logic of
+  beginning, committing and rollback a transaction.
+
+The `TransactionOptions` is defined here as an empty placeholder, and
+implementation depends on the database.
+
+The `Transaction` class provides the client methods for `querying`, and also
+provides the `prepare` method.
+
+```ts
+interface Transaction extends Queriable, Preparable {
+  ... // other Queriable and Preparable properties
+  readonly inTransaction: boolean;
+  commitTransaction(options?: TransactionOptions): Promise<void> | void;
+  rollbackTransaction(options?: TransactionOptions): Promise<void> | void;
+  createSavepoint(name?: string, options?: TransactionOptions): Promise<void> | void;
+  releaseSavepoint(name?: string, options?: TransactionOptions): Promise<void> | void;
+}
+```
+
+See the [examples](#examples) section for sample usage.
+
+#### Pool Client
+
+There are two types of clients, a `Client` used for a single connection, and a
+`ClientPool` for when a pool of clients (`PoolClient`, a subset of `Client`) is
+needed. Both the `Client` and the `ClientPool` provide the same base signature,
+although the `options` argument differs slightly (see
+[Properties](#properties-2)).
+
+The `PoolClients` in a `ClientPool` can either be eagerly or lazily connected
+when calling the `connect` method. The `PoolClient`s can then be acquired when
+needed.
+
+```ts
+const pool = new ClientPool(connectionUrl, connectionOptions);
+await pool.connect();
+const client = await pool.acquire(); // returns a PoolClient class
+```
+
+After a `PoolClient` is no longer needed, it must be released back to the pool
+using the `release` method.
+
+```ts
+await client.release();
+```
+
+> A `PoolClient` can also be destroyed (disconnected and removed) by using the
+> `remove` method.
+
+When the pool is no longer needed, it must be closed by the `close` method. The
+`close` method will close all the connections in the pool.
+
+```ts
+await client.close();
+```
+
+Using
+[Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management),
+no manual release or close is needed.
+
+```ts
+await using pool = new ClientPool(connectionUrl, connectionOptions);
+await pool.connect();
+await using client = await pool.acquire();
+// no need to release the client at the end
+// no need to close the pool at the end
+```
+
+##### Properties
+
+The `ClientPool` follows the same constructor signature as defined for the
+[Client](#client-api) and [Driver](#driver-api), although the `options` argument
+is extended. The same options object that is used for a `ClientPool` should be
+possible to use with a `Client`, the reverse is not required, but would allow
+for better develoment experience.
+
+```ts
+export interface Options {
+  ...  // client options defined above
+  poolOptions: {
+    lazyInitialization?: boolean;
+    maxSize?: number;
+  };
+}
+```
+
+- `lazyInitialization` will enable lazily initialization of connections. This
+  means that connections will only be created if there are no idle connections
+  available when acquiring a connection, and max pool size has not been reached.
+- `maxSize` sets the maximum amount of pool clients.
+
+```ts
+interface ClientPool extends Queriable, Preparable, Transactionable {
+  ... // other Queriable, Preparable and Transactionable properties that will automatically allocate a PoolClient
   /**
    * Create a connection to the database
    */
-  connect(): Promise<void>;
+  connect(): Promise<void>|void;
 
   /**
    * Close the connection to the database
    */
-  close(): Promise<void>;
-
-  /**
-   * Execute a SQL statement
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the number of affected rows if any
-   */
-  execute(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<number | undefined>;
-
-  /**
-   * Query the database
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  query<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T[]>;
-
-  /**
-   * Query the database and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an object entry, or undefined if no row is returned
-   */
-  queryOne<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  queryMany<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): AsyncGenerator<T>;
-
-  /**
-   * Query the database
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T[]>;
-
-  /**
-   * Query the database and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an array entry, or undefined if no row is returned
-   */
-  queryOneArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): AsyncGenerator<T>;
-
-  /**
-   * Query the database using tagged template
-   *
-   * @returns the rows returned by the query as object entries
-   */
-  sql<T extends Row<any> = Row<any>>(
-    strings: TemplateStringsArray,
-    ...parameters: ParameterType[]
-  ): Promise<T[]>;
-
-  /**
-   * Query the database using tagged template
-   *
-   * @returns the rows returned by the query as array entries
-   */
-  sqlArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    strings: TemplateStringsArray,
-    ...parameters: ParameterType[]
-  ): Promise<T[]>;
-
-  /**
-   * Create a prepared statement that can be executed multiple times.
-   * This is useful when you want to execute the same SQL statement multiple times with different parameters.
-   *
-   * @param sql the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns a prepared statement
-   */
-  prepare(sql: string, options?: QueryOptions): PreparedStatement;
-
-  /**
-   * Starts a transaction
-   */
-  beginTransaction(
-    options?: TransactionOptions["beginTransactionOptions"],
-  ): Promise<Transaction>;
-
-  /**
-   * Transaction wrapper
-   *
-   * Automatically begins a transaction, executes the callback function, and commits the transaction.
-   *
-   * If the callback function throws an error, the transaction will be rolled back and the error will be rethrown.
-   * If the callback function returns successfully, the transaction will be committed.
-   *
-   * @param fn callback function to be executed within a transaction
-   * @returns the result of the callback function
-   */
-  transaction<T>(fn: (t: Transaction) => Promise<T>): Promise<T>;
-}
-
-interface PoolClient {
-  /**
-   * Release the connection to the pool
-   */
-  release(): Promise<void>;
-
-  /**
-   * Execute a SQL statement
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the number of affected rows if any
-   */
-  execute(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<number | undefined>;
-
-  /**
-   * Query the database
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  query<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T[]>;
-
-  /**
-   * Query the database and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an object entry, or undefined if no row is returned
-   */
-  queryOne<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  queryMany<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): AsyncGenerator<T>;
-
-  /**
-   * Query the database
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T[]>;
-
-  /**
-   * Query the database and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an array entry, or undefined if no row is returned
-   */
-  queryOneArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: ParameterType[],
-    options?: QueryOptions,
-  ): AsyncGenerator<T>;
-
-  /**
-   * Query the database using tagged template
-   *
-   * @returns the rows returned by the query as object entries
-   */
-  sql<T extends Row<any> = Row<any>>(
-    strings: TemplateStringsArray,
-    ...parameters: ParameterType[]
-  ): Promise<T[]>;
-
-  /**
-   * Query the database using tagged template
-   *
-   * @returns the rows returned by the query as array entries
-   */
-  sqlArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    strings: TemplateStringsArray,
-    ...parameters: ParameterType[]
-  ): Promise<T[]>;
-
-  /**
-   * Create a prepared statement that can be executed multiple times.
-   * This is useful when you want to execute the same SQL statement multiple times with different parameters.
-   *
-   * @param sql the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns a prepared statement
-   */
-  prepare(sql: string, options?: QueryOptions): PreparedStatement;
-
-  /**
-   * Starts a transaction
-   */
-  beginTransaction(
-    options?: TransactionOptions["beginTransactionOptions"],
-  ): Promise<Transaction>;
-
-  /**
-   * Transaction wrapper
-   *
-   * Automatically begins a transaction, executes the callback function, and commits the transaction.
-   *
-   * If the callback function throws an error, the transaction will be rolled back and the error will be rethrown.
-   * If the callback function returns successfully, the transaction will be committed.
-   *
-   * @param fn callback function to be executed within a transaction
-   * @returns the result of the callback function
-   */
-  transaction<T>(fn: (t: Transaction) => Promise<T>): Promise<T>;
-}
-
-interface ClientPool {
-  /**
-   * Create a connection to the database
-   */
-  connect(): Promise<void>;
-
-  /**
-   * Close the connection to the database
-   */
-  close(): Promise<void>;
+  close(force?: boolean | number): Promise<void>|void;
 
   /**
    * Acquire a connection from the pool
    */
-  acquire(): Promise<PoolClient>;
+  acquire(): Promise<PoolClient>|PoolClient;
+  remove(client:PoolClient):Promise<void>|void
 }
 ```
 
-> To see the full specification, take a look at the
-> [code](https://github.com/halvardssm/deno_stdext/tree/feat/sql/sql).
+> The `PoolClient` should extend the query methods of the `Client` and
+> facilitate `aquire` and `release` behind the scenes when calling them.
+
+- `connect` establishes a connection to the database for the PoolClients. If
+  `lazyInitialization` is set to true, no connections will be established until
+  aquired.
+- `close` waits for all clients to be released (will not allow for new ones to
+  be created) and closes all connections to the database. If the `force`
+  argument is passed as true, the connections will imediately be closed without
+  waiting. If the `force` argument is passed as a number, it will wait up to the
+  number in milliseconds for it to be released or force close the connections.
+
+```ts
+interface PoolClient extends Queriable, Preparable, Transactionable {
+  ... // other Queriable, Preparable and Transactionable properties
+  readonly disposed: boolean;
+  release(): Promise<void> | void;
+  remove(): Promise<void> | void
+}
+```
+
+- `disposed` indicates if the pool client is released or removed
+- `release` releases the connection back to the pool
+- `remove` closes the connection and removes the client from the pool
+
+## Implementation
+
+> This section is for implementing the interface for database drivers. For
+> general usage, read the [specification](#specification) section or look at the
+> [examples](#examples).
+
+To be fully compliant with the specs, you will need to implement the following
+classes for your database driver:
+
+- `Connection`: This represents the connection to the database. This should
+  preferably only contain the functionality of containing a connection, and
+  provide a minimum set of query methods to be used to query the database
+- `PreparedStatement`: This represents a prepared statement.
+- `Transaction`: This represents a transaction.
+- `Client`: This represents a database client
+- `ClientPool`: This represents a pool of clients
+- `PoolClient`: This represents a client to be provided by a pool
+
+It is also however advisable to create additional helper classes for easier
+inheritance (see the [inheritance graph](#inheritance-graph)).
+
+### Inheritance graph
+
+Here is an overview of the inheritance and flow of the different interfaces. In
+most cases, these are the classes and the inheritance graph that should be
+implemented.
+
+![inheritance flow](./_assets/inheritance_flowchart.jpg)
 
 ## Examples
+
+> All methods per spec can be either async or sync. The respective
+> implementations decide which to implement. The following examples shows async.
 
 Async dispose
 
@@ -1067,96 +863,6 @@ const prepared = db.prepare("SOME PREPARED STATEMENT");
 await prepared.query([...params]);
 console.log(res);
 // [{ col1: "some value" }]
-```
-
-## Implementation
-
-> This section is for implementing the interface for database drivers. For
-> general usage, read the [usage](#usage) section.
-
-To be fully compliant with the specs, you will need to implement the following
-classes for your database driver:
-
-- `Connection`: This represents the connection to the database. This should
-  preferably only contain the functionality of containing a connection, and
-  provide a minimum set of query methods to be used to query the database
-- `PreparedStatement`: This represents a prepared statement.
-- `Transaction`: This represents a transaction.
-- `Client`: This represents a database client
-- `ClientPool`: This represents a pool of clients
-- `PoolClient`: This represents a client to be provided by a pool
-
-It is also however advisable to create additional helper classes for easier
-inheritance (see the [inheritance graph](#inheritance-graph)).
-
-### Inheritance graph
-
-Here is an overview of the inheritance and flow of the different interfaces. In
-most cases, these are the classes and the inheritance graph that should be
-implemented.
-
-![inheritance flow](./_assets/inheritance_flowchart.jpg)
-
-### Constructor Signature
-
-The constructor must follow a strict signature.
-
-The constructor for both the Client and the ClientPool follows the same
-signature:
-
-1. `connectionUrl`: string | URL
-2. `options`?: ConnectionOptions & QueryOptions
-
-As `ConnectionOptions` and `QueryOptions` can be extended, the options can be
-used to customize the settings, thus having a standard 2 argument signature of
-the constructor.
-
-> The current way to specify a constructor using interfaces in TS, is to use a
-> combination of `implements` and `satisfies`. This will be updated if anything
-> changes.
-
-#### Client
-
-The Client must have a constructor following the signature specified by
-`SqlClientConstructor`.
-
-```ts
-export const Client = class extends Transactionable implements SqlClient<...> { // Transactionable is a class implementing `SqlTransactionable`
-  ...
-  // The constructor now has to satisfy `SqlClientConstructor`
-  constructor(
-	connectionUrl: string | URL,
-	options: ConnectionOptions & QueryOptions = {},
-  ) {
-	...
-  }
-  ...
-} satisfies SqlClientConstructor<...>;
-
-// We need to also export the instance type of the client
-export type Client = InstanceType<typeof Client>;
-```
-
-#### ClientPool
-
-The ClientPool must have a constructor following the signature specified by
-`SqlClientPoolConstructor`.
-
-```ts
-const ClientPool = class extends Transactionable implements SqlClientPool<...> { // Transactionable is a class implementing `SqlTransactionable`
-  ...
-  // The constructor now has to satisfy `SqlClientPoolConstructor`
-  constructor(
-	connectionUrl: string | URL,
-	options: ConnectionOptions & QueryOptions = {},
-  ) {
-	...
-  }
-  ...
-} satisfies SqlClientPoolConstructor<...>;
-
-// We need to also export the instance type of the client pool
-export type ClientPool = InstanceType<typeof ClientPool>;
 ```
 
 ## Acknowledgment
