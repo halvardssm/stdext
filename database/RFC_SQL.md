@@ -43,7 +43,8 @@ The motivation for this RFC comes from creating applications and scripts using
 the database drivers available. Comparing the signatures of the different
 database drivers, we see that they vary greatly and have little to no coherent
 usage. Thus the motivation is to create a coherent base interface (that can be
-extended) that can be implemented across database drivers.
+extended, see [here](#extending-the-interfaces)) that can be implemented across
+database drivers.
 
 Below there is a comparison of how to execute a query in the different drivers
 taken from the respective readmes.
@@ -733,6 +734,23 @@ most cases, these are the classes and the inheritance graph that should be
 implemented.
 
 ![inheritance flow](./_assets/inheritance_flowchart.jpg)
+
+### Extending the interfaces
+
+As these interfaces are meant as a base, it is intended to be extended upon with
+methods respective to each database. As these methods are not defined in the
+specs, the specs provide the following guidance in method signature.
+
+In general we follow
+[Deno's Style Guide for methods](https://docs.deno.com/runtime/contributing/style_guide/#exported-functions%3A-max-2-args%2C-put-the-rest-into-an-options-object)
+
+> 1. A function takes 0-2 required arguments, plus (if necessary) an options
+>    object (so max 3 total).
+>    - A function could for example also take only one argument which is an
+>      options object.
+> 2. Optional parameters should generally go into the options object.
+> 3. The 'options' argument is the only argument that is a `Record` type
+>    `Object`.
 
 ## Examples
 
