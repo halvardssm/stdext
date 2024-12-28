@@ -11,6 +11,8 @@ hashing.
 
 The hash module contains helpers and implementations for password hashing.
 
+> The hash methods are written in Rust and compiled to WASM.
+
 The following algorithms are provided:
 
 - Argon2
@@ -21,6 +23,20 @@ The following algorithms are provided:
 import { hash, verify } from "@stdext/crypto/hash";
 const h = hash("argon2", "password");
 verify("argon2", "password", h);
+
+// With options
+
+const h = hash({ name: "argon2", algorithm: "argon2i" }, "password");
+verify({ name: AlgorithmName.Argon2, algorithm: "argon2i" }, "password", h);
+```
+
+Hashes can also be imported individually, although this should not be needed if
+tree shaking is available in your build process.
+
+```ts
+import { hash, verify } from "@stdext/crypto/hash/argon2";
+const h = hash("password", options);
+verify("password", h, options);
 ```
 
 ### HOTP (HMAC One-Time Password)

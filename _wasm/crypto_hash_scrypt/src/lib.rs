@@ -76,7 +76,8 @@ extern "C" {
 
 fn get_parsed_options(i: ScryptOptions) -> Params {
   let parsed_options: WasmScryptOptionsRaw =
-    serde_wasm_bindgen::from_value(i.into()).unwrap_throw();
+    serde_wasm_bindgen::from_value(i.into())
+      .expect_throw("Options could not be parsed");
 
   Params::new(
     parsed_options.log_n.unwrap_or(Params::RECOMMENDED_LOG_N),
@@ -84,25 +85,31 @@ fn get_parsed_options(i: ScryptOptions) -> Params {
     parsed_options.parallelism.unwrap_or(Params::RECOMMENDED_P),
     parsed_options.key_lenght.unwrap_or(Params::RECOMMENDED_LEN),
   )
-  .expect("invalid parameters")
+  .expect_throw("Failed to parse parameters")
 }
 
 /// Hash a password using Scrypt
 #[wasm_bindgen]
-pub fn hash(data: String, options: ScryptOptions) -> String {
+pub fn hash(data: String, options: ScryptOptions) -> Result<String, JsError> {
   let parsed_options = get_parsed_options(options);
   let data_bytes = data.as_bytes();
   let salt = SaltString::generate(&mut OsRng);
   let hasher = Scrypt
     .hash_password_customized(data_bytes, None, None, parsed_options, &salt)
-    .expect_throw("failed to hash password");
-  hasher.to_string()
+    .expect_throw("Failed to generate hash");
+  Ok(hasher.to_string())
 }
 
 /// Verify a password using Scrypt
 #[wasm_bindgen]
-pub fn verify(data: String, hash: String, _options: ScryptOptions) -> bool {
+pub fn verify(
+  data: String,
+  hash: String,
+  _options: ScryptOptions,
+) -> Result<bool, JsError> {
   let data_bytes = data.as_bytes();
-  let parsed_hash = PasswordHash::new(&hash).expect("failed to parse hash");
-  Scrypt.verify_password(data_bytes, &parsed_hash).is_ok()
+  let parsed_hash = PasswordHash::new(&hash)
+    .expect_throw("Failed to parse hash, invalid hash provided");
+  let is_ok = Scrypt.verify_password(data_bytes, &parsed_hash).is_ok();
+  Ok(is_ok)
 }
