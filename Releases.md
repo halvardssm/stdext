@@ -7,6 +7,7 @@
 #### @stdext/crypto 0.0.6 (patch)
 
 - feat(crypto): updated readme
+- fix(crypto): Improved throw messages
 
 #### @stdext/encoding 0.0.6 (patch)
 
