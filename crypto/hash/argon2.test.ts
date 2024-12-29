@@ -1,4 +1,4 @@
-import { assert, assertMatch } from "@std/assert";
+import { assert, assertFalse, assertMatch, assertThrows } from "@std/assert";
 import { type Argon2Options, hash, verify } from "./argon2.ts";
 
 Deno.test("hash() and verify() with default arguments", () => {
@@ -41,4 +41,22 @@ Deno.test("hash() and verify() with all options", () => {
   const h = hash("password", o);
   assertMatch(h, /^\$argon2id\$v=19\$m=10000,t=3,p=2\$/);
   assert(verify("password", h, o));
+});
+
+Deno.test("verify with invalid hash", () => {
+  assertThrows(
+    () => verify("password", "foo", {}),
+    Error,
+    "Failed to parse hash, invalid hash provided",
+  );
+});
+
+Deno.test("verify with invalid hash", () => {
+  assertFalse(
+    verify(
+      "password",
+      "$argon2id$v=19$m=4096,t=3,p=1$saRQ61U1SwiUeZRzDEUbcQ$t3LzT0gU5UKQKzZmPUv1XK/BTnOfvSpWyoZ4Fh/GHKg",
+      {},
+    ),
+  );
 });

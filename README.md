@@ -44,6 +44,8 @@ console.log(dump(buffer));
 
 ## Packages
 
+- [assert](https://jsr.io/@stdext/assert): The assert package, contains
+  validators and assertions
 - [crypto](https://jsr.io/@stdext/crypto): The crypto package contains utility
   for crypto and hashing
 - [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
