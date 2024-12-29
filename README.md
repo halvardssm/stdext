@@ -111,6 +111,17 @@ feedback and approval, open a PR linking to the issue.
 Code that is copied from other places, must be credited and is only allowed if
 the license allows for it.
 
+## Workflows
+
+To bump versions and publish the packages to JSR, do the following:
+
+1. Trigger the manual GitHub action
+   [version bump](https://github.com/halvardssm/stdext/actions/workflows/version_bump.yml).
+2. Check the created PR, verify the changes, and merge.
+3. Create a [new release](https://github.com/halvardssm/stdext/releases/new),
+   with the tag name `release-[date]` (e.g. `release-2024.12.29`) and auto
+   generate release notes.
+
 ## Acknowledgments
 
 This repo is an extension of the Deno STD and is therefore heavily based on it.
