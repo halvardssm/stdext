@@ -1,33 +1,8 @@
 ### 2024.12.29
 
-#### @stdext/assert 0.0.2 (patch)
+#### @stdext/crypto 0.0.7 (patch)
 
-- feat(assert): updated readme
-
-#### @stdext/crypto 0.0.6 (patch)
-
-- feat(crypto): updated readme
 - fix(crypto): Improved throw messages
-
-#### @stdext/encoding 0.0.6 (patch)
-
-- feat(encoding): updated readme
-
-#### @stdext/http 0.0.6 (patch)
-
-- feat(http): updated readme
-
-#### @stdext/json 0.0.2 (patch)
-
-- feat(json): updated readme
-
-#### @stdext/lexer 0.0.2 (patch)
-
-- feat(lexer): updated readme
-
-#### @stdext/types 0.0.2 (patch)
-
-- feat(types): updated readme
 
 ### 2024.10.15
 
