@@ -1,3 +1,33 @@
+### 2024.12.29a
+
+#### @stdext/assert 0.1.0 (minor)
+
+- BREAKING(*): bump all versions to minor 1.0
+
+#### @stdext/crypto 0.1.0 (minor)
+
+- BREAKING(*): bump all versions to minor 1.0
+
+#### @stdext/encoding 0.1.0 (minor)
+
+- BREAKING(*): bump all versions to minor 1.0
+
+#### @stdext/http 0.1.0 (minor)
+
+- BREAKING(*): bump all versions to minor 1.0
+
+#### @stdext/json 0.1.0 (minor)
+
+- BREAKING(*): bump all versions to minor 1.0
+
+#### @stdext/lexer 0.1.0 (minor)
+
+- BREAKING(*): bump all versions to minor 1.0
+
+#### @stdext/types 0.1.0 (minor)
+
+- BREAKING(*): bump all versions to minor 1.0
+
 ### 2024.12.29
 
 #### @stdext/crypto 0.0.7 (patch)
