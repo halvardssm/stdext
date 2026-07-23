@@ -1,0 +1,8 @@
+{
+  "version": "0.1.0",
+  "name": "@stdext/dom",
+  "exports": {
+    ".": "./mod.ts",
+    "./domparser": "./domparser.ts"
+  }
+}

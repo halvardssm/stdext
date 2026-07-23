@@ -4,6 +4,7 @@ members = [
   "crypto_hash_argon2",
   "crypto_hash_bcrypt",
   "crypto_hash_scrypt",
+  "dom_domparser",
   "json_jsonpath"
 ]
 
@@ -20,6 +21,7 @@ serde_json_path = "0.6"
 getrandom = { version = "0.2", features = ["js"] }
 rand_core = { version = "0.6", features = ["std"] }
 js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Document", "DomParser", "Node", "Element", "HtmlElement", "Text", "Comment", "DocumentFragment", "DocumentType", "Attr", "NamedNodeMap", "NodeList", "HtmlCollection", "DomTokenList", "HtmlHeadElement", "HtmlBodyElement", "HtmlTitleElement", "HtmlMetaElement", "HtmlLinkElement", "HtmlScriptElement", "HtmlStyleElement"] }
 argon2 = "0.5"
 bcrypt = "0.15"
 scrypt = "0.11"

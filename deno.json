@@ -8,6 +8,7 @@
     "@std/toml": "jsr:@std/toml@^1",
     "@stdext/assert": "jsr:@stdext/assert@^0",
     "@stdext/crypto": "jsr:@stdext/crypto@^0",
+    "@stdext/dom": "jsr:@stdext/dom@^0",
     "@stdext/encoding": "jsr:@stdext/encoding@^0",
     "@stdext/http": "jsr:@stdext/http@^0",
     "@stdext/json": "jsr:@stdext/json@^0",
@@ -28,6 +29,7 @@
   "workspace": [
     "./assert",
     "./crypto",
+    "./dom",
     "./encoding",
     "./http",
     "./json",

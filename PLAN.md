@@ -9,27 +9,28 @@ Add DOMParser API implementation in a new `./dom` namespace with Rust/WASM, foll
 - [x] Explore existing repository structure (json namespace, wasm build system)
 - [x] Understand the pattern: Rust crate in _wasm/ -> generates WASM -> TypeScript wrapper
 - [x] Create PLAN.md with all steps
-- [ ] Create and checkout branch `vibe/domparser`
+- [x] Create and checkout branch `vibe/domparser`
+- [x] Push initial PLAN.md commit
 
 ### Phase 2: Repository Structure
-- [ ] Create `dom/` directory
-- [ ] Create `dom/deno.json` package configuration
-- [ ] Create `dom/mod.ts` exports
-- [ ] Create `dom/README.md` documentation
-- [ ] Add `dom` to root `deno.json` workspace
-- [ ] Add `@stdext/dom` to root `deno.json` imports
+- [x] Create `dom/` directory
+- [x] Create `dom/deno.json` package configuration
+- [x] Create `dom/mod.ts` exports
+- [x] Create `dom/README.md` documentation
+- [x] Add `dom` to root `deno.json` workspace
+- [x] Add `@stdext/dom` to root `deno.json` imports
 
 ### Phase 3: Rust Implementation
-- [ ] Create `_wasm/dom_domparser/` directory
-- [ ] Create `_wasm/dom_domparser/Cargo.toml`
-- [ ] Create `_wasm/dom_domparser/src/lib.rs` with DOMParser implementation
-- [ ] Add `dom_domparser` to `_wasm/Cargo.toml` workspace members
-- [ ] Add required dependencies to `_wasm/Cargo.toml` (e.g., wasm-bindgen, js-sys for DOM types)
+- [x] Create `_wasm/dom_domparser/` directory
+- [x] Create `_wasm/dom_domparser/Cargo.toml`
+- [x] Create `_wasm/dom_domparser/src/lib.rs` with DOMParser implementation
+- [x] Add `dom_domparser` to `_wasm/Cargo.toml` workspace members
+- [x] Add required dependencies to `_wasm/Cargo.toml` (web-sys, js-sys)
 
 ### Phase 4: TypeScript Wrapper
-- [ ] Create `dom/domparser.ts` TypeScript wrapper
-- [ ] Import and re-export from generated WASM bindings
-- [ ] Add proper TypeScript types for DOMParser API
+- [x] Create `dom/domparser.ts` TypeScript wrapper
+- [x] Import and re-export from generated WASM bindings
+- [x] Add proper TypeScript types for DOMParser API
 
 ### Phase 5: Testing
 - [ ] Create `dom/domparser.test.ts` with tests
@@ -43,9 +44,8 @@ Add DOMParser API implementation in a new `./dom` namespace with Rust/WASM, foll
 - [ ] Run `deno task test` for dom package
 
 ### Phase 7: Commits
-- [ ] Commit initial setup (PLAN.md, branch, directory structure)
-- [ ] Commit Rust implementation
-- [ ] Commit TypeScript wrapper
+- [x] Commit initial setup (PLAN.md, branch, directory structure)
+- [ ] Commit Rust implementation & TypeScript wrapper
 - [ ] Commit tests
 - [ ] Commit build verification
 
@@ -73,18 +73,8 @@ Document parseFromString(string, contentType)
 
 ## Rust Crate Considerations
 
-Potential crates for parsing:
-- `html5ever` - HTML parser
-- `xml-rs` or `quick-xml` - XML parsers
-- `wasm-bindgen` - for JS interop
-- `js-sys` - for DOM types (Document, Node, etc.)
-
-However, since we're in WASM and need to return a Document that works in JS, we have two approaches:
-1. Use `js-sys` to create actual browser DOM Document objects (only works in browser)
-2. Create a custom Document-like structure that can be serialized to JS
-
-Given the project supports Node, Deno, Edge runtimes and Browser, approach #2 is more portable.
+Using web-sys crate which provides bindings to the browser's native DOMParser. This works in browser environments and provides direct access to the DOM API.
 
 ## Implementation Strategy
 
-We'll create a minimal Document-like structure in Rust that can be serialized to JS objects, representing the parsed DOM tree.
+The Rust implementation uses web-sys to wrap the browser's native DOMParser. The TypeScript wrapper provides a clean API that matches the web standard.
