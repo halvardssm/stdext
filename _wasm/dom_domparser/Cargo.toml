@@ -10,5 +10,6 @@ crate-type = ["cdylib"]
 wasm-bindgen.workspace = true
 serde.workspace = true
 serde-wasm-bindgen.workspace = true
-js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Document", "DomParser", "Node", "Element", "HtmlElement", "Text", "Comment", "DocumentFragment", "DocumentType", "Attr", "NamedNodeMap", "NodeList", "HtmlCollection", "DomTokenList", "HtmlHeadElement", "HtmlBodyElement", "HtmlTitleElement", "HtmlMetaElement", "HtmlLinkElement", "HtmlScriptElement", "HtmlStyleElement"] }
+html5ever = "0.26"
+markup5ever_rcdom = "0.2"
+tendril = "0.4"
