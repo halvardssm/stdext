@@ -173,12 +173,6 @@ const JsDOMParserFinalization = (typeof FinalizationRegistry === 'undefined')
     : new FinalizationRegistry(ptr => wasm.__wbg_jsdomparser_free(ptr >>> 0));
 /**
 * DOMParser provides the ability to parse XML or HTML source code from a string into a DOM Document.
-*
-* @example
-* ```ts
-* const parser = new DOMParser();
-* const doc = parser.parseFromString("<html><body>Hello</body></html>", "text/html");
-* ```
 */
 export class JsDOMParser {
 
@@ -195,10 +189,6 @@ export class JsDOMParser {
     }
     /**
     * Parses a string into a Document.
-    *
-    * @param string - The string to parse
-    * @param content_type - The content type (e.g., "text/html", "text/xml", "application/xml")
-    * @returns A Document object serialized as JSON, or throws an error
     * @param {string} string
     * @param {string} content_type
     * @returns {any}
@@ -225,6 +215,10 @@ const imports = {
     __wbindgen_placeholder__: {
         __wbindgen_string_new: function(arg0, arg1) {
             const ret = getStringFromWasm0(arg0, arg1);
+            return addHeapObject(ret);
+        },
+        __wbindgen_number_new: function(arg0) {
+            const ret = arg0;
             return addHeapObject(ret);
         },
         __wbg_set_20cbc34131e76824: function(arg0, arg1, arg2) {
