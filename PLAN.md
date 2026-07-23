@@ -25,7 +25,7 @@ Add DOMParser API implementation in a new `./dom` namespace with Rust/WASM, foll
 - [x] Create `_wasm/dom_domparser/Cargo.toml`
 - [x] Create `_wasm/dom_domparser/src/lib.rs` with DOMParser implementation
 - [x] Add `dom_domparser` to `_wasm/Cargo.toml` workspace members
-- [x] Add required dependencies to `_wasm/Cargo.toml` (web-sys, js-sys)
+- [x] Add required dependencies to `_wasm/Cargo.toml` (html5ever, markup5ever_rcdom, tendril)
 
 ### Phase 4: TypeScript Wrapper
 - [x] Create `dom/domparser.ts` TypeScript wrapper
@@ -33,20 +33,21 @@ Add DOMParser API implementation in a new `./dom` namespace with Rust/WASM, foll
 - [x] Add proper TypeScript types for DOMParser API
 
 ### Phase 5: Testing
-- [ ] Create `dom/domparser.test.ts` with tests
-- [ ] Test basic parseFromString functionality
-- [ ] Test error handling
+- [x] Create `dom/domparser.test.ts` with tests
+- [x] Test basic parseFromString functionality
+- [x] Test error handling
 
 ### Phase 6: Build & Verify
-- [ ] Run `deno task build:wasm` to generate WASM files
-- [ ] Verify generated files appear in `dom/_wasm/`
-- [ ] Run `deno task check` to verify TypeScript
-- [ ] Run `deno task test` for dom package
+- [x] Build WASM using cargo
+- [x] Generate bindings using wasm-bindgen
+- [x] Verify generated files appear in `dom/_wasm/`
+- [ ] Run `deno task check` to verify TypeScript (requires deno)
+- [ ] Run `deno task test` for dom package (requires deno)
 
 ### Phase 7: Commits
 - [x] Commit initial setup (PLAN.md, branch, directory structure)
-- [ ] Commit Rust implementation & TypeScript wrapper
-- [ ] Commit tests
+- [x] Commit Rust implementation & TypeScript wrapper
+- [ ] Commit tests and WASM build
 - [ ] Commit build verification
 
 ## DOMParser API Spec (from MDN)
@@ -73,8 +74,16 @@ Document parseFromString(string, contentType)
 
 ## Rust Crate Considerations
 
-Using web-sys crate which provides bindings to the browser's native DOMParser. This works in browser environments and provides direct access to the DOM API.
+Using html5ever and markup5ever_rcdom crates for HTML parsing. The implementation parses HTML/XML strings into a custom serializable Document structure that can be used across all runtimes (Node, Deno, Browser).
 
 ## Implementation Strategy
 
-The Rust implementation uses web-sys to wrap the browser's native DOMParser. The TypeScript wrapper provides a clean API that matches the web standard.
+The Rust implementation uses html5ever to parse HTML content into an RcDom, then converts it to a custom JsDocument/JsNode structure that can be serialized to JSON and returned to JavaScript. This approach is portable across all supported runtimes.
+
+## Current Status
+
+- Rust implementation complete with html5ever parser
+- TypeScript wrapper complete
+- WASM generated and bindings created
+- Tests written but not yet run (deno not available in build environment)
+- Need to verify with actual deno runtime
