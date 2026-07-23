@@ -181,6 +181,7 @@ version = "0.0.0"
 dependencies = [
  "html5ever",
  "markup5ever_rcdom",
+ "quick-xml",
  "serde",
  "serde-wasm-bindgen",
  "tendril",
@@ -494,6 +495,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d1597b0c024618f09a9c3b8655b7e430397a36d23fdafec26d6965e9eec3eba"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
+dependencies = [
+ "memchr",
+ "serde",
 ]
 
 [[package]]

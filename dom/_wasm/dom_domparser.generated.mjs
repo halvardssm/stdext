@@ -197,16 +197,16 @@ export class JsDOMParser {
     * Parses a string into a Document.
     *
     * @param string - The string to parse
-    * @param content_type - The content type (e.g., "text/html", "text/xml")
-    * @returns A Document object serialized as JSON
+    * @param content_type - The content type (e.g., "text/html", "text/xml", "application/xml")
+    * @returns A Document object serialized as JSON, or throws an error
     * @param {string} string
-    * @param {string} _content_type
+    * @param {string} content_type
     * @returns {any}
     */
-    parse_from_string(string, _content_type) {
+    parse_from_string(string, content_type) {
         const ptr0 = passStringToWasm0(string, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(_content_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr1 = passStringToWasm0(content_type, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
         const ret = wasm.jsdomparser_parse_from_string(this.__wbg_ptr, ptr0, len0, ptr1, len1);
         return takeObject(ret);

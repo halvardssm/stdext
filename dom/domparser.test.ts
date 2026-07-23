@@ -75,3 +75,80 @@ Deno.test("DOMParser - document structure", async () => {
   assertExists(title);
   assertEquals(title.children[0].nodeValue, "Test");
 });
+
+// XML parsing tests
+
+Deno.test("DOMParser - basic XML parsing with text/xml", async () => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString("<root><item>test</item></root>", "text/xml");
+  
+  assertExists(doc.documentElement);
+  assertEquals(doc.documentElement?.nodeName, "root");
+  assertEquals(doc.documentElement?.children.length, 1);
+  assertEquals(doc.documentElement?.children[0].nodeName, "item");
+});
+
+Deno.test("DOMParser - XML parsing with application/xml", async () => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString("<root><item>test</item></root>", "application/xml");
+  
+  assertExists(doc.documentElement);
+  assertEquals(doc.documentElement?.nodeName, "root");
+});
+
+Deno.test("DOMParser - XML with attributes", async () => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString('<root><item id="123" name="test"/></root>', "text/xml");
+  
+  assertExists(doc.documentElement);
+  assertEquals(doc.documentElement?.children.length, 1);
+  const item = doc.documentElement?.children[0];
+  assertEquals(item.nodeName, "item");
+  assertEquals(item.attributes.length, 2);
+  
+  const idAttr = item.attributes.find(([name]) => name === "id");
+  const nameAttr = item.attributes.find(([name]) => name === "name");
+  
+  assertExists(idAttr);
+  assertEquals(idAttr[1], "123");
+  assertExists(nameAttr);
+  assertEquals(nameAttr[1], "test");
+});
+
+Deno.test("DOMParser - XML with nested elements", async () => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString("<root><parent><child>value</child></parent></root>", "text/xml");
+  
+  assertExists(doc.documentElement);
+  assertEquals(doc.documentElement?.nodeName, "root");
+  assertEquals(doc.documentElement?.children.length, 1);
+  
+  const parent = doc.documentElement?.children[0];
+  assertEquals(parent.nodeName, "parent");
+  assertEquals(parent.children.length, 1);
+  
+  const child = parent.children[0];
+  assertEquals(child.nodeName, "child");
+  assertEquals(child.children[0].nodeValue, "value");
+});
+
+Deno.test("DOMParser - SVG parsing with image/svg+xml", async () => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString('<svg><circle cx="50" cy="50" r="40"/></svg>', "image/svg+xml");
+  
+  assertExists(doc.documentElement);
+  assertEquals(doc.documentElement?.nodeName, "svg");
+  assertEquals(doc.documentElement?.children.length, 1);
+  
+  const circle = doc.documentElement?.children[0];
+  assertEquals(circle.nodeName, "circle");
+  assertEquals(circle.attributes.length, 3);
+});
+
+Deno.test("DOMParser - default to HTML for unknown content type", async () => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString("<div>Test</div>", "unknown/type");
+  
+  assertExists(doc.documentElement);
+  assertEquals(doc.documentElement?.nodeName, "div");
+});

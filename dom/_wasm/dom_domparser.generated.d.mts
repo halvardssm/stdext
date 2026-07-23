@@ -36,13 +36,13 @@ export class JsDOMParser {
 * Parses a string into a Document.
 *
 * @param string - The string to parse
-* @param content_type - The content type (e.g., "text/html", "text/xml")
-* @returns A Document object serialized as JSON
+* @param content_type - The content type (e.g., "text/html", "text/xml", "application/xml")
+* @returns A Document object serialized as JSON, or throws an error
 * @param {string} string
-* @param {string} _content_type
+* @param {string} content_type
 * @returns {any}
 */
-  parse_from_string(string: string, _content_type: string): any;
+  parse_from_string(string: string, content_type: string): any;
 /**
 * Creates a new DOMParser instance.
 */
