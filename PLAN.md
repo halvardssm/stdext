@@ -1,117 +1,324 @@
 # DOMParser Implementation Plan
 
 ## Overview
-Add DOMParser API implementation in a new `./dom` namespace with Rust/WASM, following the pattern used by the `json` namespace.
+Add DOMParser API implementation in a new `./dom` namespace with Rust/WASM, following the pattern used by the `json` namespace. This implementation will be fully compliant with the Web DOM API specification.
 
-## Checklist
+## Web DOM API Specification
 
-### Phase 1: Setup & Planning
-- [x] Explore existing repository structure (json namespace, wasm build system)
-- [x] Understand the pattern: Rust crate in _wasm/ -> generates WASM -> TypeScript wrapper
-- [x] Create PLAN.md with all steps
-- [x] Create and checkout branch `vibe/domparser`
-- [x] Push initial PLAN.md commit
+### DOMParser Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/DOMParser)
 
-### Phase 2: Repository Structure
-- [x] Create `dom/` directory
-- [x] Create `dom/deno.json` package configuration
-- [x] Create `dom/mod.ts` exports
-- [x] Create `dom/README.md` documentation
-- [x] Add `dom` to root `deno.json` workspace
-- [x] Add `@stdext/dom` to root `deno.json` imports
+#### Constructor
+- `new DOMParser()` - Creates a new DOMParser instance
 
-### Phase 3: Rust Implementation
-- [x] Create `_wasm/dom_domparser/` directory
-- [x] Create `_wasm/dom_domparser/Cargo.toml`
-- [x] Create `_wasm/dom_domparser/src/lib.rs` with DOMParser implementation
-- [x] Add `dom_domparser` to `_wasm/Cargo.toml` workspace members
-- [x] Add required dependencies to `_wasm/Cargo.toml` (html5ever, markup5ever_rcdom, tendril)
+#### Methods
+- `parseFromString(string, contentType)` - Parses a string into a Document
+  - Parameters:
+    - `string`: The DOMString to be parsed
+    - `contentType`: The type of content (e.g., "text/html", "text/xml", "application/xml", "application/xhtml+xml", "image/svg+xml")
+  - Returns: A `Document`
 
-### Phase 4: TypeScript Wrapper
-- [x] Create `dom/domparser.ts` TypeScript wrapper
-- [x] Import and re-export from generated WASM bindings
-- [x] Add proper TypeScript types for DOMParser API
+### Document Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/Document)
 
-### Phase 5: Testing
-- [x] Create `dom/domparser.test.ts` with tests
-- [x] Test basic parseFromString functionality
-- [x] Test error handling
+#### Properties (Read-only)
+- `doctype`: Returns the DocumentType for the document
+- `documentElement`: Returns the Element that is the root element of the document
+- `body`: Returns the <body> or <frameset> node of the current document
+- `head`: Returns the <head> element of the current document
+- `title`: Gets/sets the title of the document
+- `URL`: Returns the document location as a string
+- `referrer`: Returns the referrer of the document
+- `lastModified`: Returns the date the page was last modified
+- `characterSet`: Returns the character encoding of the document
+- `contentType`: Returns the Content-Type from the MIME header of the current document
 
-### Phase 6: Build & Verify
-- [x] Build WASM using cargo
-- [x] Generate bindings using wasm-bindgen
-- [x] Verify generated files appear in `dom/_wasm/`
-- [x] Commit all changes to branch
-- [ ] Run `deno task check` to verify TypeScript (requires deno runtime)
-- [ ] Run `deno task test` for dom package (requires deno runtime)
+#### Methods
+- `createElement(tagName)`: Creates an HTML element
+- `createElementNS(namespaceURI, qualifiedName)`: Creates an element with a namespace
+- `createTextNode(data)`: Creates a text node
+- `createComment(data)`: Creates a comment node
+- `createDocumentFragment()`: Creates a document fragment
+- `getElementById(id)`: Returns the element with the specified ID
+- `getElementsByClassName(className)`: Returns a live HTMLCollection of elements with the class name
+- `getElementsByTagName(tagName)`: Returns a live HTMLCollection of elements with the tag name
+- `getElementsByName(name)`: Returns a live NodeList of elements with the name attribute
+- `querySelector(selectors)`: Returns the first element matching the selector
+- `querySelectorAll(selectors)`: Returns a static NodeList of all elements matching the selector
+- `importNode(externalNode, deep)`: Imports a node from another document
+- `adoptNode(externalNode)`: Adopts a node from another document
 
-### Phase 7: Commits
-- [x] Commit initial setup (PLAN.md, branch, directory structure)
-- [x] Commit Rust implementation & TypeScript wrapper
-- [x] Commit tests and WASM build
-- [x] Push all commits to remote branch
+### Node Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/Node)
 
-## DOMParser API Spec (from MDN)
+#### Properties (Read-only)
+- `nodeType`: Returns the type of node
+- `nodeName`: Returns the name of the node
+- `nodeValue`: Gets/sets the value of the node
+- `parentNode`: Returns the parent node
+- `parentElement`: Returns the parent element
+- `childNodes`: Returns a live NodeList of child nodes
+- `firstChild`: Returns the first child node
+- `lastChild`: Returns the last child node
+- `previousSibling`: Returns the previous sibling node
+- `nextSibling`: Returns the next sibling node
+- `ownerDocument`: Returns the document object associated with the node
+- `isConnected`: Returns a boolean indicating if the node is connected to the DOM
 
-The DOMParser interface provides the ability to parse XML or HTML source code from a string into a DOM Document.
+#### Methods
+- `appendChild(node)`: Adds a child node
+- `removeChild(node)`: Removes a child node
+- `replaceChild(newNode, oldNode)`: Replaces a child node
+- `insertBefore(newNode, referenceNode)`: Inserts a node before another
+- `hasChildNodes()`: Returns a boolean indicating if the node has child nodes
+- `cloneNode(deep)`: Clones a node
+- `normalize()`: Normalizes the node (merges adjacent text nodes)
+- `isEqualNode(otherNode)`: Returns a boolean indicating if two nodes are equal
+- `isSameNode(otherNode)`: Returns a boolean indicating if two nodes are the same
+- `compareDocumentPosition(otherNode)`: Compares the document position of two nodes
+- `contains(otherNode)`: Returns a boolean indicating if a node contains another
+- `lookupPrefix(namespaceURI)`: Returns the prefix for a namespace URI
+- `lookupNamespaceURI(prefix)`: Returns the namespace URI for a prefix
 
-### Constructor
-```
-new DOMParser()
-```
+### Element Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/Element)
 
-### Methods
-```
-Document parseFromString(string, contentType)
-```
-- string: The DOMString to be parsed
-- contentType: The type of content (e.g., "text/html", "text/xml", "application/xml", "application/xhtml+xml", "image/svg+xml")
-- Returns: A Document
+#### Properties
+- `tagName`: Returns the tag name of the element
+- `id`: Gets/sets the ID of the element
+- `className`: Gets/sets the class of the element
+- `classList`: Returns the class list of the element
+- `attributes`: Returns a live NamedNodeMap of attributes
+- `shadowRoot`: Returns the shadow root of the element
+- `slot`: Gets/sets the slot of the element
 
-### Notes
-- For HTML parsing, we need to use the browser's DOM implementation or a HTML parser crate
-- For XML parsing, we can use a Rust XML parser crate
-- The implementation should return a Document object that can be queried
+#### Methods
+- `getAttribute(name)`: Gets the value of an attribute
+- `setAttribute(name, value)`: Sets the value of an attribute
+- `removeAttribute(name)`: Removes an attribute
+- `hasAttribute(name)`: Returns a boolean indicating if the element has an attribute
+- `hasAttributes()`: Returns a boolean indicating if the element has attributes
+- `getAttributeNS(namespaceURI, localName)`: Gets the value of a namespaced attribute
+- `setAttributeNS(namespaceURI, qualifiedName, value)`: Sets the value of a namespaced attribute
+- `removeAttributeNS(namespaceURI, localName)`: Removes a namespaced attribute
+- `hasAttributeNS(namespaceURI, localName)`: Returns a boolean indicating if the element has a namespaced attribute
+- `getElementsByClassName(className)`: Returns a live HTMLCollection of elements with the class name
+- `getElementsByTagName(tagName)`: Returns a live HTMLCollection of elements with the tag name
+- `getElementsByTagNameNS(namespaceURI, localName)`: Returns a live HTMLCollection of elements with the tag name and namespace
+- `querySelector(selectors)`: Returns the first element matching the selector
+- `querySelectorAll(selectors)`: Returns a static NodeList of all elements matching the selector
+- `matches(selectors)`: Returns a boolean indicating if the element matches the selector
+- `closest(selectors)`: Returns the closest ancestor matching the selector
+- `insertAdjacentElement(position, element)`: Inserts an element at a specified position
+- `insertAdjacentText(position, text)`: Inserts text at a specified position
+- `insertAdjacentHTML(position, html)`: Inserts HTML at a specified position
+- `getBoundingClientRect()`: Returns the bounding rectangle of the element
+- `scrollIntoView(arg)`: Scrolls the element into view
+- `focus()`: Focuses the element
+- `blur()`: Removes focus from the element
+- `click()`: Simulates a click on the element
 
-## Rust Crate Considerations
+### HTMLElement Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement)
 
-Using html5ever and markup5ever_rcdom crates for HTML parsing. The implementation parses HTML/XML strings into a custom serializable Document structure that can be used across all runtimes (Node, Deno, Edge, Browser).
+Extends Element with HTML-specific properties and methods.
 
-## Implementation Strategy
+#### Properties
+- `innerHTML`: Gets/sets the HTML content of the element
+- `outerHTML`: Gets/sets the HTML content of the element including itself
+- `innerText`: Gets/sets the text content of the element
+- `outerText`: Gets/sets the text content of the element including itself
+- `textContent`: Gets/sets the text content of the node and its descendants
 
-The Rust implementation uses html5ever to parse HTML content into an RcDom, then converts it to a custom JsDocument/JsNode structure that can be serialized to JSON and returned to JavaScript. This approach is portable across all supported runtimes.
+### Text Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/Text)
+
+Extends CharacterData with text-specific properties.
+
+#### Properties
+- `wholeText`: Gets/sets the text of the node and its descendants
+
+### Comment Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/Comment)
+
+Extends CharacterData with comment-specific properties.
+
+### DocumentFragment Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/DocumentFragment)
+
+Extends Node with fragment-specific properties.
+
+### NamedNodeMap Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/NamedNodeMap)
+
+Represents a collection of attributes.
+
+#### Properties
+- `length`: Returns the number of attributes
+
+#### Methods
+- `getNamedItem(name)`: Returns the attribute with the specified name
+- `setNamedItem(attr)`: Sets the attribute with the specified name
+- `removeNamedItem(name)`: Removes the attribute with the specified name
+- `item(index)`: Returns the attribute at the specified index
+- `getNamedItemNS(namespaceURI, localName)`: Returns the namespaced attribute
+- `setNamedItemNS(attr)`: Sets the namespaced attribute
+- `removeNamedItemNS(namespaceURI, localName)`: Removes the namespaced attribute
+
+### NodeList Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/NodeList)
+
+Represents a collection of nodes.
+
+#### Properties
+- `length`: Returns the number of nodes
+
+#### Methods
+- `item(index)`: Returns the node at the specified index
+- `forEach(callback)`: Executes a callback for each node
+
+### HTMLCollection Interface (MDN: https://developer.mozilla.org/en-US/docs/Web/API/HTMLCollection)
+
+Represents a collection of elements.
+
+#### Properties
+- `length`: Returns the number of elements
+
+#### Methods
+- `item(index)`: Returns the element at the specified index
+- `namedItem(name)`: Returns the element with the specified name or ID
+
+## Implementation Checklist
+
+### Phase 1: Core Infrastructure (COMPLETED)
+- [x] Repository structure
+- [x] Rust crate setup
+- [x] WASM build pipeline
+- [x] Basic DOMParser with parseFromString
+- [x] HTML parsing (html5ever)
+- [x] XML parsing (quick-xml)
+- [x] Content type handling
+
+### Phase 2: Node Interface
+- [ ] Add parentNode property
+- [ ] Add parentElement property
+- [ ] Add childNodes property (live NodeList)
+- [ ] Add firstChild property
+- [ ] Add lastChild property
+- [ ] Add previousSibling property
+- [ ] Add nextSibling property
+- [ ] Add ownerDocument property
+- [ ] Add isConnected property
+- [ ] Add appendChild method
+- [ ] Add removeChild method
+- [ ] Add replaceChild method
+- [ ] Add insertBefore method
+- [ ] Add hasChildNodes method
+- [ ] Add cloneNode method
+- [ ] Add normalize method
+- [ ] Add isEqualNode method
+- [ ] Add isSameNode method
+- [ ] Add compareDocumentPosition method
+- [ ] Add contains method
+
+### Phase 3: Document Interface
+- [ ] Add doctype property
+- [ ] Add body property
+- [ ] Add head property
+- [ ] Add title property (getter/setter)
+- [ ] Add URL property
+- [ ] Add referrer property
+- [ ] Add lastModified property
+- [ ] Add characterSet property
+- [ ] Add contentType property
+- [ ] Add createElement method
+- [ ] Add createElementNS method
+- [ ] Add createTextNode method
+- [ ] Add createComment method
+- [ ] Add createDocumentFragment method
+- [ ] Add getElementById method
+- [ ] Add getElementsByClassName method
+- [ ] Add getElementsByTagName method
+- [ ] Add getElementsByName method
+- [ ] Add querySelector method
+- [ ] Add querySelectorAll method
+- [ ] Add importNode method
+- [ ] Add adoptNode method
+
+### Phase 4: Element Interface
+- [ ] Add tagName property
+- [ ] Add id property (getter/setter)
+- [ ] Add className property (getter/setter)
+- [ ] Add classList property
+- [ ] Add attributes property (NamedNodeMap)
+- [ ] Add getAttribute method
+- [ ] Add setAttribute method
+- [ ] Add removeAttribute method
+- [ ] Add hasAttribute method
+- [ ] Add hasAttributes method
+- [ ] Add getAttributeNS method
+- [ ] Add setAttributeNS method
+- [ ] Add removeAttributeNS method
+- [ ] Add hasAttributeNS method
+- [ ] Add getElementsByClassName method
+- [ ] Add getElementsByTagName method
+- [ ] Add getElementsByTagNameNS method
+- [ ] Add querySelector method
+- [ ] Add querySelectorAll method
+- [ ] Add matches method
+- [ ] Add closest method
+
+### Phase 5: HTMLElement Interface
+- [ ] Add innerHTML property (getter/setter)
+- [ ] Add outerHTML property (getter/setter)
+- [ ] Add innerText property (getter/setter)
+- [ ] Add textContent property (getter/setter)
+
+### Phase 6: Collection Types
+- [ ] Implement NodeList interface
+- [ ] Implement HTMLCollection interface
+- [ ] Implement NamedNodeMap interface
+
+### Phase 7: Additional Node Types
+- [ ] DocumentType implementation
+- [ ] DocumentFragment implementation
+- [ ] Attr implementation
+- [ ] CharacterData implementation (base for Text, Comment)
+
+### Phase 8: Testing
+- [ ] Tests for Node interface methods
+- [ ] Tests for Document interface methods
+- [ ] Tests for Element interface methods
+- [ ] Tests for HTMLElement interface properties
+- [ ] Tests for collection types
+- [ ] Tests for all node types
+
+### Phase 9: Build & Verify
+- [ ] Rebuild WASM with full implementation
+- [ ] Regenerate bindings
+- [ ] Run deno task check
+- [ ] Run deno task test
+- [ ] Verify all tests pass
+
+## Implementation Order (Optimal)
+
+1. **Node Interface** - Foundation for all DOM nodes
+   - Properties: parentNode, parentElement, childNodes, firstChild, lastChild, previousSibling, nextSibling, ownerDocument, isConnected
+   - Methods: appendChild, removeChild, replaceChild, insertBefore, hasChildNodes, cloneNode, normalize, isEqualNode, isSameNode, compareDocumentPosition, contains
+
+2. **Document Interface** - Document-specific functionality
+   - Properties: doctype, body, head, title, URL, referrer, lastModified, characterSet, contentType
+   - Methods: createElement, createElementNS, createTextNode, createComment, createDocumentFragment, getElementById, getElementsByClassName, getElementsByTagName, getElementsByName, querySelector, querySelectorAll, importNode, adoptNode
+
+3. **Element Interface** - Element-specific functionality
+   - Properties: tagName, id, className, classList, attributes
+   - Methods: getAttribute, setAttribute, removeAttribute, hasAttribute, hasAttributes, getAttributeNS, setAttributeNS, removeAttributeNS, hasAttributeNS, getElementsByClassName, getElementsByTagName, getElementsByTagNameNS, querySelector, querySelectorAll, matches, closest
+
+4. **HTMLElement Interface** - HTML element extensions
+   - Properties: innerHTML, outerHTML, innerText, textContent
+
+5. **Collection Types** - NodeList, HTMLCollection, NamedNodeMap
+
+6. **Additional Node Types** - DocumentType, DocumentFragment, Attr, CharacterData
 
 ## Current Status
 
-✅ **Implementation Complete**
+✅ **Phase 1: Core Infrastructure - COMPLETE**
+⏳ **Phase 2-9: Full DOM API Implementation - IN PROGRESS**
 
-All major components are in place:
-- Rust crate with DOMParser implementation using html5ever
-- WASM module generated and bindings created
-- TypeScript wrapper with proper types
-- Test suite written
-- All changes committed and pushed to `vibe/domparser` branch
+## Notes
 
-**Note**: Full verification (running tests with deno) requires the deno runtime, which is not available in the current build environment. The implementation should be tested locally with:
-```bash
-deno task build:wasm
-deno task check
-deno task test
-```
-
-## Files Created/Modified
-
-### New Files
-- `dom/deno.json` - Package configuration
-- `dom/mod.ts` - Package exports
-- `dom/README.md` - Documentation
-- `dom/domparser.ts` - TypeScript wrapper
-- `dom/domparser.test.ts` - Test suite
-- `_wasm/dom_domparser/Cargo.toml` - Rust crate configuration
-- `_wasm/dom_domparser/src/lib.rs` - Rust implementation
-- `dom/_wasm/dom_domparser.generated.*` - Generated WASM bindings
-
-### Modified Files
-- `deno.json` - Added dom to workspace and imports
-- `_wasm/Cargo.toml` - Added dom_domparser to workspace and dependencies
-- `_wasm/Cargo.lock` - Updated with new dependencies
+- The implementation will use a custom Rust data structure that mirrors the DOM tree
+- All methods will be implemented to work on this custom structure
+- The WASM boundary will serialize/deserialize as needed
+- TypeScript wrappers will provide the full DOM API surface
