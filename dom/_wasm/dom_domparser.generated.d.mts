@@ -33,11 +33,21 @@ export interface JsDocument {
 
 /**
 * DOMParser provides the ability to parse XML or HTML source code from a string into a DOM Document.
+*
+* @example
+* ```ts
+* const parser = new DOMParser();
+* const doc = parser.parseFromString("<html><body>Hello</body></html>", "text/html");
+* ```
 */
 export class JsDOMParser {
   free(): void;
 /**
 * Parses a string into a Document.
+*
+* @param string - The string to parse
+* @param content_type - The content type (e.g., "text/html", "text/xml", "application/xml")
+* @returns A Document object serialized as JSON, or an error message
 * @param {string} string
 * @param {string} content_type
 * @returns {any}
