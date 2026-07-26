@@ -13,7 +13,7 @@ Create a DOMParser polyfill for Deno that implements only what doesn't already e
 - [x] Implement other necessary DOM interfaces (NodeList, HTMLCollection, etc.)
 - [x] Add tests for DOMParser
 - [x] Update deno.json with new package
-- [ ] Verify implementation works correctly
+- [x] Verify implementation works correctly
 
 ## Notes
 - Deno currently has DOMException, DOMMatrix, DOMRect, etc. but NOT DOMParser, Document, Element, Node
