@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "name": "@stdext/dom",
+  "exports": {
+    ".": "./mod.ts",
+    "./dom_parser": "./dom_parser.ts",
+    "./document": "./document.ts",
+    "./element": "./element.ts",
+    "./node": "./node.ts"
+  }
+}
