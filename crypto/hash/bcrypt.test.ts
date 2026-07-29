@@ -1,4 +1,4 @@
-import { assert, assertMatch } from "@std/assert";
+import { assert, assertFalse, assertMatch } from "@std/assert";
 import { type BcryptOptions, hash, verify } from "./bcrypt.ts";
 
 Deno.test("hash() and verify() with defaults", () => {
@@ -13,4 +13,14 @@ Deno.test("hash() and verify() with all options", () => {
   const h = hash("password", o);
   assertMatch(h, /^\$2b\$04\$/);
   assert(verify("password", h, o));
+});
+
+Deno.test("verify with invalid hash", () => {
+  assertFalse(
+    verify(
+      "password",
+      "foo",
+      {},
+    ),
+  );
 });

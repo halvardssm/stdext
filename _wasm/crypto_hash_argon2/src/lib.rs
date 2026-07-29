@@ -69,7 +69,8 @@ extern "C" {
 
 fn get_parsed_options(i: Argon2Options) -> (argon2::Algorithm, argon2::Params) {
   let parsed_options: WasmArgon2OptionsIncoming =
-    serde_wasm_bindgen::from_value(i.into()).unwrap_throw();
+    serde_wasm_bindgen::from_value(i.into())
+      .expect_throw("Options could not be parsed");
 
   let algorithm = match parsed_options
     .algorithm
@@ -94,34 +95,40 @@ fn get_parsed_options(i: Argon2Options) -> (argon2::Algorithm, argon2::Params) {
       .unwrap_or(default_params.p_cost()),
     parsed_options.output_length,
   )
-  .expect_throw("failed to create params");
+  .expect_throw("Failed to parse parameters");
 
   (algorithm, params)
 }
 
 /// Hash a password using Argon2
 #[wasm_bindgen]
-pub fn hash(data: String, options: Argon2Options) -> String {
+pub fn hash(data: String, options: Argon2Options) -> Result<String, JsError> {
   let (algorithm, parsed_options) = get_parsed_options(options);
   let argon2 = Argon2::new(algorithm, Version::V0x13, parsed_options.clone());
   let salt = SaltString::generate(&mut OsRng);
   let data_bytes = data.as_bytes();
-  argon2
+  let hash = argon2
     .hash_password(data_bytes, &salt)
-    .expect("hashing failed")
-    .to_string()
+    .expect_throw("Failed to generate hash")
+    .to_string();
+  Ok(hash)
 }
 
 /// Verify a password using Argon2
 #[wasm_bindgen]
-pub fn verify(data: String, hash: String, options: Argon2Options) -> bool {
+pub fn verify(
+  data: String,
+  hash: String,
+  options: Argon2Options,
+) -> Result<bool, JsError> {
   let (algorithm, parsed_options) = get_parsed_options(options);
 
   let data_bytes = data.as_bytes();
-  let parsed_hash = PasswordHash::new(&hash).expect("failed to parse hash");
-  let argon2 = Argon2::new(algorithm, Version::V0x13, parsed_options.clone())
+  let parsed_hash = PasswordHash::new(&hash)
+    .expect_throw("Failed to parse hash, invalid hash provided");
+  let is_ok = Argon2::new(algorithm, Version::V0x13, parsed_options.clone())
     .verify_password(data_bytes, &parsed_hash)
     .is_ok();
 
-  argon2
+  Ok(is_ok)
 }
