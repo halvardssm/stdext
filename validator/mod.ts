@@ -13,3 +13,6 @@ export * from "./validator.ts";
 
 // Re-export types
 export * from "./types.ts";
+
+// Re-export JSON Schema functionality
+export * from "./json_schema.ts";
