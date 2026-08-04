@@ -1,0 +1,12 @@
+{
+  "version": "0.1.0",
+  "name": "@stdext/validator",
+  "exports": {
+    ".": "./mod.ts",
+    "./types": "./types.ts",
+    "./validator": "./validator.ts"
+  },
+  "imports": {
+    "jsr:@standard-schema/spec": "jsr:@standard-schema/spec@^1"
+  }
+}

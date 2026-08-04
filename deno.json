@@ -12,7 +12,8 @@
     "@stdext/http": "jsr:@stdext/http@^0",
     "@stdext/json": "jsr:@stdext/json@^0",
     "@stdext/lexer": "jsr:@stdext/lexer@^0",
-    "@stdext/types": "jsr:@stdext/types@^0"
+    "@stdext/types": "jsr:@stdext/types@^0",
+    "@stdext/validator": "jsr:@stdext/validator@^0"
   },
   "tasks": {
     "check": "deno task format:check && deno lint && deno check **/*.ts",
@@ -32,7 +33,8 @@
     "./http",
     "./json",
     "./lexer",
-    "./types"
+    "./types",
+    "./validator"
   ],
   "exclude": [
     "./_wasm/target",
