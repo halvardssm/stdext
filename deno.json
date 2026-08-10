@@ -1,6 +1,8 @@
 {
   "lock": false,
   "imports": {
+    "@standard-schema/spec": "jsr:@standard-schema/spec@^1",
+    "@standard-schema/utils": "jsr:@standard-schema/utils@^0",
     "@std/assert": "jsr:@std/assert@^1",
     "@std/encoding": "jsr:@std/encoding@^1",
     "@std/json": "jsr:@std/json@^1",
