@@ -34,7 +34,8 @@
     "./http",
     "./json",
     "./lexer",
-    "./types"
+    "./types",
+    "./validation"
   ],
   "exclude": [
     "./_wasm/target",

@@ -1,0 +1,8 @@
+{
+  "version": "0.1.0",
+  "name": "@stdext/validation",
+  "exports": {
+    ".": "./mod.ts",
+    "./validator": "./validator.ts"
+  }
+}
