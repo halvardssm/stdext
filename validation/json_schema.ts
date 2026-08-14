@@ -1124,25 +1124,55 @@ export interface ObjectOptions extends
 }
 
 /**
- * The inferred output type for an object schema, derived from its `properties`.
+ * The inferred output type for an object schema, derived from its `properties`,
+ * `required`, and `additionalProperties`.
  *
- * All inferred properties are marked optional. JSON Schema's `required` field
- * is typed as `string[]`, which widens array literals and therefore cannot be
- * used to reliably distinguish required from optional keys at the type level.
+ * - Keys listed in `required` are required; the remaining declared keys are
+ *   optional.
+ * - `additionalProperties` controls extra (undeclared) keys: `false` removes the
+ *   index signature, a schema types the extra values, and `true`/absent allows
+ *   `unknown` extra values.
  *
- * @template O - The {@link ObjectOptions} passed to the builder
+ * @template Properties - The `properties` record
+ * @template Required - The readonly `required` string tuple
+ * @template AdditionalProperties - The `additionalProperties` option value
  */
-export type ObjectElementOutput<O extends ObjectOptions | undefined> = O extends
-  { properties?: infer P } ? InferObjectOutput<P> : object;
+export type ObjectElementOutput<
+  Properties,
+  Required extends ReadonlyArray<string>,
+  AdditionalProperties,
+> = InferObjectOutput<Properties, Required, AdditionalProperties>;
+
+/**
+ * Resolves the inferred output type of an {@link object} schema from its
+ * options. Used internally so the `validate` return annotation and the returned
+ * value share the exact same type (avoiding spurious mismatches between
+ * conditionals that differ only in `infer P` vs `infer P | undefined`).
+ *
+ * @template O - The {@link ObjectOptions}
+ * @template Required - The readonly `required` string tuple
+ */
+type ObjectOutputOf<
+  O extends ObjectOptions | undefined,
+  Required extends ReadonlyArray<string> | undefined,
+> = ObjectElementOutput<
+  O extends { properties?: infer P } ? P : never,
+  Required extends ReadonlyArray<string> ? Required : [],
+  O extends { additionalProperties?: infer AP } ? AP : undefined
+>;
 
 /**
  * Creates an object schema that validates object values.
  * Supports constraints for properties, patterns, and additional properties.
  *
- * When `properties` is provided, the schema's input and output types are inferred
- * from the property schemas. All inferred properties are marked optional (see
- * {@link ObjectElementOutput}).
+ * Type inference uses `properties`, `required`, and `additionalProperties`:
+ * - Keys listed in `required` are required; the remaining declared keys are
+ *   optional.
+ * - `additionalProperties: false` disallows extra (undeclared) keys;
+ *   `additionalProperties: <schema>` types extra values; `true`/absent allows
+ *   `unknown` extra values.
  *
+ * @template Required - The readonly `required` string tuple, or `undefined`
  * @template O - The object options, used to infer the output shape
  * @param options - Optional object schema options
  * @returns A schema object for object validation
@@ -1158,16 +1188,33 @@ export type ObjectElementOutput<O extends ObjectOptions | undefined> = O extends
  * });
  * const result = validate(personSchema, { name: "Alice", age: 30 });
  * // result: { value: { name: "Alice", age: 30 } }
- * const parsed: { name?: string; age?: number } = parse(personSchema, { name: "Alice" });
+ * const parsed: { name: string; age?: number } = parse(personSchema, { name: "Alice" });
+ *
+ * const strict = object({
+ *   properties: { name: string() },
+ *   required: ["name"],
+ *   additionalProperties: false,
+ * });
+ * const strictParsed: { name: string } = parse(strict, { name: "Alice" });
  * ```
  */
-export function object<O extends ObjectOptions | undefined = undefined>(
-  options?: O,
-): SchemaObject<"object", ObjectElementOutput<O>, ObjectElementOutput<O>> {
+export function object<
+  const Required extends ReadonlyArray<string> | undefined = undefined,
+  O extends ObjectOptions | undefined = undefined,
+>(
+  options?: O & { required?: Required },
+): SchemaObject<
+  "object",
+  ObjectOutputOf<O, Required>,
+  ObjectOutputOf<O, Required>
+> {
   return schema(
     { type: "object", ...options },
     {
-      validate: (value, _opts) => {
+      validate: (
+        value,
+        _opts,
+      ): StandardSchemaV1.Result<ObjectOutputOf<O, Required>> => {
         if (!isObject(value)) {
           return failureResult(msg.invalidType("object", value));
         }
@@ -1317,9 +1364,9 @@ export function object<O extends ObjectOptions | undefined = undefined>(
           }
         }
 
-        return issues.length
-          ? { issues }
-          : { value: value as ObjectElementOutput<O> };
+        return issues.length ? { issues } : {
+          value: value as ObjectOutputOf<O, Required>,
+        };
       },
       input: (params) => {
         return {

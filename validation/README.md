@@ -189,13 +189,22 @@ const tupleRest = array({ prefixItems: [string()], items: number() });
 type TupleRest = InferOutput<typeof tupleRest>; // [string, ...number[]]
 const tr: [string, ...number[]] = parse(tupleRest, ["a", 1, 2, 3]);
 
-// Objects infer their shape (all properties are optional, since JSON Schema's
-// `required` is `string[]` and cannot be tracked at the type level)
+// Objects infer their shape from `properties`, `required`, and
+// `additionalProperties`. `required` keys become required; the rest are
+// optional. `additionalProperties: false` disallows extra keys, a schema/`true`
+// allows them (typed `unknown`).
 const person = object({
   properties: { name: string(), age: number() },
   required: ["name"],
 });
-type Person = InferOutput<typeof person>; // { name?: string; age?: number }
+type Person = InferOutput<typeof person>; // { name: string; age?: number } & { [key: string]: unknown }
+
+const strict = object({
+  properties: { name: string() },
+  required: ["name"],
+  additionalProperties: false,
+});
+type Strict = InferOutput<typeof strict>; // { name: string }
 
 // Combinations infer a union of their members
 const id = combination({ anyOf: [string(), number()] });

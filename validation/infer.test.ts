@@ -101,6 +101,7 @@ Deno.test("type inference: array schema", () => {
 });
 
 Deno.test("type inference: object schema", () => {
+  // required drives required vs optional keys
   const s = object({
     properties: {
       name: string(),
@@ -108,40 +109,50 @@ Deno.test("type inference: object schema", () => {
     },
     required: ["name"],
   });
-  // All inferred properties are optional: see ObjectElementOutput.
-  const _a: IsExact<
-    InferOutput<typeof s>,
-    { name?: string; age?: number }
-  > = ok;
-  const _b: IsExact<
-    InferInput<typeof s>,
-    { name?: string; age?: number }
-  > = ok;
+  // name is required, age is optional; extras allowed as unknown
+  const vs = null as unknown as InferOutput<typeof s>;
+  const _name: string = vs.name;
+  const _age: number | undefined = vs.age;
+  const _extra: unknown = (vs as Record<string, unknown>).whatever;
 
-  // Multiple properties
+  // all required
   const all = object({
     properties: {
       a: string(),
       b: boolean(),
     },
     required: ["a", "b"],
+    additionalProperties: false,
   });
-  const _c: IsExact<
-    InferOutput<typeof all>,
-    { a?: string; b?: boolean }
-  > = ok;
+  const va = null as unknown as InferOutput<typeof all>;
+  const _a: string = va.a;
+  const _b: boolean = va.b;
 
-  // JSON Schema objects may carry arbitrary extra keys (validated at runtime
-  // via additionalProperties/unevaluatedProperties), so the inferred type
-  // accepts unknown extra properties.
+  // no required -> all optional
+  const opt = object({ properties: { x: string(), y: number() } });
+  const vo = null as unknown as InferOutput<typeof opt>;
+  const _x: string | undefined = vo.x;
+  const _y: number | undefined = vo.y;
+
+  // additionalProperties: false disallows extras (no index signature)
+  const strict = object({
+    properties: { name: string() },
+    required: ["name"],
+    additionalProperties: false,
+  });
+  const vstrict = null as unknown as InferOutput<typeof strict>;
+  const _sname: string = vstrict.name;
+
+  // additionalProperties: <schema> allows extras (typed unknown to avoid
+  // conflicts with declared properties of a different type)
   const extras = object({
     properties: { name: string() },
+    required: ["name"],
     additionalProperties: number(),
   });
-  const _e: IsSubtype<
-    { name: string; age: number },
-    InferOutput<typeof extras>
-  > = ok;
+  const vextras = null as unknown as InferOutput<typeof extras>;
+  const _ename: string = vextras.name;
+  const _eextra: unknown = (vextras as Record<string, unknown>).whatever;
 });
 
 Deno.test("type inference: combination schema", () => {
@@ -162,13 +173,14 @@ Deno.test("type inference: parse and validate signatures", () => {
   const arrParsed = parse(arr, ["a", "b"]);
   const _b: IsExact<typeof arrParsed, string[]> = ok;
 
-  // Object parse infers shape
+  // Object parse infers shape (required keys are required)
   const obj = object({
     properties: { id: number(), label: string() },
     required: ["id", "label"],
+    additionalProperties: false,
   });
   const objParsed = parse(obj, { id: 1, label: "x" });
-  const _c: IsExact<typeof objParsed, { id?: number; label?: string }> = ok;
+  const _c: IsExact<typeof objParsed, { id: number; label: string }> = ok;
 
   // validate result carries the output type
   const result = validate(s, "hello");

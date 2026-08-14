@@ -86,33 +86,80 @@ export type InferMemberOutputRecord<T> = {
 };
 
 /**
- * Builds the output type of an `object` schema from its `properties`.
+ * Resolves the index-signature contribution of an object schema's
+ * `additionalProperties` option, mirroring JSON Schema 2020-12 semantics:
  *
- * All inferred properties are marked optional. JSON Schema's `required` field
- * is typed as `string[]`, which widens array literals and therefore cannot be
- * used to reliably distinguish required from optional keys at the type level.
- * Marking every property optional is type-safe: a value with broader
- * optionality is always assignable to the stricter runtime expectation, while
- * still surfacing the property names and their inferred types.
+ * - `false` disallows extra properties (no index signature).
+ * - `true` or absent allows any extra property (`unknown`).
+ * - a schema allows extra properties validated against it (its output type).
  *
- * @template Properties - The properties record
+ * @template AdditionalProperties - The `additionalProperties` option value
+ */
+export type InferObjectAdditionalIndex<AdditionalProperties> =
+  // `false` disallows extra properties (a `never` index signature forbids
+  // any undeclared key). Any other value (`true`, a schema, or absent) allows
+  // extra properties; the index is typed `unknown` to avoid unsound conflicts
+  // with declared properties of a different type (the `additionalProperties`
+  // schema still validates extras at runtime).
+  AdditionalProperties extends false ? { [key: string]: never }
+    : { [key: string]: unknown };
+
+/**
+ * Extracts the union of required property keys from a `required` tuple.
+ *
+ * @template Required - The readonly `required` string tuple
+ */
+export type InferObjectRequiredKeys<
+  Required extends ReadonlyArray<string>,
+> = Required[number];
+
+/**
+ * Builds the output type of an `object` schema from its `properties`,
+ * `required`, and `additionalProperties`.
+ *
+ * - Keys listed in `required` are required; the remaining declared keys are
+ *   optional.
+ * - `additionalProperties` controls extra (undeclared) keys: `false` removes
+ *   the index signature, a schema types the extra values, and `true`/absent
+ *   allows `unknown` extra values.
+ *
+ * `required` must be captured as a `const` tuple on the builder (see
+ * `object()`) so the literal keys are preserved rather than widened to
+ * `string[]`.
+ *
+ * @template Properties - The `properties` record
+ * @template Required - The readonly `required` string tuple
+ * @template AdditionalProperties - The `additionalProperties` option value
  *
  * @example
  * ```typescript
- * type Out = InferObjectOutput<{ name: StringSchema; age: NumberSchema }>;
- * // { name?: string; age?: number }
+ * type Out = InferObjectOutput<
+ *   { name: StringSchema; age: NumberSchema },
+ *   ["name"],
+ *   false
+ * >;
+ * // { name: string; age?: number }
  * ```
  */
-export type InferObjectOutput<Properties> =
+export type InferObjectOutput<
+  Properties,
+  Required extends ReadonlyArray<string> = [],
+  AdditionalProperties = undefined,
+> =
   & {
-    [K in keyof Properties]?: InferMemberOutput<Properties[K]>;
+    [
+      K in keyof Properties as K extends InferObjectRequiredKeys<Required> ? K
+        : never
+    ]: InferMemberOutput<Properties[K]>;
   }
   & {
-    // JSON Schema objects may carry arbitrary keys (constrained by
-    // `additionalProperties`/`unevaluatedProperties`/`patternProperties` at
-    // runtime), so the inferred type allows unknown extra properties.
-    [key: string]: unknown;
-  };
+    [
+      K in keyof Properties as K extends InferObjectRequiredKeys<Required>
+        ? never
+        : K
+    ]?: InferMemberOutput<Properties[K]>;
+  }
+  & InferObjectAdditionalIndex<AdditionalProperties>;
 
 /**
  * Maps a readonly tuple of schemas (e.g. an array's `prefixItems`) to a tuple

@@ -9,7 +9,9 @@ export type {
   InferInput,
   InferMemberOutput,
   InferMemberOutputRecord,
+  InferObjectAdditionalIndex,
   InferObjectOutput,
+  InferObjectRequiredKeys,
   InferOutput,
 } from "./infer.ts";
 export {
