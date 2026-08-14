@@ -115,6 +115,80 @@ export type InferObjectOutput<Properties> =
   };
 
 /**
+ * Maps a readonly tuple of schemas (e.g. an array's `prefixItems`) to a tuple
+ * of their inferred output types, preserving element order and count.
+ *
+ * @template T - The readonly tuple of member schemas
+ *
+ * @example
+ * ```typescript
+ * type T = InferArrayTuple<readonly [StringSchema, NumberSchema]>;
+ * // readonly [string, number]
+ * ```
+ */
+export type InferArrayTuple<T extends ReadonlyArray<unknown>> = {
+  [K in keyof T]: InferMemberOutput<T[K]>;
+};
+
+/**
+ * Resolves the variadic "rest" element type of an array schema from its
+ * `items`, `unevaluatedItems`, or `contains` option (in that order of
+ * precedence), mirroring JSON Schema 2020-12 evaluation. Returns `never` when
+ * none of these are present.
+ *
+ * @template Options - The array options
+ */
+export type InferArrayRest<Options> = Options extends { items: infer Items }
+  ? InferMemberOutput<Items>
+  : Options extends { unevaluatedItems: infer Unevaluated } ? InferMemberOutput<
+      Unevaluated
+    >
+  : Options extends { contains: infer Contains } ? InferMemberOutput<Contains>
+  : never;
+
+/**
+ * Whether an array schema declares any variadic rest element source
+ * (`items`, `unevaluatedItems`, or `contains`).
+ *
+ * @template Options - The array options
+ */
+export type InferArrayHasRest<Options> = Options extends { items: infer _Items }
+  ? true
+  : Options extends { unevaluatedItems: infer _Unevaluated } ? true
+  : Options extends { contains: infer _Contains } ? true
+  : false;
+
+/**
+ * Builds the output type of an `array` schema.
+ *
+ * - When `prefixItems` is present, the leading elements form a fixed tuple.
+ *   If a variadic rest source (`items`/`unevaluatedItems`/`contains`) is also
+ *   present, it is appended as a variadic tail; otherwise the tuple is exact.
+ * - When only a rest source is present, the result is `Rest[]`.
+ * - Otherwise the result is `unknown[]`.
+ *
+ * @template Prefix - The readonly `prefixItems` tuple, or `undefined`
+ * @template Options - The array options (carrying the rest element sources)
+ *
+ * @example
+ * ```typescript
+ * type A = InferArrayOutput<readonly [StringSchema, NumberSchema], {}>;
+ * // [string, number]
+ * type B = InferArrayOutput<readonly [StringSchema], { items: NumberSchema }>;
+ * // [string, ...number[]]
+ * ```
+ */
+export type InferArrayOutput<
+  Prefix extends ReadonlyArray<unknown> | undefined,
+  Options,
+> = Prefix extends ReadonlyArray<unknown>
+  ? InferArrayHasRest<Options> extends true
+    ? [...InferArrayTuple<Prefix>, ...InferArrayRest<Options>[]]
+  : [...InferArrayTuple<Prefix>]
+  : InferArrayHasRest<Options> extends true ? InferArrayRest<Options>[]
+  : unknown[];
+
+/**
  * Infers the output type of a `combination` schema from its `allOf`, `anyOf`
  * and `oneOf` members. The resulting type is the union of every member output.
  * When no members are present the result is `unknown`.

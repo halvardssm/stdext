@@ -30,8 +30,8 @@ import {
   stringify,
 } from "./utils.ts";
 import type {
+  InferArrayOutput,
   InferCombinationOutput,
-  InferMemberOutput,
   InferObjectOutput,
 } from "./infer.ts";
 import { validate as _validate } from "./validator.ts";
@@ -838,23 +838,41 @@ export interface ArrayOptions extends
 }
 
 /**
- * The inferred output type for an array schema's element. When `items` is a
- * schema, this is its inferred output type; when it is a boolean or absent it
- * falls back to `unknown`.
+ * The inferred output type for an array schema.
  *
- * @template Options - The {@link ArrayOptions} passed to the builder
+ * - When `prefixItems` is present, the leading elements form a fixed tuple.
+ *   If a variadic rest source (`items`/`unevaluatedItems`/`contains`) is also
+ *   present, it is appended as a variadic tail; otherwise the tuple is exact.
+ * - When only a rest source (`items`/`unevaluatedItems`/`contains`) is present,
+ *   the result is `Rest[]`.
+ * - Otherwise the result is `unknown[]`.
+ *
+ * @template Prefix - The readonly `prefixItems` tuple, or `undefined`
+ * @template Options - The {@link ArrayOptions} carrying the rest element
+ *   sources
  */
-export type ArrayElementOutput<Options extends ArrayOptions | undefined> =
-  Options extends { items: infer Items } ? InferMemberOutput<Items>[]
-    : unknown[];
+export type ArrayElementOutput<
+  Prefix extends ReadonlyArray<unknown> | undefined,
+  Options extends ArrayOptions | undefined,
+> = InferArrayOutput<Prefix, Options>;
 
 /**
  * Creates an array schema that validates array values.
- * Supports constraints for items, length, and uniqueness.
+ * Supports constraints for items, prefix items, contains, length, and
+ * uniqueness.
  *
- * When `items` is provided, the schema's input and output types are inferred
- * from the item schema (e.g. `array({ items: string() })` infers `string[]`).
+ * Type inference:
+ * - `items` infers a uniform array type (e.g. `array({ items: string() })` ->
+ *   `string[]`).
+ * - `prefixItems` infers a fixed tuple (e.g. `array({ prefixItems: [string(),
+ *   number()] })` -> `[string, number]`).
+ * - `prefixItems` combined with `items`, `unevaluatedItems`, or `contains`
+ *   appends a variadic tail to the tuple (e.g. `array({ prefixItems:
+ *   [string()], items: number() })` -> `[string, ...number[]]`).
+ * - `unevaluatedItems` or `contains` (without `prefixItems`) infers a uniform
+ *   array of that element type.
  *
+ * @template Prefix - The readonly `prefixItems` tuple, or `undefined`
  * @template O - The array options, used to infer the element type
  * @param options - Optional array schema options
  * @returns A schema object for array validation
@@ -865,11 +883,24 @@ export type ArrayElementOutput<Options extends ArrayOptions | undefined> =
  * const result = validate(stringArraySchema, ["hello", "world"]);
  * // result: { value: ["hello", "world"] }
  * const parsed: string[] = parse(stringArraySchema, ["hello", "world"]);
+ *
+ * const tupleSchema = array({ prefixItems: [string(), number()] });
+ * const tuple: [string, number] = parse(tupleSchema, ["hello", 42]);
+ *
+ * const restSchema = array({ prefixItems: [string()], items: number() });
+ * const rest: [string, ...number[]] = parse(restSchema, ["hello", 1, 2, 3]);
  * ```
  */
-export function array<O extends ArrayOptions | undefined = undefined>(
-  options?: O,
-): SchemaObject<"array", ArrayElementOutput<O>, ArrayElementOutput<O>> {
+export function array<
+  const Prefix extends ReadonlyArray<unknown> | undefined = undefined,
+  O extends ArrayOptions | undefined = undefined,
+>(
+  options?: O & { prefixItems?: Prefix },
+): SchemaObject<
+  "array",
+  ArrayElementOutput<Prefix, O>,
+  ArrayElementOutput<Prefix, O>
+> {
   return schema(
     { type: "array", ...options },
     {
@@ -1026,7 +1057,7 @@ export function array<O extends ArrayOptions | undefined = undefined>(
 
         return issues.length
           ? { issues }
-          : { value: value as ArrayElementOutput<O> };
+          : { value: value as ArrayElementOutput<Prefix, O> };
       },
       input: (params) => {
         return {

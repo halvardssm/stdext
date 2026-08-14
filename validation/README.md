@@ -179,6 +179,16 @@ const tags = array({ items: string() });
 type Tags = InferOutput<typeof tags>; // string[]
 const arr: string[] = parse(tags, ["a", "b"]);
 
+// prefixItems infers a fixed tuple, and items/unevaluatedItems/contains append
+// a variadic tail
+const tuple = array({ prefixItems: [string(), number()] });
+type Tuple = InferOutput<typeof tuple>; // [string, number]
+const t: [string, number] = parse(tuple, ["a", 1]);
+
+const tupleRest = array({ prefixItems: [string()], items: number() });
+type TupleRest = InferOutput<typeof tupleRest>; // [string, ...number[]]
+const tr: [string, ...number[]] = parse(tupleRest, ["a", 1, 2, 3]);
+
 // Objects infer their shape (all properties are optional, since JSON Schema's
 // `required` is `string[]` and cannot be tracked at the type level)
 const person = object({

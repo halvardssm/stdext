@@ -62,6 +62,42 @@ Deno.test("type inference: array schema", () => {
   // Array without items falls back to unknown[]
   const u = array();
   const _d: IsExact<InferOutput<typeof u>, unknown[]> = ok;
+
+  // prefixItems infers a fixed tuple
+  const tuple = array({ prefixItems: [string(), number()] });
+  const _e: IsExact<InferOutput<typeof tuple>, [string, number]> = ok;
+
+  // prefixItems + items appends a variadic tail to the tuple
+  const tupleRest = array({ prefixItems: [string()], items: number() });
+  const _f: IsExact<InferOutput<typeof tupleRest>, [string, ...number[]]> = ok;
+
+  // prefixItems + unevaluatedItems appends a variadic tail to the tuple
+  const tupleUnevaluated = array({
+    prefixItems: [string()],
+    unevaluatedItems: number(),
+  });
+  const _g: IsExact<
+    InferOutput<typeof tupleUnevaluated>,
+    [string, ...number[]]
+  > = ok;
+
+  // prefixItems + contains appends a variadic tail to the tuple
+  const tupleContains = array({
+    prefixItems: [string(), number()],
+    contains: boolean(),
+  });
+  const _h: IsExact<
+    InferOutput<typeof tupleContains>,
+    [string, number, ...boolean[]]
+  > = ok;
+
+  // contains (without prefixItems) infers a uniform array
+  const contains = array({ contains: number() });
+  const _i: IsExact<InferOutput<typeof contains>, number[]> = ok;
+
+  // unevaluatedItems (without prefixItems) infers a uniform array
+  const unevaluated = array({ unevaluatedItems: number() });
+  const _j: IsExact<InferOutput<typeof unevaluated>, number[]> = ok;
 });
 
 Deno.test("type inference: object schema", () => {
