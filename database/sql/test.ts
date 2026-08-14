@@ -4,8 +4,6 @@ import {
   testClient,
   testClientConnection,
   testClientConstructorIntegration,
-  testClientPool,
-  testClientPoolConnection,
   testClientSanity,
   testDriver,
   testEventTarget,
@@ -39,15 +37,12 @@ interface TestDriverQueryOptions extends Sql.DriverQueryOptions {
 interface TestDriverConnectionOptions extends Sql.DriverConnectionOptions {
   test?: string;
 }
-interface TestClientPoolOptions extends Sql.ClientPoolOptions {
+interface TestPoolOptions extends Sql.PoolOptions {
 }
 class TestDriver implements
   Sql.Driver<
     TestDriverConnectionOptions,
-    TestDriverQueryOptions,
-    TestParameterType,
-    TestQueryValues,
-    TestQueryMeta
+    TestDriverQueryOptions
   > {
   readonly connectionUrl: string;
   readonly options: Sql.DriverInternalOptions<
@@ -105,11 +100,6 @@ class TestDriver implements
 
 class TestSqlConnectable implements
   Sql.DriverConnectable<
-    TestDriverConnectionOptions,
-    TestDriverQueryOptions,
-    TestParameterType,
-    TestQueryValues,
-    TestQueryMeta,
     TestDriver
   > {
   readonly options: Sql.DriverInternalOptions<
@@ -142,10 +132,7 @@ class TestPreparedStatement extends TestSqlConnectable
     Sql.PreparedStatement<
       TestDriverConnectionOptions,
       TestDriverQueryOptions,
-      TestParameterType,
-      TestQueryValues,
-      TestQueryMeta,
-      TestDriver
+      TestParameterType
     > {
   sql: string;
   constructor(
@@ -227,10 +214,7 @@ class TestSqlQueriable extends TestSqlConnectable implements
   Sql.Queriable<
     TestDriverConnectionOptions,
     TestDriverQueryOptions,
-    TestParameterType,
-    TestQueryValues,
-    TestQueryMeta,
-    TestDriver
+    TestParameterType
   > {
   constructor(
     connection: TestSqlQueriable["connection"],
@@ -312,12 +296,6 @@ class TestSqlQueriable extends TestSqlConnectable implements
 
 class TestSqlPreparable extends TestSqlQueriable implements
   Sql.Preparable<
-    TestDriverConnectionOptions,
-    TestDriverQueryOptions,
-    TestParameterType,
-    TestQueryValues,
-    TestQueryMeta,
-    TestDriver,
     TestPreparedStatement
   > {
   constructor(
@@ -346,11 +324,6 @@ class TestTransaction extends TestSqlPreparable implements
   Sql.Transaction<
     TestDriverConnectionOptions,
     TestDriverQueryOptions,
-    TestParameterType,
-    TestQueryValues,
-    TestQueryMeta,
-    TestDriver,
-    TestPreparedStatement,
     TestTransactionOptions
   > {
   declare readonly options: Sql.TransactionInternalOptions<
@@ -399,12 +372,6 @@ class TestTransaction extends TestSqlPreparable implements
 
 class TestTransactionable extends TestSqlPreparable implements
   Sql.Preparable<
-    TestDriverConnectionOptions,
-    TestDriverQueryOptions,
-    TestParameterType,
-    TestQueryValues,
-    TestQueryMeta,
-    TestDriver,
     TestPreparedStatement
   > {
   declare readonly options: Sql.TransactionInternalOptions<
@@ -453,40 +420,7 @@ class TestSqlEventTarget extends Sql.SqlEventTarget<
 > {
 }
 
-class TestClient extends TestTransactionable implements
-  Sql.Client<
-    TestDriverConnectionOptions,
-    TestDriverQueryOptions,
-    TestParameterType,
-    TestQueryValues,
-    TestQueryMeta,
-    TestDriver,
-    TestPreparedStatement,
-    TestTransactionOptions,
-    TestTransaction,
-    TestSqlEventTarget
-  > {
-  eventTarget: TestSqlEventTarget;
-  constructor(
-    connectionUrl: string | URL,
-    options: TestTransactionable["options"],
-  ) {
-    const driver = new TestDriver(connectionUrl.toString(), options);
-    super(driver, options);
-    this.eventTarget = new TestSqlEventTarget();
-  }
-  async connect(): Promise<void> {
-    await this.connection.connect();
-    this.eventTarget.dispatchEvent(
-      new Sql.ConnectEvent({ connection: this.connection }),
-    );
-  }
-  async close(): Promise<void> {
-    this.eventTarget.dispatchEvent(
-      new Sql.CloseEvent({ connection: this.connection }),
-    );
-    await this.connection.close();
-  }
+interface TestPoolOptions extends Sql.PoolOptions {
 }
 
 interface TestPoolClientOptions extends Sql.PoolClientOptions {
@@ -538,8 +472,8 @@ class TestPoolClient extends TestTransactionable implements
   }
 }
 
-class TestClientPool implements
-  Sql.ClientPool<
+class TestClient implements
+  Sql.Client<
     TestDriverConnectionOptions,
     TestDriverQueryOptions,
     TestParameterType,
@@ -550,36 +484,127 @@ class TestClientPool implements
     TestTransactionOptions,
     TestTransaction,
     TestPoolClientOptions,
-    TestPoolClient
+    TestPoolClient,
+    TestPoolOptions,
+    TestSqlEventTarget
   > {
-  declare readonly options: Sql.ClientPoolInternalOptions<
+  declare readonly options: Sql.ClientInternalOptions<
     TestDriverConnectionOptions,
     TestDriverQueryOptions,
     TestTransactionOptions,
     TestPoolClientOptions,
-    TestClientPoolOptions
+    TestPoolOptions
   >;
-
+  _connected: boolean = false;
   deferredStack: DeferredStack<TestDriver>;
   eventTarget: TestSqlEventTarget;
   connectionUrl: string;
-  _connected: boolean = false;
-  get connected(): boolean {
-    return this._connected;
-  }
   constructor(
     connectionUrl: string | URL,
-    options: TestClientPool["options"],
+    options: TestClient["options"],
   ) {
     this.connectionUrl = connectionUrl.toString();
     this.options = options;
     this.deferredStack = new DeferredStack<TestDriver>({
-      maxSize: 3,
+      maxSize: options.poolOptions.maxSize ?? 3,
       removeFn: async (element) => {
         await element._value.close();
       },
     });
     this.eventTarget = new TestSqlEventTarget();
+  }
+  get connected(): boolean {
+    return this._connected;
+  }
+  async beginTransaction(
+    options?: Record<string, unknown> | undefined,
+  ): Promise<TestTransaction> {
+    const conn = await this.acquire();
+    return conn.beginTransaction(options);
+  }
+  async transaction<T>(fn: (t: TestTransaction) => Promise<T>): Promise<T> {
+    const conn = await this.acquire();
+    return conn.transaction(fn);
+  }
+  async prepare(
+    sql: string,
+    options?: TestDriverQueryOptions | undefined,
+  ): Promise<TestPreparedStatement> {
+    const conn = await this.acquire();
+    return conn.prepare(sql, options);
+  }
+  async execute(
+    sql: string,
+    params?: string[] | undefined,
+    options?: TestDriverQueryOptions | undefined,
+  ): Promise<number | undefined> {
+    const conn = await this.acquire();
+    return conn.execute(sql, params, options);
+  }
+  async query<T extends TestRow = TestRow>(
+    sql: string,
+    params?: string[] | undefined,
+    options?: TestDriverQueryOptions | undefined,
+  ): Promise<T[]> {
+    const conn = await this.acquire();
+    return conn.query(sql, params, options);
+  }
+  async queryOne<T extends TestRow = TestRow>(
+    sql: string,
+    params?: string[] | undefined,
+    options?: TestDriverQueryOptions | undefined,
+  ): Promise<T | undefined> {
+    const conn = await this.acquire();
+    return conn.queryOne(sql, params, options);
+  }
+  async *queryMany<T extends TestRow = TestRow>(
+    sql: string,
+    params?: string[] | undefined,
+    options?: TestDriverQueryOptions | undefined,
+  ): AsyncGenerator<T> {
+    const conn = await this.acquire();
+    yield* conn.queryMany(sql, params, options);
+  }
+  async queryArray<T extends TestArrayRow = TestArrayRow>(
+    sql: string,
+    params?: string[] | undefined,
+    options?: TestDriverQueryOptions | undefined,
+  ): Promise<T[]> {
+    const conn = await this.acquire();
+    return conn.queryArray(sql, params, options);
+  }
+  async queryOneArray<T extends TestArrayRow = TestArrayRow>(
+    sql: string,
+    params?: string[] | undefined,
+    options?: TestDriverQueryOptions | undefined,
+  ): Promise<T | undefined> {
+    const conn = await this.acquire();
+    return conn.queryOneArray(sql, params, options);
+  }
+  async *queryManyArray<T extends TestArrayRow = TestArrayRow>(
+    sql: string,
+    params?: string[] | undefined,
+    options?: TestDriverQueryOptions | undefined,
+  ): AsyncGenerator<T> {
+    const conn = await this.acquire();
+    yield* conn.queryManyArray(sql, params, options);
+  }
+  async sql<T extends TestRow = TestRow>(
+    strings: TemplateStringsArray,
+    ...parameters: string[]
+  ): Promise<T[]> {
+    const conn = await this.acquire();
+    return conn.sql(strings, ...parameters);
+  }
+  async sqlArray<T extends TestArrayRow = TestArrayRow>(
+    strings: TemplateStringsArray,
+    ...parameters: string[]
+  ): Promise<T[]> {
+    const conn = await this.acquire();
+    return conn.sqlArray(strings, ...parameters);
+  }
+  [Symbol.asyncDispose](): PromiseLike<void> {
+    return this.close();
   }
   async connect(): Promise<void> {
     for (let i = 0; i < this.deferredStack.maxSize; i++) {
@@ -604,6 +629,7 @@ class TestClientPool implements
       await el.remove();
     }
   }
+
   async acquire(): Promise<TestPoolClient> {
     const el = await this.deferredStack.pop();
     this.eventTarget.dispatchEvent(
@@ -611,7 +637,7 @@ class TestClientPool implements
     );
     const c = new TestPoolClient(
       el.value,
-      deepMerge<TestClientPool["options"]>(
+      deepMerge<TestClient["options"]>(
         this.options,
         {
           poolClientOptions: {
@@ -627,14 +653,11 @@ class TestClientPool implements
     );
     return c;
   }
-  async [Symbol.asyncDispose](): Promise<void> {
-    await this.close();
-  }
 }
 
 const connectionUrl = "test";
-const options: TestClientPool["options"] = {
-  clientPoolOptions: {},
+const options: TestClient["options"] = {
+  poolOptions: {},
   connectionOptions: {},
   poolClientOptions: {},
   queryOptions: {},
@@ -652,12 +675,10 @@ const transaction = new TestTransaction(connection, options);
 const eventTarget = new TestSqlEventTarget();
 const client = new TestClient(connectionUrl, options);
 const poolClient = new TestPoolClient(connection, options);
-const clientPool = new TestClientPool(connectionUrl, options);
 
 const expects = {
   connectionUrl,
   options,
-  clientPoolOptions: options,
   sql,
 };
 
@@ -685,10 +706,6 @@ Deno.test(`sql static test`, async (t) => {
   await t.step(`sql/PoolClient`, () => {
     testPoolClient(poolClient, expects);
   });
-
-  await t.step(`sql/ClientPool`, () => {
-    testClientPool(clientPool, expects);
-  });
 });
 
 Deno.test(`sql connection test`, async (t) => {
@@ -696,13 +713,6 @@ Deno.test(`sql connection test`, async (t) => {
     await testClientConnection(
       t,
       TestClient,
-      [connectionUrl, options],
-    );
-  });
-  await t.step("Client", async (t) => {
-    await testClientPoolConnection(
-      t,
-      TestClientPool,
       [connectionUrl, options],
     );
   });

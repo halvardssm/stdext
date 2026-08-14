@@ -1,12 +1,15 @@
-import type { DriverQueryNext } from "./driver.ts";
+import type {
+  ContextMetadata,
+  ResultIterableContext,
+  ResultObject,
+} from "./core.ts";
 
 /**
  * Takes a row object and returns a mapped object
  */
-export function getObjectFromRow<
-  Output extends Record<string, unknown> = Record<string, unknown>,
-  Row extends DriverQueryNext = DriverQueryNext,
->(row: Row): Output {
+export function resultObjectToObject<
+  R extends ResultIterableContext = ResultIterableContext,
+>(metadata: R["metadata"], row: R[""]): Output {
   const rowObject: Output = {} as Output;
 
   for (let i = 0; i < row.columns.length; i++) {

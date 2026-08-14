@@ -1,28 +1,46 @@
-// deno-lint-ignore-file no-explicit-any
-import type {
-  Driver,
-  DriverConnectable,
-  DriverConnectionOptions,
-  DriverInternalOptions,
-  DriverParameterType,
-  DriverQueryMeta,
-  DriverQueryOptions,
-  DriverQueryValues,
-} from "./driver.ts";
+import { ClientEventTarget, Eventable } from "./events.ts";
 
 /**
- * Row
+ * ContextMetadata
  *
- * Row type for SQL queries, represented as an object entry.
+ * @template C the column array
+ *
+ * @example
+ * ```ts
+ * ContextMetadata<["id","name"]>
+ * ```
  */
-export type Row<T = unknown> = Record<string, T>;
+export type ContextMetadata<C extends string[] = string[]> = {
+  columns: C;
+};
 
-/**
- * ArrayRow
- *
- * Row type for SQL queries, represented as an array entry.
- */
-export type ArrayRow<T = unknown> = T[];
+/** */
+export type ResultObject<
+  V = Array<unknown>,
+  R = Record<string, V[keyof V]>,
+> = {
+  values: V;
+  toRecord: () => R;
+};
+
+export interface ResultIterableContext<
+  V extends unknown[] = unknown[],
+  M extends ContextMetadata = ContextMetadata,
+  // @todo Figure out this type
+  R = Record<M["columns"][number], V[number]>,
+> extends AsyncIterable<ResultObject<V, R>> {
+  toValues: () => Promise<V[]>;
+  toRecords: () => Promise<R[]>;
+  toRecord: (value: V) => R;
+  metadata: M;
+}
+
+export interface Optionable<IOptions> {
+  /**
+   * Options for the object
+   */
+  get options(): IOptions;
+}
 
 /**
  * TransactionOptions
@@ -30,67 +48,122 @@ export type ArrayRow<T = unknown> = T[];
  * Core transaction options
  * Used to type the options for the transaction methods
  */
-export type TransactionOptions = {
+export interface TransactionOptions {
   beginTransactionOptions?: Record<string, unknown>;
   commitTransactionOptions?: Record<string, unknown>;
   rollbackTransactionOptions?: Record<string, unknown>;
-};
+}
 
-/**
- * Internal Transaction options
- */
-export interface TransactionInternalOptions<
-  IConnectionOptions extends DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions,
-  ITransactionOptions extends TransactionOptions,
-> extends DriverInternalOptions<IConnectionOptions, IQueryOptions> {
+export interface TransactionOptionsWrapper<
+  ITransactionOptions extends TransactionOptions = TransactionOptions,
+> {
   transactionOptions: ITransactionOptions;
 }
 
 /**
- * PreparedQueriable
+ * ConnectionOptions
+ *
+ * The options that will be used when connecting to the database.
+ */
+export interface ConnectionOptions {
+  /**
+   * The connection URL
+   */
+  connectionUrl: URL;
+}
+
+export interface ConnectionOptionsWrapper<
+  IConnectionOptions extends ConnectionOptions = ConnectionOptions,
+> {
+  connectionOptions: IConnectionOptions;
+}
+
+/**
+ * Connectable
+ *
+ * Represents a connectable object
+ */
+export interface Connectable<
+  IConnectionOptions extends ConnectionOptions = ConnectionOptions,
+> extends
+  AsyncDisposable,
+  Optionable<ConnectionOptionsWrapper<IConnectionOptions>> {
+  /**
+   * Whether the connection is connected to the database
+   */
+  get connected(): boolean;
+
+  /**
+   * Create a connection to the database
+   */
+  connect(): Promise<void>;
+
+  /**
+   * Close the connection to the database
+   */
+  close(): Promise<void>;
+}
+
+/**
+ * Pingable
+ *
+ * Represents an object able to ping a connection
+ */
+export interface Pingable {
+  /**
+   * Pings the database connection to check that it's alive
+   *
+   * Throws an error if connection is not alive
+   */
+  ping(): Promise<void>;
+}
+
+/**
+ * QueryOptions
+ *
+ * Options to pass to the query methods.
+ */
+export interface QueryOptions {
+  /**
+   * A signal to abort the query.
+   */
+  signal?: AbortSignal;
+  /**
+   * Transforms the value that will be sent to the database
+   */
+  transformInput?: (value: unknown) => unknown;
+  /**
+   * Transforms the value received from the database
+   */
+  transformOutput?: (value: unknown) => unknown;
+}
+
+export interface QueryOptionsW<
+  IQueryOptions extends QueryOptions = QueryOptions,
+> {
+  queryOptions: IQueryOptions;
+}
+
+/**
+ * PreparedStatement
  *
  * Represents a prepared statement to be executed separately from creation.
+ *
+ * @template ConnectionOptions {@link ConnectionOptions}
+ * @template QueryOptions {@link QueryOptions}
  */
 export interface PreparedStatement<
-  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  IParameterType extends DriverParameterType = DriverParameterType,
-  IQueryValues extends DriverQueryValues = DriverQueryValues,
-  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  IDriver extends Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  > = Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  >,
-> extends
-  DriverConnectable<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  > {
-  readonly options: DriverInternalOptions<IConnectionOptions, IQueryOptions>;
-
+  IQueryOptions extends QueryOptions = QueryOptions,
+> extends AsyncDisposable, Optionable<QueryOptionsW<IQueryOptions>> {
   /**
    * The SQL statement
    */
-  readonly sql: string;
+  get sql(): string;
 
   /**
    * Whether the prepared statement has been deallocated or not.
    */
-  readonly deallocated: boolean;
+  get deallocated(): boolean;
 
   /**
    * Deallocate the prepared statement
@@ -98,287 +171,66 @@ export interface PreparedStatement<
   deallocate(): Promise<void>;
 
   /**
-   * Executes the prepared statement
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the number of affected rows if any
-   */
-  execute(
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): Promise<number | undefined>;
-  /**
    * Query the database with the prepared statement
    *
    * @param params the parameters to bind to the SQL statement
    * @param options the options to pass to the query method, will be merged with the global options
    * @returns the rows returned by the query as object entries
    */
-  query<T extends Row<any> = Row<any>>(
-    params?: IParameterType[],
+  query(
+    params?: unknown,
     options?: IQueryOptions,
-  ): Promise<T[]>;
-  /**
-   * Query the database with the prepared statement, and return at most one row
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an object entry, or undefined if no row is returned
-   */
-  queryOne<T extends Row<any> = Row<any>>(
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): Promise<T | undefined>;
-  /**
-   * Query the database with the prepared statement, and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  queryMany<T extends Row<any> = Row<any>>(
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): AsyncGenerator<T>;
-  /**
-   * Query the database with the prepared statement
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): Promise<T[]>;
-  /**
-   * Query the database with the prepared statement, and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an array entry, or undefined if no row is returned
-   */
-  queryOneArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database with the prepared statement, and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): AsyncGenerator<T>;
+  ): Promise<ResultIterableContext>;
 }
 
 /**
  * Queriable
  *
  * Represents an object that can execute SQL queries.
+ *
+ * @template ConnectionOptions {@link ConnectionOptions}
+ * @template QueryOptions {@link QueryOptions}
  */
 export interface Queriable<
-  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  IParameterType extends DriverParameterType = DriverParameterType,
-  IQueryValues extends DriverQueryValues = DriverQueryValues,
-  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  IDriver extends Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  > = Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  >,
-> extends
-  DriverConnectable<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  > {
-  readonly options: DriverInternalOptions<IConnectionOptions, IQueryOptions>;
-
-  /**
-   * Execute a SQL statement
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the number of affected rows if any
-   */
-  execute(
-    sql: string,
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): Promise<number | undefined>;
+  IQueryOptions extends QueryOptions = QueryOptions,
+> extends Optionable<QueryOptionsW<IQueryOptions>> {
   /**
    * Query the database
    *
    * @param sql the SQL statement
    * @param params the parameters to bind to the SQL statement
    * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
+   * @returns the rows returned by the query
    */
-  query<T extends Row<any> = Row<any>>(
+  query(
     sql: string,
-    params?: IParameterType[],
+    params?: unknown,
     options?: IQueryOptions,
-  ): Promise<T[]>;
-  /**
-   * Query the database and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an object entry, or undefined if no row is returned
-   */
-  queryOne<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): Promise<T | undefined>;
-  /**
-   * Query the database and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as object entries
-   */
-  queryMany<T extends Row<any> = Row<any>>(
-    sql: string,
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): AsyncGenerator<T>;
-  /**
-   * Query the database
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): Promise<T[]>;
-  /**
-   * Query the database and return at most one row
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the row returned by the query as an array entry, or undefined if no row is returned
-   */
-  queryOneArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): Promise<T | undefined>;
-
-  /**
-   * Query the database and return an iterator.
-   * Usefull when querying large datasets, as this should take advantage of data streams.
-   *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the query method, will be merged with the global options
-   * @returns the rows returned by the query as array entries
-   */
-  queryManyArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    sql: string,
-    params?: IParameterType[],
-    options?: IQueryOptions,
-  ): AsyncGenerator<T>;
+  ): Promise<ResultIterableContext>;
 
   /**
    * Query the database using tagged template
    *
-   * @returns the rows returned by the query as object entries
+   * @returns the rows returned by the query
    */
-  sql<T extends Row<any> = Row<any>>(
+  sql(
     strings: TemplateStringsArray,
-    ...parameters: IParameterType[]
-  ): Promise<T[]>;
-
-  /**
-   * Query the database using tagged template
-   *
-   * @returns the rows returned by the query as array entries
-   */
-  sqlArray<T extends ArrayRow<any> = ArrayRow<any>>(
-    strings: TemplateStringsArray,
-    ...parameters: IParameterType[]
-  ): Promise<T[]>;
+    ...parameters: unknown[]
+  ): Promise<ResultIterableContext>;
 }
 
 /**
  * Preparable
  *
  * Represents an object that can create a prepared statement.
+ *
+ * @template QueryOptions {@link QueryOptions}
+ * @template PreparedStatement {@link PreparedStatement}
  */
 export interface Preparable<
-  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  IParameterType extends DriverParameterType = DriverParameterType,
-  IQueryValues extends DriverQueryValues = DriverQueryValues,
-  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  IDriver extends Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  > = Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  >,
-  IPreparedStatement extends PreparedStatement<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  > = PreparedStatement<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  >,
-> extends
-  Queriable<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  > {
+  IQueryOptions extends QueryOptions = QueryOptions,
+  IPreparedStatement extends PreparedStatement = PreparedStatement,
+> extends Optionable<QueryOptionsW<IQueryOptions>> {
   /**
    * Create a prepared statement that can be executed multiple times.
    * This is useful when you want to execute the same SQL statement multiple times with different parameters.
@@ -397,67 +249,21 @@ export interface Preparable<
    * }
    * ```
    */
-  prepare(
-    sql: string,
-    options?: IQueryOptions,
-  ): Promise<IPreparedStatement>;
+  prepare(sql: string, options?: IQueryOptions): Promise<IPreparedStatement>;
 }
 
 /**
  * Transaction
  *
  * Represents a transaction.
+ *
+ * @template ConnectionOptions {@link ConnectionOptions}
+ * @template QueryOptions {@link QueryOptions}
+ * @template TransactionOptions {@link TransactionOptions}
  */
 export interface Transaction<
-  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  IParameterType extends DriverParameterType = DriverParameterType,
-  IQueryValues extends DriverQueryValues = DriverQueryValues,
-  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  IDriver extends Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  > = Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  >,
-  IPreparedStatement extends PreparedStatement<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  > = PreparedStatement<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  >,
   ITransactionOptions extends TransactionOptions = TransactionOptions,
-> extends
-  Preparable<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver,
-    IPreparedStatement
-  > {
-  readonly options: TransactionInternalOptions<
-    IConnectionOptions,
-    IQueryOptions,
-    ITransactionOptions
-  >;
+> extends Optionable<TransactionOptionsWrapper<ITransactionOptions>> {
   /**
    * Whether the connection is in an active transaction or not.
    */
@@ -497,76 +303,14 @@ export interface Transaction<
  * This interface is to be implemented by any class that supports creating a prepared statement.
  * A prepared statement should in most cases be unique to a connection,
  * and should not live after the related connection is closed.
+ *
+ * @template TransactionOptions {@link TransactionOptions}
+ * @template Transaction {@link Transaction}
  */
 export interface Transactionable<
-  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  IParameterType extends DriverParameterType = DriverParameterType,
-  IQueryValues extends DriverQueryValues = DriverQueryValues,
-  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  IDriver extends Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  > = Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  >,
-  IPreparedStatement extends PreparedStatement<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  > = PreparedStatement<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver
-  >,
   ITransactionOptions extends TransactionOptions = TransactionOptions,
-  ITransaction extends Transaction<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver,
-    IPreparedStatement,
-    ITransactionOptions
-  > = Transaction<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver,
-    IPreparedStatement,
-    ITransactionOptions
-  >,
-> extends
-  Preparable<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta,
-    IDriver,
-    IPreparedStatement
-  > {
-  readonly options: TransactionInternalOptions<
-    IConnectionOptions,
-    IQueryOptions,
-    ITransactionOptions
-  >;
+  ITransaction extends Transaction = Transaction,
+> extends Optionable<TransactionOptionsWrapper<ITransactionOptions>> {
   /**
    * Starts a transaction
    */
@@ -585,7 +329,188 @@ export interface Transactionable<
    * @param fn callback function to be executed within a transaction
    * @returns the result of the callback function
    */
-  transaction<T>(
-    fn: (t: ITransaction) => Promise<T>,
-  ): Promise<T>;
+  transaction<T>(fn: (t: ITransaction) => Promise<T>): Promise<T>;
+}
+
+/**
+ * DriverConnection
+ *
+ * This represents a connection to a database.
+ * When a user wants a single connection to the database,
+ * they should use a class implementing or using this interface.
+ *
+ * The class implementing this interface should be able to connect to the database,
+ * and have the following constructor arguments (if more options are needed, extend the ConnectionOptions):
+ *  - connectionUrl: string|URL
+ *  - connectionOptions?: ConnectionOptions;
+ *
+ * @template ConnectionOptions {@link ConnectionOptions}
+ * @template DriverQueryOptions {@link DriverQueryOptions}
+ */
+export interface Driver<
+  IOptions extends
+    & ConnectionOptionsWrapper
+    & QueryOptionsW
+    & TransactionOptionsWrapper =
+      & ConnectionOptionsWrapper
+      & QueryOptionsW
+      & TransactionOptionsWrapper,
+> extends
+  Connectable,
+  Pingable,
+  Queriable,
+  Transactionable,
+  Preparable,
+  Eventable {
+  /**
+   * @inheritdoc
+   */
+  get options(): IOptions;
+}
+
+/**
+ * The driver constructor
+ */
+export interface DriverConstructor {
+  new (connectionUrl: string, options: object): Driver;
+}
+
+/**
+ * DriverConnectable
+ *
+ * The base interface for everything that interracts with the connection like querying.
+ *
+ * @template Driver {@link Driver}
+ */
+export interface Driverable<IDriver extends Driver = Driver> {
+  /**
+   * The the database driver
+   */
+  get driver(): IDriver;
+}
+
+/**
+ * PoolClientOptions
+ *
+ * This represents the options for a pool client.
+ */
+export interface PoolClientOptions {
+  /**
+   * The function to call when releasing the connection.
+   */
+  releaseFn?: () => Promise<void>;
+}
+
+export interface PoolClientOptionsW<
+  IPoolClientOptions extends PoolClientOptions = PoolClientOptions,
+> {
+  poolClientOptions: IPoolClientOptions;
+}
+
+/**
+ * PoolClient
+ *
+ * This represents a connection to a database from a pool.
+ * When a user wants to use a connection from a pool,
+ * they should use a class implementing this interface.
+ */
+export interface PoolClient<
+  IOptions extends
+    & ConnectionOptionsWrapper
+    & QueryOptionsW
+    & TransactionOptionsWrapper
+    & PoolClientOptionsW =
+      & ConnectionOptionsWrapper
+      & QueryOptionsW
+      & TransactionOptionsWrapper
+      & PoolClientOptionsW,
+> extends
+  AsyncDisposable,
+  Pick<Connectable, "connected">,
+  Pingable,
+  Queriable,
+  Transactionable,
+  Preparable,
+  Driverable {
+  /**
+   * @inheritdoc
+   */
+  get options(): IOptions;
+
+  /**
+   * Whether the pool client is disposed and should not be available anymore
+   */
+  get disposed(): boolean;
+
+  /**
+   * Release the connection to the pool
+   */
+  release(): Promise<void>;
+}
+
+/**
+ * ClientPoolOptions
+ *
+ * This represents the options for a connection pool.
+ */
+export interface PoolOptions {
+  /**
+   * Whether to lazily initialize connections.
+   *
+   * This means that connections will only be created
+   * if there are no idle connections available when
+   * acquiring a connection, and max pool size has not been reached.
+   */
+  lazyInitialization?: boolean;
+  /**
+   * The maximum stack size to be allowed.
+   */
+  maxSize?: number;
+}
+
+export interface PoolOptionsW<IPoolOptions extends PoolOptions = PoolOptions> {
+  poolOptions: IPoolOptions;
+}
+
+export interface Poolable<
+  IPoolOptions extends PoolOptions = PoolOptions,
+  IPoolClient extends PoolClient = PoolClient,
+> extends Optionable<PoolOptionsW<IPoolOptions>> {
+  /**
+   * Acquire a connection from the pool
+   */
+  acquire(): Promise<IPoolClient>;
+}
+
+/**
+ * Client
+ *
+ * This represents a database client. When you need a single connection
+ * to the database, you will in most cases use this interface.
+ */
+export interface Client<
+  IOptions extends
+    & ConnectionOptionsWrapper
+    & QueryOptionsW
+    & TransactionOptionsWrapper
+    & PoolClientOptionsW
+    & PoolOptionsW =
+      & ConnectionOptionsWrapper
+      & QueryOptionsW
+      & TransactionOptionsWrapper
+      & PoolClientOptionsW
+      & PoolOptionsW,
+> extends
+  AsyncDisposable,
+  Connectable,
+  Pingable,
+  Queriable,
+  Transactionable,
+  Preparable,
+  Poolable,
+  Eventable<ClientEventTarget> {
+  /**
+   * @inheritdoc
+   */
+  get options(): IOptions;
 }

@@ -1,9 +1,7 @@
 /**
- * SqlError
- *
- * Base Error
+ * DatabaseError
  */
-export class SqlError extends Error {
+export class DatabaseError extends Error {
   constructor(message: string) {
     super(message);
     this.name = this.constructor.name;

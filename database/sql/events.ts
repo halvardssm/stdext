@@ -1,224 +1,68 @@
-import type {
-  Driver,
-  DriverConnectionOptions,
-  DriverParameterType,
-  DriverQueryMeta,
-  DriverQueryOptions,
-  DriverQueryValues,
-} from "./driver.ts";
-import type { DriverConnectable } from "./driver.ts";
-
+import type { Driver } from "./core.ts";
+import {
+  CustomEvent,
+  CustomEventListener,
+  CustomEventListenerOrEventListenerObject,
+  CustomEventTarget,
+} from "@stdext/event";
+import { DatabaseError } from "./errors.ts";
 /**
- * Event types
+ * Driver event types
  */
-
-/**
- * Client event types
- */
-export type ClientEventType = "connect" | "close" | "error";
+export type DriverEventType =
+  | "connect"
+  | "close"
+  | "error";
 
 /**
  * Pool connection event types
  */
-export type PoolConnectionEventType =
-  | ClientEventType
+export type ClientEventType =
+  | DriverEventType
   | "acquire"
   | "release";
 
-/**
- * EventInits
- */
-
-/**
- * SqlErrorEventInit
- */
-export interface SqlErrorEventInit<
-  IConnectable extends DriverConnectable = DriverConnectable,
-> extends ErrorEventInit {
-  connectable?: IConnectable;
+export interface EventDetail {
+  driver: Driver;
+}
+export interface ErrorEventDetail {
+  driver: Driver;
+  error: DatabaseError;
 }
 
-/**
- * DriverConnectableEventInit
- *
- * IConnectable event init
- */
-export interface DriverEventInit<
-  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  IParameterType extends DriverParameterType = DriverParameterType,
-  IQueryValues extends DriverQueryValues = DriverQueryValues,
-  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  IDriver extends Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  > = Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  >,
-> extends EventInit {
-  connection: IDriver;
-}
+export class DriverEvent<
+  T extends DriverEventType = DriverEventType,
+  D extends EventDetail = T extends "error" ? ErrorEventDetail : EventDetail,
+> extends CustomEvent<T, D> {}
 
-/**
- * Event classes
- */
+export class ClientEvent<
+  T extends ClientEventType = ClientEventType,
+  D extends EventDetail = T extends "error" ? ErrorEventDetail : EventDetail,
+> extends CustomEvent<T, D> {}
 
-/**
- * Base error event class
- */
-export class SqlErrorEvent<
-  IEventInit extends SqlErrorEventInit = SqlErrorEventInit,
-> extends ErrorEvent {
-  constructor(type: "error", eventInitDict?: IEventInit) {
-    super(type, eventInitDict);
-  }
-}
+export class DriverEventTarget<
+  T extends DriverEventType = DriverEventType,
+  E extends CustomEvent<T> = CustomEvent<T>,
+  L extends CustomEventListenerOrEventListenerObject<E> =
+    CustomEventListenerOrEventListenerObject<E>,
+  AO extends AddEventListenerOptions = AddEventListenerOptions,
+  RO extends EventListenerOptions = EventListenerOptions,
+> extends CustomEventTarget<T, E, L, AO, RO> {}
 
-/**
- * Base event class
- */
-export class SqlEvent<
-  IEventType extends PoolConnectionEventType = PoolConnectionEventType,
-  IEventInit extends DriverEventInit = DriverEventInit,
-> extends Event {
-  constructor(type: IEventType, eventInitDict?: IEventInit) {
-    super(type, eventInitDict);
-  }
-}
-
-/**
- * Gets dispatched when a connection is established
- */
-export class ConnectEvent<
-  IEventInit extends DriverEventInit = DriverEventInit,
-> extends SqlEvent<"connect", IEventInit> {
-  constructor(eventInitDict: IEventInit) {
-    super("connect", eventInitDict);
-  }
-}
-
-/**
- * Gets dispatched when a connection is about to be closed
- */
-export class CloseEvent<
-  IEventInit extends DriverEventInit = DriverEventInit,
-> extends SqlEvent<"close", IEventInit> {
-  constructor(eventInitDict: IEventInit) {
-    super("close", eventInitDict);
-  }
-}
-
-/**
- * Gets dispatched when a connection is acquired from the pool
- */
-export class AcquireEvent<
-  IEventInit extends DriverEventInit = DriverEventInit,
-> extends SqlEvent<"acquire", IEventInit> {
-  constructor(eventInitDict: IEventInit) {
-    super("acquire", eventInitDict);
-  }
-}
-
-/**
- * Gets dispatched when a connection is released back to the pool
- */
-export class ReleaseEvent<
-  IEventInit extends DriverEventInit = DriverEventInit,
-> extends SqlEvent<"release", IEventInit> {
-  constructor(eventInitDict: IEventInit) {
-    super("release", eventInitDict);
-  }
-}
-
-/**
- * Event targets
- */
-
-/**
- * EventTarget
- *
- * The EventTarget to be used
- */
-export class SqlEventTarget<
-  IConnectionOptions extends DriverConnectionOptions = DriverConnectionOptions,
-  IQueryOptions extends DriverQueryOptions = DriverQueryOptions,
-  IParameterType extends DriverParameterType = DriverParameterType,
-  IQueryValues extends DriverQueryValues = DriverQueryValues,
-  IQueryMeta extends DriverQueryMeta = DriverQueryMeta,
-  IDriver extends Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  > = Driver<
-    IConnectionOptions,
-    IQueryOptions,
-    IParameterType,
-    IQueryValues,
-    IQueryMeta
-  >,
-  IEventType extends PoolConnectionEventType = PoolConnectionEventType,
-  IEventInit extends DriverEventInit<IDriver> = DriverEventInit<
-    IDriver
-  >,
-  IEvent extends SqlEvent<IEventType, IEventInit> = SqlEvent<
-    IEventType,
-    IEventInit
-  >,
-  IListener extends EventListenerOrEventListenerObject =
-    EventListenerOrEventListenerObject,
-  IListenerOptions extends AddEventListenerOptions = AddEventListenerOptions,
-  IRemoveListenerOptions extends EventListenerOptions = EventListenerOptions,
-> extends EventTarget {
-  /**
-   * With typed events.
-   *
-   * @inheritdoc
-   */
-  override addEventListener(
-    type: IEventType,
-    listener: IListener | null,
-    options?: boolean | IListenerOptions,
-  ): void {
-    return super.addEventListener(type, listener, options);
-  }
-
-  /**
-   * With typed events.
-   *
-   * @inheritdoc
-   */
-  override dispatchEvent(event: IEvent): boolean {
-    return super.dispatchEvent(event);
-  }
-
-  /**
-   * With typed events.
-   *
-   * @inheritdoc
-   */
-  override removeEventListener(
-    type: IEventType,
-    callback: IListener | null,
-    options?: boolean | IRemoveListenerOptions,
-  ): void {
-    return super.removeEventListener(type, callback, options);
-  }
-}
+export class ClientEventTarget<
+  T extends ClientEventType = ClientEventType,
+  E extends ClientEvent<T> = ClientEvent<T>,
+  L extends CustomEventListenerOrEventListenerObject<E> =
+    CustomEventListenerOrEventListenerObject<E>,
+  AO extends AddEventListenerOptions = AddEventListenerOptions,
+  RO extends EventListenerOptions = EventListenerOptions,
+> extends CustomEventTarget<T, E, L, AO, RO> {}
 
 /**
  * Eventable
  */
 export interface Eventable<
-  IEventTarget extends SqlEventTarget = SqlEventTarget,
+  IEventTarget extends DriverEventTarget = DriverEventTarget,
 > {
   /**
    * The EventTarget to reduce inheritance

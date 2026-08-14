@@ -1,0 +1,218 @@
+import { ensureDir, exists } from "@std/fs";
+import { cacheFile, CacheFileOptions, denoCacheDir } from "@stdext/fs";
+import { dirname, join, resolve } from "@std/path";
+
+/**
+ * Options for dlopen function
+ */
+export type DlopenOptions = {
+  /** File options for different OS/architecture combinations */
+  filename: FilenameOptions;
+  /** Cache options for remote files */
+  cacheOptions?: CacheOptions;
+};
+
+/**
+ * File options for different operating systems and architectures
+ */
+export type FilenameOptions = {
+  [os in typeof Deno.build.os]?: {
+    [arch in typeof Deno.build.arch]?: FileOptions;
+  };
+};
+
+/**
+ * Options for a specific file
+ */
+export type FileOptions = {
+  /** Local path or remote URL to download the file from */
+  url: string | URL;
+  /** Type of file */
+  type?: FileType;
+  /** Path within archive (required for archive files such as zip) */
+  archivePath?: string;
+};
+
+/**
+ * Type of file for caching
+ * - `"lib"`: Library file
+ * - `"zip"`: Zip archive
+ */
+export type FileType = "lib" | "zip";
+
+/**
+ * Cache options extending CacheFileOptions
+ */
+export type CacheOptions = CacheFileOptions & {
+  /** Custom cache path */
+  path?: string;
+};
+
+/**
+ * Dynamically loads a library depending on OS and cache remote files
+ *
+ * @param symbols the foreign library interface symbols
+ * @param options {@link DlopenOptions} dlopen options
+ * @returns a promise that resolves to a {@link DynamicLibrary} object
+ *
+ * @example
+ * ```ts
+ * const dylib = dlopen(
+ *   {
+ *     "add": { parameters: ["isize", "isize"], result: "isize" },
+ *   },
+ *   {
+ *     filename: {
+ *       darwin: {
+ *         aarch64: { url: "https://example.com/darwin-aarch64.dylib" },
+ *       },
+ *       linux: {
+ *         x86_64: {
+ *           url: "./local_lib.so",
+ *         },
+ *         aarch64: {
+ *           url: "https://example.com/some_archive.zip",
+ *           type: "zip",
+ *           path: "path/to/lib/in/zip"
+ *         },
+ *       },
+ *     },
+ *     cacheOptions: {
+ *       cacheControl: "reload",
+ *       path: "./custom/cache/path"
+ *     }
+ *   }
+ * );
+ * ```
+ */
+export async function dlopen<const S extends Deno.ForeignLibraryInterface>(
+  symbols: S,
+  options: DlopenOptions,
+): Promise<Deno.DynamicLibrary<S>> {
+  const fileOptions = getFileOptions(options.filename);
+
+  let libFile = fileOptions.url.toString();
+
+  if (/https?:\/\//.test(libFile)) {
+    libFile = await cacheRemoteFile(fileOptions, options.cacheOptions);
+  }
+
+  return Deno.dlopen<S>(libFile, symbols);
+}
+
+/**
+ * Gets the appropriate file options for the current OS and architecture
+ *
+ * @param options {@link FilenameOptions} filename options for different platforms
+ * @returns the file options for the current platform
+ * @throws {TypeError} when file options for current OS/architecture are not provided
+ */
+export function getFileOptions(options: FilenameOptions): FileOptions {
+  const fileOptions: FileOptions | undefined = options[Deno.build.os]
+    ?.[Deno.build.arch];
+
+  if (!fileOptions) {
+    throw new TypeError(
+      `File options for current os/arch '${Deno.build.os}/${Deno.build.arch}' not provided`,
+    );
+  }
+  return fileOptions;
+}
+
+/**
+ * Caches a remote file locally
+ *
+ * @param fileOptions {@link FileOptions} file options
+ * @param cacheOptions {@link CacheOptions} cache options
+ * @returns the absolute path to the cached file
+ * @throws {TypeError} when zip file path is not provided or library not found in archive
+ */
+export async function cacheRemoteFile(
+  fileOptions: FileOptions,
+  cacheOptions?: CacheOptions,
+): Promise<string> {
+  const cachePath = await getCachePath(cacheOptions?.path);
+
+  const fileUrl = new URL(fileOptions.url);
+
+  const filePathSegments = urlToPathSegments(fileUrl);
+
+  let absoluteFilePath = join(cachePath, filePathSegments);
+
+  await ensureDir(dirname(absoluteFilePath));
+
+  await cacheFile(fileUrl, absoluteFilePath, cacheOptions);
+
+  if (cacheOptions?.cacheControl === "reload") {
+    if (fileOptions.type === "zip") {
+      if (!fileOptions.archivePath) {
+        throw new TypeError(
+          `When using file type zip, path needs to be provided`,
+        );
+      }
+      const unarchivedPath = withoutExt(absoluteFilePath);
+      await Deno.remove(unarchivedPath, { recursive: true })
+        .catch((e: Error) => e.name !== "NotFound" && console.warn(e.message));
+      await unzip(absoluteFilePath, unarchivedPath);
+      absoluteFilePath = join(unarchivedPath, fileOptions.archivePath);
+      const fileExistsInArchive = await exists(absoluteFilePath);
+      if (!fileExistsInArchive) {
+        throw new TypeError(
+          `Library not found in archive at ${absoluteFilePath}`,
+        );
+      }
+    }
+  }
+
+  return absoluteFilePath;
+}
+
+/**
+ * Gets the cache path for dlopen files
+ *
+ * @param path optional custom cache path
+ * @returns the cache path
+ */
+export async function getCachePath(path?: string): Promise<string> {
+  if (path) {
+    return resolve(path);
+  }
+
+  const denoCacheDirPath = await denoCacheDir();
+
+  return join(denoCacheDirPath, "stdext_dlopen_cache");
+}
+
+/**
+ * Converts a URL to path segments
+ *
+ * @param url the URL to convert
+ * @returns path segments as a string
+ */
+export function urlToPathSegments(url: URL): string {
+  return join(url.protocol.slice(0, -1), url.hostname, url.pathname);
+}
+
+/**
+ * Removes the file extension from a path
+ *
+ * @param path the path or URL to remove extension from
+ * @returns the path without extension
+ */
+export function withoutExt(path: string | URL): string {
+  return path.toString().replace(/\.+\w+$/, "");
+}
+
+async function unzip(src: string, dest: string): Promise<void> {
+  const cmd = new Deno.Command("unzip", {
+    args: [src, "-d", dest],
+  });
+
+  const output = await cmd.output();
+
+  if (!output.success) {
+    throw new Error(
+      `Failed to unzip:\n${new TextDecoder().decode(output.stderr)}`,
+    );
+  }
+}

@@ -232,6 +232,9 @@ supporting it, and a `Client` can have many supported `Drivers`.
 A `Client` will use the `Driver` for querying the database, and provide higher
 level and more specified methods.
 
+The `Client` interface also includes pooling functionality, allowing for
+connection pooling when needed.
+
 > All methods per spec can be either async or sync. The respective
 > implementations decide which to implement. The following examples shows async.
 
@@ -402,6 +405,8 @@ interface Client extends Queriable, Preparable, Transactionable {
   ... // other properties defined by the Driver
   readonly driver: Driver;
   ... // other properties defined further down
+  // Pooling functionality
+  poolOptions?: PoolOptions;
 }
 ```
 
@@ -410,6 +415,44 @@ interface Client extends Queriable, Preparable, Transactionable {
   advanced usecases.
 
 The driver also contains aditional properties for different usecases
+
+##### Pooling
+
+The `Client` interface includes pooling functionality:
+
+```ts
+interface PoolOptions {
+  lazyInitialization?: boolean;
+  maxSize?: number;
+}
+```
+
+- `lazyInitialization` will enable lazily initialization of connections. This
+  means that connections will only be created if there are no idle connections
+  available when acquiring a connection, and max pool size has not been reached.
+- `maxSize` sets the maximum amount of pool clients. Implementors sets the
+  default value, but a value of 1 only creates one connection.
+
+By default, a using `Client.query()` (or other query methods) will acquire a
+`PoolClient` and release it after retrieving the results.
+
+Acquiring and holding a pool client is also possible, by using the `acquire`
+method.
+
+Manual acquire and release:
+
+```ts
+const poolClient = await client.acquire();
+// Use the poolClient
+await poolClient.release();
+```
+
+Or using Explicit Resource Management:
+
+```ts
+await using poolClient = await client.acquire();
+// Use the poolClient
+```
 
 ##### Queriable
 
@@ -592,27 +635,22 @@ See the [examples](#examples) section for sample usage.
 
 #### Pool Client
 
-There are two types of clients, a `Client` used for a single connection, and a
-`ClientPool` for when a pool of clients (`PoolClient`, a subset of `Client`) is
-needed. Both the `Client` and the `ClientPool` provide the same base signature,
-although the `options` argument differs slightly (see
-[Properties](#properties-2)).
+The `PoolClient` represents an individual connection from the pool.
 
-The `PoolClients` in a `ClientPool` can either be eagerly or lazily connected
-when calling the `connect` method. The `PoolClient`s can then be acquired when
-needed.
+The `PoolClient`s can either be eagerly or lazily connected when calling the
+`connect` method. The `PoolClient`s can then be acquired when needed.
 
 ```ts
-const pool = new ClientPool(connectionUrl, connectionOptions);
-await pool.connect();
-const client = await pool.acquire(); // returns a PoolClient class
+const client = new Client(connectionUrl, { poolOptions: { maxSize: 10 } });
+await client.connect();
+const poolClient = await client.acquire(); // returns a PoolClient
 ```
 
 After a `PoolClient` is no longer needed, it must be released back to the pool
 using the `release` method.
 
 ```ts
-await client.release();
+await poolClient.release();
 ```
 
 > A `PoolClient` can also be destroyed (disconnected and removed) by using the
@@ -630,68 +668,16 @@ Using
 no manual release or close is needed.
 
 ```ts
-await using pool = new ClientPool(connectionUrl, connectionOptions);
-await pool.connect();
-await using client = await pool.acquire();
-// no need to release the client at the end
-// no need to close the pool at the end
+await using client = new Client(connectionUrl, {
+  poolOptions: { maxSize: 10 },
+});
+await client.connect();
+await using poolClient = await client.acquire();
+// no need to release the poolClient at the end
+// no need to close the client at the end
 ```
 
-##### Properties
-
-The `ClientPool` follows the same constructor signature as defined for the
-[Client](#client-api) and [Driver](#driver-api), although the `options` argument
-is extended. The same options object that is used for a `ClientPool` should be
-possible to use with a `Client`, the reverse is not required, but would allow
-for better develoment experience.
-
-```ts
-export interface Options {
-  ...  // client options defined above
-  poolOptions: {
-    lazyInitialization?: boolean;
-    maxSize?: number;
-  };
-}
-```
-
-- `lazyInitialization` will enable lazily initialization of connections. This
-  means that connections will only be created if there are no idle connections
-  available when acquiring a connection, and max pool size has not been reached.
-- `maxSize` sets the maximum amount of pool clients.
-
-```ts
-interface ClientPool extends Queriable, Preparable, Transactionable {
-  ... // other Queriable, Preparable and Transactionable properties that will automatically allocate a PoolClient
-  /**
-   * Create a connection to the database
-   */
-  connect(): Promise<void>|void;
-
-  /**
-   * Close the connection to the database
-   */
-  close(force?: boolean | number): Promise<void>|void;
-
-  /**
-   * Acquire a connection from the pool
-   */
-  acquire(): Promise<PoolClient>|PoolClient;
-  remove(client:PoolClient):Promise<void>|void
-}
-```
-
-> The `PoolClient` should extend the query methods of the `Client` and
-> facilitate `aquire` and `release` behind the scenes when calling them.
-
-- `connect` establishes a connection to the database for the PoolClients. If
-  `lazyInitialization` is set to true, no connections will be established until
-  aquired.
-- `close` waits for all clients to be released (will not allow for new ones to
-  be created) and closes all connections to the database. If the `force`
-  argument is passed as true, the connections will imediately be closed without
-  waiting. If the `force` argument is passed as a number, it will wait up to the
-  number in milliseconds for it to be released or force close the connections.
+##### PoolClient Interface
 
 ```ts
 interface PoolClient extends Queriable, Preparable, Transactionable {
@@ -720,8 +706,8 @@ classes for your database driver:
   provide a minimum set of query methods to be used to query the database
 - `PreparedStatement`: This represents a prepared statement.
 - `Transaction`: This represents a transaction.
-- `Client`: This represents a database client
-- `ClientPool`: This represents a pool of clients
+- `Client`: This represents a database client (with optional pooling
+  functionality)
 - `PoolClient`: This represents a client to be provided by a pool
 
 It is also however advisable to create additional helper classes for easier
@@ -733,7 +719,31 @@ Here is an overview of the inheritance and flow of the different interfaces. In
 most cases, these are the classes and the inheritance graph that should be
 implemented.
 
-![inheritance flow](./_assets/inheritance_flowchart.jpg)
+```mermaid
+flowchart LR
+    A[Client]
+    B[PoolClient]
+    C[Eventable]
+    D[Transactionable]
+    E[Transaction]
+    F[Preparable]
+    G[PreparedStatement]
+    H[Queriable]
+    I[Connectable]
+    J[Connection]
+
+    A -. acquire .-> B
+    A --> C
+    B --> D
+    D -. beginTransaction()/transaction() .-> E
+    E --> F
+    D --> F
+    F -. prepare() .-> G
+    G --> I
+    F --> H
+    H --> I
+    I --> J
+```
 
 ### Extending the interfaces
 

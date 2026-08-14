@@ -1,0 +1,7 @@
+{
+  "version": "0.1.0",
+  "name": "@stdext/event",
+  "exports": {
+    ".": "./mod.ts"
+  }
+}

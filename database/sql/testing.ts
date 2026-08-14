@@ -7,7 +7,6 @@ import {
 } from "@std/assert";
 import {
   assertIsClient,
-  assertIsClientPool,
   assertIsDriver,
   assertIsDriverConnectable,
   assertIsEventable,
@@ -18,8 +17,6 @@ import {
   assertIsTransaction,
   assertIsTransactionable,
   type Client,
-  type ClientPool,
-  type DriverConnectable,
   type DriverConstructor,
   type PoolClient,
   type PreparedStatement,
@@ -32,20 +29,14 @@ import type { AnyConstructor } from "@stdext/types";
 import { assertIsConnectionUrl, assertIsDriverOptions } from "./asserts.ts";
 
 export type ClientConstructorArguments<
-  IClient extends DriverConnectable = DriverConnectable,
+  IClient extends Client = Client,
 > = [
   string,
   IClient["options"],
 ];
-export type ClientPoolConstructorArguments<
-  IClient extends ClientPool = ClientPool,
-> = [string, IClient["options"]];
 export type ClientConstructor<
-  IClient extends DriverConnectable = DriverConnectable,
+  IClient extends Client = Client,
 > = AnyConstructor<IClient, ClientConstructorArguments<IClient>>;
-export type ClientPoolConstructor<
-  IClient extends ClientPool = ClientPool,
-> = AnyConstructor<IClient, ClientPoolConstructorArguments<IClient>>;
 
 /**
  * Test the Driver class
@@ -367,23 +358,6 @@ export function testPoolClient(
 }
 
 /**
- * Test the ClientPool class
- * @param value The ClientPool
- * @param expects The values to test against
- */
-export function testClientPool(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: ClientPool["options"];
-  },
-) {
-  assertIsClientPool(value);
-  testEventable(value);
-  assertEquals(value.connectionUrl, expects.connectionUrl);
-}
-
-/**
  * Tests the connection of a Client
  */
 export async function testClientConnection<
@@ -395,79 +369,11 @@ export async function testClientConnection<
 ): Promise<void> {
   await t.step("testConnectAndClose", async (t) => {
     await t.step("should connect and close with using", async () => {
-      await using db = new Client(...clientArguments);
-
-      await db.connect();
-    });
-
-    await t.step("should connect and close", async () => {
-      const db = new Client(...clientArguments);
-
-      await db.connect();
-
-      await db.close();
-    });
-
-    await t.step("should connect and close with events", async () => {
-      const db = new Client(...clientArguments);
-
-      let connectListenerCalled = false;
-      let closeListenerCalled = false;
-      let error: Error | undefined = undefined;
-
-      try {
-        db.eventTarget.addEventListener("connect", () => {
-          connectListenerCalled = true;
-        });
-
-        db.eventTarget.addEventListener("close", () => {
-          closeListenerCalled = true;
-        });
-
-        await db.connect();
-        await db.close();
-      } catch (e) {
-        error = e as Error;
-      }
-
-      assert(
-        connectListenerCalled,
-        "Connect listener not called: " + error?.message,
-      );
-      assert(
-        closeListenerCalled,
-        "Close listener not called: " + error?.message,
-      );
-    });
-  });
-}
-
-/**
- * Tests the connection of a ClientPool
- */
-export async function testClientPoolConnection<
-  IClient extends ClientPool = ClientPool,
->(
-  t: Deno.TestContext,
-  Client: ClientPoolConstructor<IClient>,
-  clientArguments: ClientPoolConstructorArguments<IClient>,
-): Promise<void> {
-  await t.step("testConnectAndClose", async (t) => {
-    await t.step("should connect and close", async () => {
-      const db = new Client(...clientArguments);
-
-      assertEquals(db.connected, false);
-
-      await db.connect();
-
-      await db.close();
-    });
-    await t.step("should connect and close with using", async () => {
       const opts = deepMerge<IClient["options"]>(
         clientArguments[1],
         // @ts-expect-error: ts-inference
         {
-          clientPoolOptions: {
+          poolOptions: {
             lazyInitialization: true,
           },
         },
@@ -489,6 +395,17 @@ export async function testClientPoolConnection<
         "Connect listener called, but should not have been due to lazyInitialization",
       );
     });
+
+    await t.step("should connect and close", async () => {
+      const db = new Client(...clientArguments);
+
+      assertEquals(db.connected, false);
+
+      await db.connect();
+
+      await db.close();
+    });
+
     await t.step("should connect and close with events", async () => {
       const db = new Client(clientArguments[0], {
         ...clientArguments[1],

@@ -1,0 +1,8 @@
+{
+  "version": "0.0.0-1",
+  "name": "@stdext/fs",
+  "exports": {
+    ".": "./mod.ts",
+    "./cache": "./cache.ts"
+  }
+}
