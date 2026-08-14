@@ -31,11 +31,46 @@ import {
 } from "./utils.ts";
 import { validate as _validate } from "./validator.ts";
 
+/**
+ * Combined properties from both StandardSchemaV1 and StandardJSONSchemaV1.
+ * This interface merges the props from both schema standards.
+ *
+ * @template Input - The input type for the schema
+ * @template Output - The output type for the schema
+ *
+ * @example
+ * ```typescript
+ * type MyProps = CombinedProps<string, number>;
+ * ```
+ */
 export interface CombinedProps<Input = unknown, Output = Input>
   extends
     StandardSchemaV1.Props<Input, Output>,
     StandardJSONSchemaV1.Props<Input, Output> {}
 
+/**
+ * An interface that combines StandardJSONSchema and StandardSchema.
+ * This provides a comprehensive schema type that supports both standards.
+ *
+ * @template Input - The input type for the schema
+ * @template Output - The output type for the schema
+ *
+ * @example
+ * ```typescript
+ * const schema: StandardSchemaWithJSONSchema<string, number> = {
+ *   type: "string",
+ *   "~standard": {
+ *     version: 1,
+ *     vendor: "@stdext/validation",
+ *     validate: (value) => ({ value: parseInt(value) }),
+ *     jsonSchema: {
+ *       input: () => ({ type: "string" }),
+ *       output: () => ({ type: "number" }),
+ *     },
+ *   },
+ * };
+ * ```
+ */
 export interface StandardSchemaWithJSONSchema<Input = unknown, Output = Input>
   extends
     StandardSchemaV1<Input, Output>,
@@ -58,6 +93,20 @@ export interface StandardSchemaWithJSONSchema<Input = unknown, Output = Input>
   unevaluatedProperties?: StandardSchemaWithJSONSchemaInternal;
 }
 
+/**
+ * Schema internal type that can be either a StandardSchemaWithJSONSchema or a boolean.
+ * Used for nested schema definitions.
+ *
+ * @template Input - The input type for the schema
+ * @template Output - The output type for the schema
+ *
+ * @see {@link JSONSchemaInternal}
+ *
+ * @example
+ * ```typescript
+ * type MySchemaInternal = StandardSchemaWithJSONSchemaInternal<string, number>;
+ * ```
+ */
 export type StandardSchemaWithJSONSchemaInternal<
   Input = unknown,
   Output = Input,
@@ -143,6 +192,19 @@ const msg = {
     }`,
 } as const;
 
+/**
+ * Schema properties for a specific type.
+ * Combines StandardSchemaWithJSONSchema properties with a specific type.
+ *
+ * @template Type - The schema type (e.g., "string", "number", "object")
+ * @template Input - The input type for the schema
+ * @template Output - The output type for the schema
+ *
+ * @example
+ * ```typescript
+ * type StringSchemaProps = SchemaProps<"string", string, string>;
+ * ```
+ */
 export type SchemaProps<
   Type extends SchemaType,
   Input = unknown,
@@ -156,6 +218,30 @@ export type SchemaProps<
     "type": Type;
   };
 
+/**
+ * Internal function to create a schema object with standard properties.
+ * Combines the provided props with the standard schema metadata.
+ *
+ * @template Type - The schema type (e.g., "string", "number", "object")
+ * @template Input - The input type for the schema
+ * @template Output - The output type for the schema
+ * @template Props - The schema properties type
+ * @param props - The schema properties to include
+ * @param options - The standard schema options including validate, input, and output functions
+ * @returns A complete schema object with standard metadata
+ *
+ * @example
+ * ```typescript
+ * const boolSchema = schema(
+ *   { type: "boolean" },
+ *   {
+ *     validate: (value) => typeof value === "boolean" ? { value } : { issues: [{ message: "Not a boolean" }] },
+ *     input: () => ({ type: "boolean" }),
+ *     output: () => ({ type: "boolean" }),
+ *   }
+ * );
+ * ```
+ */
 function schema<
   Type extends SchemaType = SchemaType,
   Input = unknown,
@@ -187,6 +273,20 @@ function schema<
   };
 }
 
+/**
+ * Schema object type that combines StandardSchemaWithJSONSchema with specific props.
+ * This is the return type for all schema creation functions.
+ *
+ * @template Type - The schema type (e.g., "string", "number", "object")
+ * @template Input - The input type for the schema
+ * @template Output - The output type for the schema
+ * @template Props - The schema properties type
+ *
+ * @example
+ * ```typescript
+ * const boolSchema: SchemaObject<"boolean", boolean, boolean> = boolean();
+ * ```
+ */
 export type SchemaObject<
   Type extends SchemaType,
   Input = unknown,
@@ -198,10 +298,27 @@ export type SchemaObject<
   >,
 > = StandardSchemaWithJSONSchema<Input, Output> & Props;
 
+/**
+ * Options for boolean schema creation.
+ * Currently a placeholder for future boolean-specific options.
+ */
 // deno-lint-ignore no-empty-interface
 export interface BooleanOptions {
 }
 
+/**
+ * Creates a boolean schema that validates boolean values.
+ *
+ * @param options - Optional boolean schema options
+ * @returns A schema object for boolean validation
+ *
+ * @example
+ * ```typescript
+ * const boolSchema = boolean();
+ * const result = validate(boolSchema, true);
+ * // result: { value: true }
+ * ```
+ */
 export function boolean(
   options?: BooleanOptions,
 ): SchemaObject<"boolean", boolean, boolean> {
@@ -231,6 +348,19 @@ export function boolean(
   );
 }
 
+/**
+ * Options for number schema creation.
+ * Includes constraints like minimum, maximum, and multiples.
+ *
+ * @example
+ * ```typescript
+ * const numberOptions: NumberOptions = {
+ *   minimum: 0,
+ *   maximum: 100,
+ *   multipleOf: 5,
+ * };
+ * ```
+ */
 export interface NumberOptions extends
   Pick<
     JSONSchema,
@@ -242,6 +372,20 @@ export interface NumberOptions extends
   > {
 }
 
+/**
+ * Creates a number schema that validates numeric values.
+ * Supports constraints like minimum, maximum, and multiples.
+ *
+ * @param options - Optional number schema options
+ * @returns A schema object for number validation
+ *
+ * @example
+ * ```typescript
+ * const numberSchema = number({ minimum: 0, maximum: 100 });
+ * const result = validate(numberSchema, 42);
+ * // result: { value: 42 }
+ * ```
+ */
 export function number(
   options?: NumberOptions,
 ): SchemaObject<"number", number, number> {
@@ -344,9 +488,35 @@ export function number(
   );
 }
 
+/**
+ * Options for integer schema creation.
+ * Extends NumberOptions and validates that values are safe integers.
+ *
+ * @example
+ * ```typescript
+ * const integerOptions: IntegerOptions = {
+ *   minimum: 0,
+ *   maximum: 100,
+ * };
+ * ```
+ */
 export interface IntegerOptions extends NumberOptions {
 }
 
+/**
+ * Creates an integer schema that validates integer values.
+ * Values must be numbers that are safe integers (Number.isSafeInteger).
+ *
+ * @param options - Optional integer schema options
+ * @returns A schema object for integer validation
+ *
+ * @example
+ * ```typescript
+ * const integerSchema = integer({ minimum: 0, maximum: 100 });
+ * const result = validate(integerSchema, 42);
+ * // result: { value: 42 }
+ * ```
+ */
 export function integer(
   options?: IntegerOptions,
 ): SchemaObject<"integer", number, number> {
@@ -386,10 +556,37 @@ export function integer(
   );
 }
 
+/**
+ * Options for string schema creation.
+ * Includes constraints like minLength, maxLength, pattern, and format.
+ *
+ * @example
+ * ```typescript
+ * const stringOptions: StringOptions = {
+ *   minLength: 5,
+ *   maxLength: 100,
+ *   format: "email",
+ * };
+ * ```
+ */
 export interface StringOptions
   extends Pick<JSONSchema, "minLength" | "maxLength" | "pattern" | "format"> {
 }
 
+/**
+ * Creates a string schema that validates string values.
+ * Supports constraints like minLength, maxLength, pattern, and various formats.
+ *
+ * @param options - Optional string schema options
+ * @returns A schema object for string validation
+ *
+ * @example
+ * ```typescript
+ * const emailSchema = string({ format: "email" });
+ * const result = validate(emailSchema, "user@example.com");
+ * // result: { value: "user@example.com" }
+ * ```
+ */
 export function string(
   options?: StringOptions,
 ): SchemaObject<"string", string, string> {
@@ -549,10 +746,27 @@ export function string(
   );
 }
 
+/**
+ * Options for nullable schema creation.
+ * Currently a placeholder for future nullable-specific options.
+ */
 // deno-lint-ignore no-empty-interface
 export interface NullableOptions {
 }
 
+/**
+ * Creates a null schema that validates null values.
+ *
+ * @param options - Optional nullable schema options
+ * @returns A schema object for null validation
+ *
+ * @example
+ * ```typescript
+ * const nullSchema = nullable();
+ * const result = validate(nullSchema, null);
+ * // result: { value: null }
+ * ```
+ */
 export function nullable(
   options?: NullableOptions,
 ): SchemaObject<"null", null, null> {
@@ -582,6 +796,20 @@ export function nullable(
   );
 }
 
+/**
+ * Options for array schema creation.
+ * Includes constraints for array items, length, and uniqueness.
+ *
+ * @example
+ * ```typescript
+ * const arrayOptions: ArrayOptions = {
+ *   items: string(),
+ *   minItems: 1,
+ *   maxItems: 10,
+ *   uniqueItems: true,
+ * };
+ * ```
+ */
 export interface ArrayOptions extends
   Pick<
     StandardSchemaWithJSONSchema,
@@ -597,6 +825,20 @@ export interface ArrayOptions extends
   > {
 }
 
+/**
+ * Creates an array schema that validates array values.
+ * Supports constraints for items, length, and uniqueness.
+ *
+ * @param options - Optional array schema options
+ * @returns A schema object for array validation
+ *
+ * @example
+ * ```typescript
+ * const stringArraySchema = array({ items: string(), minItems: 1 });
+ * const result = validate(stringArraySchema, ["hello", "world"]);
+ * // result: { value: ["hello", "world"] }
+ * ```
+ */
 export function array(
   options?: ArrayOptions,
 ): SchemaObject<"array", unknown[], unknown[]> {
@@ -790,6 +1032,22 @@ export function array(
   );
 }
 
+/**
+ * Options for object schema creation.
+ * Includes constraints for properties, patterns, and additional properties.
+ *
+ * @example
+ * ```typescript
+ * const objectOptions: ObjectOptions = {
+ *   properties: {
+ *     name: string(),
+ *     age: number(),
+ *   },
+ *   required: ["name"],
+ *   additionalProperties: false,
+ * };
+ * ```
+ */
 export interface ObjectOptions extends
   Pick<
     StandardSchemaWithJSONSchema,
@@ -804,6 +1062,26 @@ export interface ObjectOptions extends
   > {
 }
 
+/**
+ * Creates an object schema that validates object values.
+ * Supports constraints for properties, patterns, and additional properties.
+ *
+ * @param options - Optional object schema options
+ * @returns A schema object for object validation
+ *
+ * @example
+ * ```typescript
+ * const personSchema = object({
+ *   properties: {
+ *     name: string(),
+ *     age: number(),
+ *   },
+ *   required: ["name"],
+ * });
+ * const result = validate(personSchema, { name: "Alice", age: 30 });
+ * // result: { value: { name: "Alice", age: 30 } }
+ * ```
+ */
 export function object(
   options?: ObjectOptions,
 ): SchemaObject<"object", object, object> {
@@ -994,6 +1272,17 @@ export function object(
   );
 }
 
+/**
+ * Options for combination schema creation.
+ * Includes allOf, anyOf, oneOf, and not for combining multiple schemas.
+ *
+ * @example
+ * ```typescript
+ * const combinationOptions: CombinationOptions = {
+ *   allOf: [string(), { minLength: 5 }],
+ * };
+ * ```
+ */
 export interface CombinationOptions extends
   Pick<
     StandardSchemaWithJSONSchema,
@@ -1001,6 +1290,22 @@ export interface CombinationOptions extends
   > {
 }
 
+/**
+ * Creates a combination schema that combines multiple schemas.
+ * Supports allOf, anyOf, oneOf, and not for complex validation logic.
+ *
+ * @param options - Optional combination schema options
+ * @returns A schema object for combination validation
+ *
+ * @example
+ * ```typescript
+ * const combinedSchema = combination({
+ *   allOf: [string(), { minLength: 5 }],
+ * });
+ * const result = validate(combinedSchema, "hello world");
+ * // result: { value: "hello world" }
+ * ```
+ */
 export function combination(
   options?: CombinationOptions,
 ): SchemaObject<"combination", unknown, unknown> {
