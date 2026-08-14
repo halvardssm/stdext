@@ -845,8 +845,7 @@ export interface ArrayOptions extends
  * @template Options - The {@link ArrayOptions} passed to the builder
  */
 export type ArrayElementOutput<Options extends ArrayOptions | undefined> =
-  Options extends { items: infer Items }
-    ? InferMemberOutput<Items>[]
+  Options extends { items: infer Items } ? InferMemberOutput<Items>[]
     : unknown[];
 
 /**
@@ -1102,8 +1101,8 @@ export interface ObjectOptions extends
  *
  * @template O - The {@link ObjectOptions} passed to the builder
  */
-export type ObjectElementOutput<O extends ObjectOptions | undefined> =
-  O extends { properties?: infer P } ? InferObjectOutput<P> : object;
+export type ObjectElementOutput<O extends ObjectOptions | undefined> = O extends
+  { properties?: infer P } ? InferObjectOutput<P> : object;
 
 /**
  * Creates an object schema that validates object values.
@@ -1393,7 +1392,10 @@ export function combination<
   return schema(
     { type: "combination", ...options },
     {
-      validate: (value, _opts): StandardSchemaV1.Result<CombinationElementOutput<O>> => {
+      validate: (
+        value,
+        _opts,
+      ): StandardSchemaV1.Result<CombinationElementOutput<O>> => {
         const validateAndCount = (
           schemas: StandardSchemaV1 | StandardSchemaV1[],
         ) => {

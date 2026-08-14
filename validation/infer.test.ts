@@ -26,10 +26,9 @@ type IsSubtype<Actual, Expected> = Actual extends Expected ? true : never;
  * Asserts that `Actual` and `Expected` are exactly the same type by requiring
  * mutual assignability. Use `IsExact` when the types must match precisely.
  */
-type IsExact<Actual, Expected> =
-  IsSubtype<Actual, Expected> extends true
-    ? IsSubtype<Expected, Actual> extends true ? true : never
-    : never;
+type IsExact<Actual, Expected> = IsSubtype<Actual, Expected> extends true
+  ? IsSubtype<Expected, Actual> extends true ? true : never
+  : never;
 
 /** Marker const used to force evaluation of a type-level assertion. */
 const ok: true = true;

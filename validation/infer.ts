@@ -43,10 +43,10 @@ export type InferInput<S> =
  * type Out = InferOutput<typeof s>; // string
  * ```
  */
-export type InferOutput<S> =
-  S extends { "~standard": { types?: { output: infer O } } } ? O
-    : S extends StandardSchemaV1<infer _I, infer O> ? O
-    : unknown;
+export type InferOutput<S> = S extends
+  { "~standard": { types?: { output: infer O } } } ? O
+  : S extends StandardSchemaV1<infer _I, infer O> ? O
+  : unknown;
 
 /**
  * Resolves the output type of a {@link SchemaObject} member of an array or
