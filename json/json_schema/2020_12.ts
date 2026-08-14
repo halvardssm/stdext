@@ -116,7 +116,7 @@ export interface StringSchema extends JSONSchema {
  *
  * @see {@link https://json-schema.org/draft/2020-12/meta/core}
  */
-interface CoreVocabulary {
+export interface CoreVocabulary {
   $id?: string;
   $schema?: "https://json-schema.org/draft/2020-12/schema";
   $ref?: string;
@@ -133,9 +133,9 @@ interface CoreVocabulary {
  *
  * @see {@link https://json-schema.org/draft/2020-12/meta/applicator}
  */
-interface ApplicatorVocabulary {
+export interface ApplicatorVocabulary {
   prefixItems?: JSONSchemaInternal[];
-  items?: JSONSchemaInternal | JSONSchemaInternal[];
+  items?: JSONSchemaInternal;
   contains?: JSONSchemaInternal;
   additionalProperties?: JSONSchemaInternal;
   properties?: Record<string, JSONSchemaInternal>;
@@ -151,23 +151,26 @@ interface ApplicatorVocabulary {
   not?: JSONSchemaInternal;
 }
 
+export type SchemaType =
+  | "array"
+  | "boolean"
+  | "integer"
+  | "null"
+  | "number"
+  | "object"
+  | "string"
+  | ({} & string);
+
 /**
  * ValidationVocabulary
  *
  * @see {@link https://json-schema.org/draft/2020-12/meta/validation}
  */
-interface ValidationVocabulary {
+export interface ValidationVocabulary {
   /**
    * The type of the object
    */
-  type?:
-    | "array"
-    | "boolean"
-    | "integer"
-    | "null"
-    | "number"
-    | "object"
-    | "string";
+  type?: SchemaType;
   const?: unknown;
   enum?: unknown[];
   multipleOf?: number;
@@ -194,10 +197,30 @@ interface ValidationVocabulary {
  *
  * @see {@link https://json-schema.org/draft/2020-12/meta/unevaluated}
  */
-interface UnevaluatedVocabulary {
+export interface UnevaluatedVocabulary {
   unevaluatedItems?: JSONSchemaInternal;
   unevaluatedProperties?: JSONSchemaInternal;
 }
+
+export type FormatType =
+  | "date-time"
+  | "date"
+  | "time"
+  | "duration"
+  | "email"
+  | "idn-email"
+  | "hostname"
+  | "idn-hostname"
+  | "ipv4"
+  | "ipv6"
+  | "uri"
+  | "uri-reference"
+  | "iri"
+  | "iri-reference"
+  | "uuid"
+  | "json-pointer"
+  | "relative-json-pointer"
+  | ({} & string);
 
 /**
  * FormatVocabulary
@@ -205,8 +228,8 @@ interface UnevaluatedVocabulary {
  * @see {@link https://json-schema.org/draft/2020-12/meta/format-annotation}
  * @see {@link https://json-schema.org/draft/2020-12/meta/format-assertion}
  */
-interface FormatVocabulary {
-  format?: string;
+export interface FormatVocabulary {
+  format?: FormatType;
 }
 
 /**
@@ -214,7 +237,7 @@ interface FormatVocabulary {
  *
  * @see {@link https://json-schema.org/draft/2020-12/meta/content}
  */
-interface ContentVocabulary {
+export interface ContentVocabulary {
   contentEncoding?: string;
   contentMediaType?: string;
   contentSchema?: JSONSchema;
@@ -224,7 +247,7 @@ interface ContentVocabulary {
  *
  * @see {@link https://json-schema.org/draft/2020-12/meta/meta-data}
  */
-interface MetaDataVocabulary {
+export interface MetaDataVocabulary {
   title?: string;
   description?: string;
   default?: unknown;
