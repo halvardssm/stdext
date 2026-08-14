@@ -94,6 +94,18 @@ Deno.test("type inference: object schema", () => {
     InferOutput<typeof all>,
     { a?: string; b?: boolean }
   > = ok;
+
+  // JSON Schema objects may carry arbitrary extra keys (validated at runtime
+  // via additionalProperties/unevaluatedProperties), so the inferred type
+  // accepts unknown extra properties.
+  const extras = object({
+    properties: { name: string() },
+    additionalProperties: number(),
+  });
+  const _e: IsSubtype<
+    { name: string; age: number },
+    InferOutput<typeof extras>
+  > = ok;
 });
 
 Deno.test("type inference: combination schema", () => {

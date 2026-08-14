@@ -103,9 +103,16 @@ export type InferMemberOutputRecord<T> = {
  * // { name?: string; age?: number }
  * ```
  */
-export type InferObjectOutput<Properties> = {
-  [K in keyof Properties]?: InferMemberOutput<Properties[K]>;
-};
+export type InferObjectOutput<Properties> =
+  & {
+    [K in keyof Properties]?: InferMemberOutput<Properties[K]>;
+  }
+  & {
+    // JSON Schema objects may carry arbitrary keys (constrained by
+    // `additionalProperties`/`unevaluatedProperties`/`patternProperties` at
+    // runtime), so the inferred type allows unknown extra properties.
+    [key: string]: unknown;
+  };
 
 /**
  * Infers the output type of a `combination` schema from its `allOf`, `anyOf`
