@@ -4,8 +4,8 @@
 export interface InstantiateResult {
   instance: WebAssembly.Instance;
   exports: {
-    hash: typeof hash;
-    verify: typeof verify
+    verify: typeof verify;
+    hash: typeof hash
   };
 }
 
@@ -24,13 +24,6 @@ export function instantiate(): InstantiateResult["exports"];
 export function instantiateWithInstance(): InstantiateResult;
 
 /**
-* Hash a password using Bcrypt
-* @param {string} password
-* @param {BcryptOptions} options
-* @returns {string}
-*/
-export function hash(password: string, options: BcryptOptions): string;
-/**
 * Verify a password using Bcrypt
 * @param {string} password
 * @param {string} hash
@@ -38,6 +31,13 @@ export function hash(password: string, options: BcryptOptions): string;
 * @returns {boolean}
 */
 export function verify(password: string, hash: string, options: BcryptOptions): boolean;
+/**
+* Hash a password using Bcrypt
+* @param {string} password
+* @param {BcryptOptions} options
+* @returns {string}
+*/
+export function hash(password: string, options: BcryptOptions): string;
 
 /**
  * Bcrypt options

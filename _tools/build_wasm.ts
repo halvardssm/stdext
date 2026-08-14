@@ -1,6 +1,6 @@
 import { parse } from "@std/toml";
 import { resolve } from "@std/path";
-
+import denoConfig from "../deno.json" with { type: "json" };
 const isCheck = Deno.args.some((a) => a === "--check");
 const failFast = Deno.args.some((a) => a === "--fail-fast");
 
@@ -20,10 +20,10 @@ for (const member of parsedCargo.workspace.members) {
   const args: string[] = [
     "run",
     "-A",
-    "jsr:@deno/wasmbuild@0.17.1",
+    denoConfig.imports["@deno/wasmbuild"],
     "--js-ext",
     "mjs",
-    "--sync",
+    "--inline",
     "--project",
     member,
     "--out",
