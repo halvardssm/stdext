@@ -1,5 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { SchemaError } from "@standard-schema/utils";
+import { stringify } from "./utils.ts";
 
 /**
  * Validates input against a StandardSchema
@@ -23,12 +24,24 @@ import { SchemaError } from "@standard-schema/utils";
  * ```
  */
 export function validateAsync<S extends StandardSchemaV1>(
-  schema: S,
-  input: StandardSchemaV1.InferInput<S>,
+  schema: S | boolean,
+  input: StandardSchemaV1.InferInput<S> | unknown,
   options?: Parameters<S["~standard"]["validate"]>[1],
 ):
   | StandardSchemaV1.Result<StandardSchemaV1.InferOutput<S>>
   | Promise<StandardSchemaV1.Result<StandardSchemaV1.InferOutput<S>>> {
+  if (schema === true) return { value: input };
+  if (schema === false) {
+    return {
+      issues: [{
+        message:
+          `Schema defines the property as false, this will always fail: ${
+            stringify(input)
+          }`,
+      }],
+    };
+  }
+
   if (!schema?.["~standard"]?.validate) {
     return { issues: [{ message: "The input is not a valid StandardSchema" }] };
   }
@@ -56,8 +69,8 @@ export function validateAsync<S extends StandardSchemaV1>(
  * ```
  */
 export function validate<S extends StandardSchemaV1>(
-  schema: S,
-  input: StandardSchemaV1.InferInput<S>,
+  schema: S | boolean,
+  input: StandardSchemaV1.InferInput<S> | unknown,
   options?: Parameters<S["~standard"]["validate"]>[1],
 ): StandardSchemaV1.Result<StandardSchemaV1.InferOutput<S>> {
   const result = validateAsync(schema, input, options);
@@ -90,8 +103,8 @@ export function validate<S extends StandardSchemaV1>(
  * ```
  */
 export async function parseAsync<S extends StandardSchemaV1>(
-  schema: S,
-  input: StandardSchemaV1.InferInput<S>,
+  schema: S | boolean,
+  input: StandardSchemaV1.InferInput<S> | unknown,
   options?: Parameters<S["~standard"]["validate"]>[1],
 ): Promise<StandardSchemaV1.InferOutput<S>> {
   let result = validateAsync(schema, input, options);
@@ -130,8 +143,8 @@ export async function parseAsync<S extends StandardSchemaV1>(
  * ```
  */
 export function parse<S extends StandardSchemaV1>(
-  schema: S,
-  input: StandardSchemaV1.InferInput<S>,
+  schema: S | boolean,
+  input: StandardSchemaV1.InferInput<S> | unknown,
   options?: Parameters<S["~standard"]["validate"]>[1],
 ): StandardSchemaV1.InferOutput<S> {
   const result = validate(schema, input, options);
