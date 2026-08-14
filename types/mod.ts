@@ -102,4 +102,6 @@ export type ValueOf<T> = T[keyof T];
  * ```
  */
 // deno-lint-ignore no-explicit-any
-export type AnyConstructor<T, A extends any[] = any[]> = new (...args: A) => T;
+export type AnyConstructor<T = any, A extends any[] = any[]> = new (
+  ...args: A
+) => T;

@@ -1,8 +1,10 @@
 {
-  "version": "0.1.0",
+  "version": "0.1.1",
   "name": "@stdext/json",
   "exports": {
     ".": "./mod.ts",
-    "./jsonpath": "./jsonpath.ts"
+    "./jsonpath": "./jsonpath.ts",
+    "./json-schema": "./json_schema.ts",
+    "./json-schema/2020-12": "./json_schema/2020_12.ts"
   }
 }

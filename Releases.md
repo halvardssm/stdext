@@ -1,3 +1,28 @@
+### 2026.08.14
+
+#### @stdext/crypto 0.1.1 (patch)
+
+- fix(crypto): Fixed errors due to changes in deno types
+
+#### @stdext/json 0.1.1 (patch)
+
+- feat(json): Added JSON Schema
+- fix(json): Added exports and format types
+- chore(json): fix lint
+
+#### @stdext/types 0.1.1 (patch)
+
+- feat(types): added new constructor type helper and added examples to existing
+  type helpers
+
+#### @stdext/validation 0.1.0 (minor)
+
+- feat(validation): Added tests and jsdoc - thanks AI
+- feat(validation): Implemented a basic validator implementing StandardSchemaV1,
+  StandardJSONSchemaV1 and JSONSchema
+- feat(validation): added validation namespace, and standard compliant validator
+- chore(validation): Added jsdoc and improved readme - thanks AI
+
 ### 2024.12.29a
 
 #### @stdext/assert 0.1.0 (minor)

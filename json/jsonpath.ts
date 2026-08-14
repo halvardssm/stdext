@@ -1,12 +1,8 @@
 import type { JsonValue } from "@std/json";
 import {
-  instantiate,
-  type InstantiateResult,
-  type JSONPath as WasmJSONPath,
+  JSONPath as WasmJSONPath,
   type JSONPathResult as WasmJSONPathResult,
-} from "./_wasm/json_jsonpath.generated.mjs";
-
-const instance: InstantiateResult["exports"] = instantiate();
+} from "./_wasm/json_jsonpath.mjs";
 
 export type JSONPathResult<Value = JsonValue> = WasmJSONPathResult<Value>;
 
@@ -25,7 +21,7 @@ export type JSONPathResult<Value = JsonValue> = WasmJSONPathResult<Value>;
 export class JSONPath {
   #wasmJsonPath: WasmJSONPath;
   constructor(data: JsonValue) {
-    this.#wasmJsonPath = new instance.JSONPath(data);
+    this.#wasmJsonPath = new WasmJSONPath(data);
   }
 
   queryWithLocation<Value = JsonValue>(

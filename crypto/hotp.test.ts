@@ -13,19 +13,19 @@ const secretBytes = decodeBase32(secret);
 
 Deno.test("counterToBuffer()", () => {
   assertEquals(
-    new Uint8Array(counterToBuffer(0).buffer),
+    counterToBuffer(0),
     new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0]),
   );
   assertEquals(
-    new Uint8Array(counterToBuffer(100).buffer),
+    counterToBuffer(100),
     new Uint8Array([0, 0, 0, 0, 0, 0, 0, 100]),
   );
   assertEquals(
-    new Uint8Array(counterToBuffer(1000).buffer),
+    counterToBuffer(1000),
     new Uint8Array([0, 0, 0, 0, 0, 0, 3, 232]),
   );
   assertEquals(
-    new Uint8Array(counterToBuffer(1000000000000).buffer),
+    counterToBuffer(1000000000000),
     new Uint8Array([0, 0, 0, 232, 212, 165, 16, 0]),
   );
 });
