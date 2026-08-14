@@ -110,38 +110,32 @@ Deno.test("type inference: object schema", () => {
     required: ["name"],
   });
   // name is required, age is optional; extras allowed as unknown
-  const vs = null as unknown as InferOutput<typeof s>;
-  const _name: string = vs.name;
-  const _age: number | undefined = vs.age;
-  const _extra: unknown = (vs as Record<string, unknown>).whatever;
+  const _a: IsSubtype<{ name: string; age?: number }, InferOutput<typeof s>> =
+    ok;
+  const _b: IsSubtype<
+    InferOutput<typeof s>,
+    { name: string; age?: number; [k: string]: unknown }
+  > = ok;
 
-  // all required
+  // all required + additionalProperties: false
   const all = object({
-    properties: {
-      a: string(),
-      b: boolean(),
-    },
+    properties: { a: string(), b: boolean() },
     required: ["a", "b"],
     additionalProperties: false,
   });
-  const va = null as unknown as InferOutput<typeof all>;
-  const _a: string = va.a;
-  const _b: boolean = va.b;
+  const _c: IsSubtype<{ a: string; b: boolean }, InferOutput<typeof all>> = ok;
 
   // no required -> all optional
   const opt = object({ properties: { x: string(), y: number() } });
-  const vo = null as unknown as InferOutput<typeof opt>;
-  const _x: string | undefined = vo.x;
-  const _y: number | undefined = vo.y;
+  const _d: IsSubtype<{ x?: string; y?: number }, InferOutput<typeof opt>> = ok;
 
-  // additionalProperties: false disallows extras (no index signature)
+  // additionalProperties: false disallows extras (strict shape)
   const strict = object({
     properties: { name: string() },
     required: ["name"],
     additionalProperties: false,
   });
-  const vstrict = null as unknown as InferOutput<typeof strict>;
-  const _sname: string = vstrict.name;
+  const _e: IsSubtype<{ name: string }, InferOutput<typeof strict>> = ok;
 
   // additionalProperties: <schema> allows extras (typed unknown to avoid
   // conflicts with declared properties of a different type)
@@ -150,9 +144,10 @@ Deno.test("type inference: object schema", () => {
     required: ["name"],
     additionalProperties: number(),
   });
-  const vextras = null as unknown as InferOutput<typeof extras>;
-  const _ename: string = vextras.name;
-  const _eextra: unknown = (vextras as Record<string, unknown>).whatever;
+  const _f: IsSubtype<
+    { name: string; extra: number },
+    InferOutput<typeof extras>
+  > = ok;
 });
 
 Deno.test("type inference: combination schema", () => {

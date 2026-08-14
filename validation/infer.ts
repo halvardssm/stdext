@@ -96,12 +96,15 @@ export type InferMemberOutputRecord<T> = {
  * @template AdditionalProperties - The `additionalProperties` option value
  */
 export type InferObjectAdditionalIndex<AdditionalProperties> =
-  // `false` disallows extra properties (a `never` index signature forbids
-  // any undeclared key). Any other value (`true`, a schema, or absent) allows
-  // extra properties; the index is typed `unknown` to avoid unsound conflicts
-  // with declared properties of a different type (the `additionalProperties`
-  // schema still validates extras at runtime).
-  AdditionalProperties extends false ? { [key: string]: never }
+  // `false` disallows extra properties by contributing no index signature, so
+  // the object type consists only of its declared (and required) keys and
+  // excess-property checks forbid undeclared keys on object literals. Any other
+  // value (`true`, a schema, or absent) allows extra properties; the index is
+  // typed `unknown` to avoid unsound conflicts with declared properties of a
+  // different type (the `additionalProperties` schema still validates extras at
+  // runtime).
+  // deno-lint-ignore ban-types
+  AdditionalProperties extends false ? {}
     : { [key: string]: unknown };
 
 /**
