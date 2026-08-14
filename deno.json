@@ -7,7 +7,8 @@
     "@std/encoding": "jsr:@std/encoding@^1",
     "@std/json": "jsr:@std/json@^1",
     "@std/path": "jsr:@std/path@^1",
-    "@std/toml": "jsr:@std/toml@^1"
+    "@std/toml": "jsr:@std/toml@^1",
+    "@deno/wasmbuild": "jsr:@deno/wasmbuild@^0"
   },
   "tasks": {
     "check": "deno task format:check && deno lint && deno check **/*.ts",
