@@ -58,6 +58,8 @@ console.log(dump(buffer));
   purpose lexers/tokenizers
 - [types](https://jsr.io/@stdext/types): The types package, contains general
   purpose type helpers
+- [validation](https://jsr.io/@stdext/validation): The validation package,
+  contains a Standard Schema compatible validator and schemas
 
 ## Versioning
 
@@ -68,7 +70,11 @@ STD, but minor and patch versions will be separated.
 
 We allow the following dependencies for JS:
 
-- [Deno Standard Library](https://github.com/denoland/deno_std)
+- Everything under the namespace [@deno](https://jsr.io/@deno) on JSR
+- Everything under the namespace [@std](https://jsr.io/@std) on JSR
+
+> - Imports for standard specifications will be decided on a case by case basis.
+> - 3rd party libraries for testing will be decided on a case by case basis.
 
 We allow no additional third-party dependencies for JS, thus all code must be
 implemented.
