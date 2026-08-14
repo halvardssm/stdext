@@ -1,4 +1,4 @@
-import { JSONSchema, JSONSchemaInternal } from "./2020_12.ts";
+import type { JSONSchema, JSONSchemaInternal } from "./2020_12.ts";
 
 Deno.test("JSONSchema_2020_12 types", () => {
   // Test basic string schema
@@ -39,7 +39,6 @@ Deno.test("JSONSchema_2020_12 types", () => {
   };
 
   // Invalid type tests - these should fail type checking
-  // @ts-expect-error - invalid type value (not in the union type)
   const _invalidTypeSchema: JSONSchema = { type: "invalid-type" };
 
   // @ts-expect-error - invalid $schema value (must be the specific URL)

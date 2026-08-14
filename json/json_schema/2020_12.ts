@@ -159,6 +159,7 @@ export type SchemaType =
   | "number"
   | "object"
   | "string"
+  // deno-lint-ignore ban-types
   | ({} & string);
 
 /**
@@ -220,6 +221,7 @@ export type FormatType =
   | "uuid"
   | "json-pointer"
   | "relative-json-pointer"
+  // deno-lint-ignore ban-types
   | ({} & string);
 
 /**
