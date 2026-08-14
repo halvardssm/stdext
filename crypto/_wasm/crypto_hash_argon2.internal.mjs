@@ -4,17 +4,17 @@
 // deno-fmt-ignore-file
 
 /**
- * Hash a password using Bcrypt
- * @param {string} password
- * @param {BcryptOptions} options
+ * Hash a password using Argon2
+ * @param {string} data
+ * @param {Argon2Options} options
  * @returns {string}
  */
-export function hash(password, options) {
+export function hash(data, options) {
   let deferred3_0;
   let deferred3_1;
   try {
     const ptr0 = passStringToWasm0(
-      password,
+      data,
       wasm.__wbindgen_malloc,
       wasm.__wbindgen_realloc,
     );
@@ -36,15 +36,15 @@ export function hash(password, options) {
 }
 
 /**
- * Verify a password using Bcrypt
- * @param {string} password
+ * Verify a password using Argon2
+ * @param {string} data
  * @param {string} hash
- * @param {BcryptOptions} options
+ * @param {Argon2Options} options
  * @returns {boolean}
  */
-export function verify(password, hash, options) {
+export function verify(data, hash, options) {
   const ptr0 = passStringToWasm0(
-    password,
+    data,
     wasm.__wbindgen_malloc,
     wasm.__wbindgen_realloc,
   );
@@ -64,6 +64,19 @@ export function verify(password, hash, options) {
 export function __wbg_Error_8c4e43fe74559d73(arg0, arg1) {
   const ret = Error(getStringFromWasm0(arg0, arg1));
   return ret;
+}
+export function __wbg___wbindgen_bigint_get_as_i64_8fcf4ce7f1ca72a2(
+  arg0,
+  arg1,
+) {
+  const v = arg1;
+  const ret = typeof v === "bigint" ? v : undefined;
+  getDataViewMemory0().setBigInt64(
+    arg0 + 8 * 1,
+    isLikeNone(ret) ? BigInt(0) : ret,
+    true,
+  );
+  getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
 }
 export function __wbg___wbindgen_boolean_get_bbbb1c18aa2f5e25(arg0) {
   const v = arg0;
@@ -85,6 +98,10 @@ export function __wbg___wbindgen_in_47fa6863be6f2f25(arg0, arg1) {
   const ret = arg0 in arg1;
   return ret;
 }
+export function __wbg___wbindgen_is_bigint_31b12575b56f32fc(arg0) {
+  const ret = typeof arg0 === "bigint";
+  return ret;
+}
 export function __wbg___wbindgen_is_function_0095a73b8b156f76(arg0) {
   const ret = typeof arg0 === "function";
   return ret;
@@ -100,6 +117,10 @@ export function __wbg___wbindgen_is_string_cd444516edc5b180(arg0) {
 }
 export function __wbg___wbindgen_is_undefined_9e4d92534c42d778(arg0) {
   const ret = arg0 === undefined;
+  return ret;
+}
+export function __wbg___wbindgen_jsval_eq_11888390b0186270(arg0, arg1) {
+  const ret = arg0 === arg1;
   return ret;
 }
 export function __wbg___wbindgen_jsval_loose_eq_9dd77d8cd6671811(arg0, arg1) {
@@ -252,6 +273,11 @@ export function __wbindgen_cast_0000000000000001(arg0, arg1) {
 export function __wbindgen_cast_0000000000000002(arg0, arg1) {
   // Cast intrinsic for `Ref(String) -> Externref`.
   const ret = getStringFromWasm0(arg0, arg1);
+  return ret;
+}
+export function __wbindgen_cast_0000000000000003(arg0) {
+  // Cast intrinsic for `U64 -> Externref`.
+  const ret = BigInt.asUintN(64, arg0);
   return ret;
 }
 export function __wbindgen_init_externref_table() {
