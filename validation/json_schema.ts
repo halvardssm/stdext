@@ -29,6 +29,11 @@ import {
   RFC6901_RELATIVE_JSON_POINTER,
   stringify,
 } from "./utils.ts";
+import type {
+  InferCombinationOutput,
+  InferMemberOutput,
+  InferObjectOutput,
+} from "./infer.ts";
 import { validate as _validate } from "./validator.ts";
 
 /**
@@ -263,6 +268,13 @@ function schema<
     "~standard": {
       version: 1,
       vendor: "@stdext/validation",
+      // Expose the inferred types so that `InferInput`/`InferOutput` (and the
+      // spec's `StandardSchemaV1.InferInput`/`InferOutput`) resolve to the
+      // schema's `Input`/`Output` rather than `unknown`.
+      types: {
+        input: undefined as unknown as Input,
+        output: undefined as unknown as Output,
+      },
       validate: options.validate,
       jsonSchema: {
         input: options.input,
@@ -826,9 +838,25 @@ export interface ArrayOptions extends
 }
 
 /**
+ * The inferred output type for an array schema's element. When `items` is a
+ * schema, this is its inferred output type; when it is a boolean or absent it
+ * falls back to `unknown`.
+ *
+ * @template Options - The {@link ArrayOptions} passed to the builder
+ */
+export type ArrayElementOutput<Options extends ArrayOptions | undefined> =
+  Options extends { items: infer Items }
+    ? InferMemberOutput<Items>[]
+    : unknown[];
+
+/**
  * Creates an array schema that validates array values.
  * Supports constraints for items, length, and uniqueness.
  *
+ * When `items` is provided, the schema's input and output types are inferred
+ * from the item schema (e.g. `array({ items: string() })` infers `string[]`).
+ *
+ * @template O - The array options, used to infer the element type
  * @param options - Optional array schema options
  * @returns A schema object for array validation
  *
@@ -837,11 +865,12 @@ export interface ArrayOptions extends
  * const stringArraySchema = array({ items: string(), minItems: 1 });
  * const result = validate(stringArraySchema, ["hello", "world"]);
  * // result: { value: ["hello", "world"] }
+ * const parsed: string[] = parse(stringArraySchema, ["hello", "world"]);
  * ```
  */
-export function array(
-  options?: ArrayOptions,
-): SchemaObject<"array", unknown[], unknown[]> {
+export function array<O extends ArrayOptions | undefined = undefined>(
+  options?: O,
+): SchemaObject<"array", ArrayElementOutput<O>, ArrayElementOutput<O>> {
   return schema(
     { type: "array", ...options },
     {
@@ -996,7 +1025,9 @@ export function array(
           }
         }
 
-        return issues.length ? { issues } : { value };
+        return issues.length
+          ? { issues }
+          : { value: value as ArrayElementOutput<O> };
       },
       input: (params) => {
         return {
@@ -1063,9 +1094,26 @@ export interface ObjectOptions extends
 }
 
 /**
+ * The inferred output type for an object schema, derived from its `properties`.
+ *
+ * All inferred properties are marked optional. JSON Schema's `required` field
+ * is typed as `string[]`, which widens array literals and therefore cannot be
+ * used to reliably distinguish required from optional keys at the type level.
+ *
+ * @template O - The {@link ObjectOptions} passed to the builder
+ */
+export type ObjectElementOutput<O extends ObjectOptions | undefined> =
+  O extends { properties?: infer P } ? InferObjectOutput<P> : object;
+
+/**
  * Creates an object schema that validates object values.
  * Supports constraints for properties, patterns, and additional properties.
  *
+ * When `properties` is provided, the schema's input and output types are inferred
+ * from the property schemas. All inferred properties are marked optional (see
+ * {@link ObjectElementOutput}).
+ *
+ * @template O - The object options, used to infer the output shape
  * @param options - Optional object schema options
  * @returns A schema object for object validation
  *
@@ -1080,11 +1128,12 @@ export interface ObjectOptions extends
  * });
  * const result = validate(personSchema, { name: "Alice", age: 30 });
  * // result: { value: { name: "Alice", age: 30 } }
+ * const parsed: { name?: string; age?: number } = parse(personSchema, { name: "Alice" });
  * ```
  */
-export function object(
-  options?: ObjectOptions,
-): SchemaObject<"object", object, object> {
+export function object<O extends ObjectOptions | undefined = undefined>(
+  options?: O,
+): SchemaObject<"object", ObjectElementOutput<O>, ObjectElementOutput<O>> {
   return schema(
     { type: "object", ...options },
     {
@@ -1238,7 +1287,9 @@ export function object(
           }
         }
 
-        return issues.length ? { issues } : { value };
+        return issues.length
+          ? { issues }
+          : { value: value as ObjectElementOutput<O> };
       },
       input: (params) => {
         return {
@@ -1291,9 +1342,32 @@ export interface CombinationOptions extends
 }
 
 /**
+ * The inferred output type for a combination schema, derived as the union of
+ * the inferred output types of its `allOf`, `anyOf` and `oneOf` members. When
+ * no members are present the result is `unknown`.
+ *
+ * @template O - The {@link CombinationOptions} passed to the builder
+ */
+export type CombinationElementOutput<O extends CombinationOptions | undefined> =
+  O extends {
+    allOf?: infer A;
+    anyOf?: infer B;
+    oneOf?: infer C;
+  } ? InferCombinationOutput<
+      A extends ReadonlyArray<unknown> ? A : [],
+      B extends ReadonlyArray<unknown> ? B : [],
+      C extends ReadonlyArray<unknown> ? C : []
+    >
+    : unknown;
+
+/**
  * Creates a combination schema that combines multiple schemas.
  * Supports allOf, anyOf, oneOf, and not for complex validation logic.
  *
+ * When `allOf`, `anyOf` or `oneOf` are provided, the schema's input and output
+ * types are inferred as the union of the member schemas' output types.
+ *
+ * @template O - The combination options, used to infer the output union
  * @param options - Optional combination schema options
  * @returns A schema object for combination validation
  *
@@ -1304,15 +1378,22 @@ export interface CombinationOptions extends
  * });
  * const result = validate(combinedSchema, "hello world");
  * // result: { value: "hello world" }
+ * const parsed: string = parse(combinedSchema, "hello world");
  * ```
  */
-export function combination(
-  options?: CombinationOptions,
-): SchemaObject<"combination", unknown, unknown> {
+export function combination<
+  O extends CombinationOptions | undefined = undefined,
+>(
+  options?: O,
+): SchemaObject<
+  "combination",
+  CombinationElementOutput<O>,
+  CombinationElementOutput<O>
+> {
   return schema(
     { type: "combination", ...options },
     {
-      validate: (value, _opts) => {
+      validate: (value, _opts): StandardSchemaV1.Result<CombinationElementOutput<O>> => {
         const validateAndCount = (
           schemas: StandardSchemaV1 | StandardSchemaV1[],
         ) => {
@@ -1364,7 +1445,7 @@ export function combination(
             return { issues };
           }
         }
-        return { value };
+        return { value: value as CombinationElementOutput<O> };
       },
       input: (params) => {
         return {

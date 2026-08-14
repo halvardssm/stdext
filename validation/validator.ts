@@ -3,6 +3,13 @@ import { SchemaError } from "@standard-schema/utils";
 import { stringify } from "./utils.ts";
 
 /**
+ * Re-export of the inference helpers for convenience. These read the schema's
+ * `~standard.types` field (set by the schema builders in `./json_schema.ts`)
+ * so that the input/output types of any Standard Schema can be extracted.
+ */
+export type { InferInput, InferOutput } from "./infer.ts";
+
+/**
  * Validates input against a StandardSchema
  *
  * Support both sync and async validate methods according to spec
@@ -25,7 +32,7 @@ import { stringify } from "./utils.ts";
  */
 export function validateAsync<S extends StandardSchemaV1>(
   schema: S | boolean,
-  input: StandardSchemaV1.InferInput<S> | unknown,
+  input: unknown,
   options?: Parameters<S["~standard"]["validate"]>[1],
 ):
   | StandardSchemaV1.Result<StandardSchemaV1.InferOutput<S>>
@@ -70,7 +77,7 @@ export function validateAsync<S extends StandardSchemaV1>(
  */
 export function validate<S extends StandardSchemaV1>(
   schema: S | boolean,
-  input: StandardSchemaV1.InferInput<S> | unknown,
+  input: unknown,
   options?: Parameters<S["~standard"]["validate"]>[1],
 ): StandardSchemaV1.Result<StandardSchemaV1.InferOutput<S>> {
   const result = validateAsync(schema, input, options);
@@ -104,7 +111,7 @@ export function validate<S extends StandardSchemaV1>(
  */
 export async function parseAsync<S extends StandardSchemaV1>(
   schema: S | boolean,
-  input: StandardSchemaV1.InferInput<S> | unknown,
+  input: unknown,
   options?: Parameters<S["~standard"]["validate"]>[1],
 ): Promise<StandardSchemaV1.InferOutput<S>> {
   let result = validateAsync(schema, input, options);
@@ -144,7 +151,7 @@ export async function parseAsync<S extends StandardSchemaV1>(
  */
 export function parse<S extends StandardSchemaV1>(
   schema: S | boolean,
-  input: StandardSchemaV1.InferInput<S> | unknown,
+  input: unknown,
   options?: Parameters<S["~standard"]["validate"]>[1],
 ): StandardSchemaV1.InferOutput<S> {
   const result = validate(schema, input, options);
