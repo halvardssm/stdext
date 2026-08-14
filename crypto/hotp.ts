@@ -1,13 +1,14 @@
 import { decodeBase32 } from "@std/encoding";
 
-/** Converts a counter value to a DataView.
+/** Converts a counter value to a BufferSource.
  *
  * @ignore
  */
-export function counterToBuffer(counter: number): DataView {
-  const buffer = new DataView(new ArrayBuffer(8));
-  buffer.setBigUint64(0, BigInt(counter), false);
-  return buffer;
+export function counterToBuffer(counter: number): Uint8Array {
+  const buffer = new ArrayBuffer(8);
+  const view = new DataView(buffer);
+  view.setBigUint64(0, BigInt(counter), false);
+  return new Uint8Array(buffer);
 }
 
 /** Generates a HMAC-SHA1 hash of the specified key and counter.
@@ -15,7 +16,7 @@ export function counterToBuffer(counter: number): DataView {
  * @ignore
  */
 export async function generateHmacSha1(
-  key: Uint8Array,
+  key: BufferSource,
   data: BufferSource,
 ): Promise<Uint8Array> {
   const importedKey = await crypto.subtle.importKey(
@@ -62,7 +63,14 @@ export async function generateHotp(
   const parsedKey = typeof key === "string" ? decodeBase32(key) : key;
   const buffer = counterToBuffer(counter);
 
-  const hmac = await generateHmacSha1(parsedKey, buffer);
+  const hmac = await generateHmacSha1(
+    new Uint8Array(
+      parsedKey.buffer as ArrayBuffer,
+      parsedKey.byteOffset,
+      parsedKey.byteLength,
+    ) as BufferSource,
+    buffer as BufferSource,
+  );
   return truncate(hmac, 6);
 }
 
