@@ -150,3 +150,65 @@ const outputSchema = getStandardJSONSchemaV1Output(mySchema, {
   target: "draft-2020-12",
 });
 ```
+
+### Type Inference
+
+The schema builders and validator functions are fully typed. The input type of
+`validate`/`parse` and the return type of `parse` are inferred from the schema,
+including for composed schemas (`array`, `object`, `combination`).
+
+```ts
+import {
+  array,
+  combination,
+  InferInput,
+  InferOutput,
+  number,
+  object,
+  parse,
+  string,
+} from "@stdext/validation";
+
+// Scalars infer their own type
+const str = string();
+type T = InferOutput<typeof str>; // string
+const parsed: string = parse(str, "hello");
+
+// Arrays infer the element type
+const tags = array({ items: string() });
+type Tags = InferOutput<typeof tags>; // string[]
+const arr: string[] = parse(tags, ["a", "b"]);
+
+// prefixItems infers a fixed tuple, and items/unevaluatedItems/contains append
+// a variadic tail
+const tuple = array({ prefixItems: [string(), number()] });
+type Tuple = InferOutput<typeof tuple>; // [string, number]
+const t: [string, number] = parse(tuple, ["a", 1]);
+
+const tupleRest = array({ prefixItems: [string()], items: number() });
+type TupleRest = InferOutput<typeof tupleRest>; // [string, ...number[]]
+const tr: [string, ...number[]] = parse(tupleRest, ["a", 1, 2, 3]);
+
+// Objects infer their shape from `properties`, `required`, and
+// `additionalProperties`. `required` keys become required; the rest are
+// optional. `additionalProperties: false` disallows extra keys, a schema/`true`
+// allows them (typed `unknown`).
+const person = object({
+  properties: { name: string(), age: number() },
+  required: ["name"],
+});
+type Person = InferOutput<typeof person>; // { name: string; age?: number } & { [key: string]: unknown }
+
+const strict = object({
+  properties: { name: string() },
+  required: ["name"],
+  additionalProperties: false,
+});
+type Strict = InferOutput<typeof strict>; // { name: string }
+
+// Combinations infer a union of their members
+const id = combination({ anyOf: [string(), number()] });
+type Id = InferOutput<typeof id>; // string | number
+```
+
+`InferInput` works the same way to extract a schema's expected input type.

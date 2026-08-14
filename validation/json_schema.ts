@@ -29,6 +29,11 @@ import {
   RFC6901_RELATIVE_JSON_POINTER,
   stringify,
 } from "./utils.ts";
+import type {
+  InferArrayOutput,
+  InferCombinationOutput,
+  InferObjectOutput,
+} from "./infer.ts";
 import { validate as _validate } from "./validator.ts";
 
 /**
@@ -263,6 +268,13 @@ function schema<
     "~standard": {
       version: 1,
       vendor: "@stdext/validation",
+      // Expose the inferred types so that `InferInput`/`InferOutput` (and the
+      // spec's `StandardSchemaV1.InferInput`/`InferOutput`) resolve to the
+      // schema's `Input`/`Output` rather than `unknown`.
+      types: {
+        input: undefined as unknown as Input,
+        output: undefined as unknown as Output,
+      },
       validate: options.validate,
       jsonSchema: {
         input: options.input,
@@ -826,9 +838,42 @@ export interface ArrayOptions extends
 }
 
 /**
- * Creates an array schema that validates array values.
- * Supports constraints for items, length, and uniqueness.
+ * The inferred output type for an array schema.
  *
+ * - When `prefixItems` is present, the leading elements form a fixed tuple.
+ *   If a variadic rest source (`items`/`unevaluatedItems`/`contains`) is also
+ *   present, it is appended as a variadic tail; otherwise the tuple is exact.
+ * - When only a rest source (`items`/`unevaluatedItems`/`contains`) is present,
+ *   the result is `Rest[]`.
+ * - Otherwise the result is `unknown[]`.
+ *
+ * @template Prefix - The readonly `prefixItems` tuple, or `undefined`
+ * @template Options - The {@link ArrayOptions} carrying the rest element
+ *   sources
+ */
+export type ArrayElementOutput<
+  Prefix extends ReadonlyArray<unknown> | undefined,
+  Options extends ArrayOptions | undefined,
+> = InferArrayOutput<Prefix, Options>;
+
+/**
+ * Creates an array schema that validates array values.
+ * Supports constraints for items, prefix items, contains, length, and
+ * uniqueness.
+ *
+ * Type inference:
+ * - `items` infers a uniform array type (e.g. `array({ items: string() })` ->
+ *   `string[]`).
+ * - `prefixItems` infers a fixed tuple (e.g. `array({ prefixItems: [string(),
+ *   number()] })` -> `[string, number]`).
+ * - `prefixItems` combined with `items`, `unevaluatedItems`, or `contains`
+ *   appends a variadic tail to the tuple (e.g. `array({ prefixItems:
+ *   [string()], items: number() })` -> `[string, ...number[]]`).
+ * - `unevaluatedItems` or `contains` (without `prefixItems`) infers a uniform
+ *   array of that element type.
+ *
+ * @template Prefix - The readonly `prefixItems` tuple, or `undefined`
+ * @template O - The array options, used to infer the element type
  * @param options - Optional array schema options
  * @returns A schema object for array validation
  *
@@ -837,11 +882,25 @@ export interface ArrayOptions extends
  * const stringArraySchema = array({ items: string(), minItems: 1 });
  * const result = validate(stringArraySchema, ["hello", "world"]);
  * // result: { value: ["hello", "world"] }
+ * const parsed: string[] = parse(stringArraySchema, ["hello", "world"]);
+ *
+ * const tupleSchema = array({ prefixItems: [string(), number()] });
+ * const tuple: [string, number] = parse(tupleSchema, ["hello", 42]);
+ *
+ * const restSchema = array({ prefixItems: [string()], items: number() });
+ * const rest: [string, ...number[]] = parse(restSchema, ["hello", 1, 2, 3]);
  * ```
  */
-export function array(
-  options?: ArrayOptions,
-): SchemaObject<"array", unknown[], unknown[]> {
+export function array<
+  const Prefix extends ReadonlyArray<unknown> | undefined = undefined,
+  O extends ArrayOptions | undefined = undefined,
+>(
+  options?: O & { prefixItems?: Prefix },
+): SchemaObject<
+  "array",
+  ArrayElementOutput<Prefix, O>,
+  ArrayElementOutput<Prefix, O>
+> {
   return schema(
     { type: "array", ...options },
     {
@@ -996,7 +1055,9 @@ export function array(
           }
         }
 
-        return issues.length ? { issues } : { value };
+        return issues.length
+          ? { issues }
+          : { value: value as ArrayElementOutput<Prefix, O> };
       },
       input: (params) => {
         return {
@@ -1063,9 +1124,56 @@ export interface ObjectOptions extends
 }
 
 /**
+ * The inferred output type for an object schema, derived from its `properties`,
+ * `required`, and `additionalProperties`.
+ *
+ * - Keys listed in `required` are required; the remaining declared keys are
+ *   optional.
+ * - `additionalProperties` controls extra (undeclared) keys: `false` removes the
+ *   index signature, a schema types the extra values, and `true`/absent allows
+ *   `unknown` extra values.
+ *
+ * @template Properties - The `properties` record
+ * @template Required - The readonly `required` string tuple
+ * @template AdditionalProperties - The `additionalProperties` option value
+ */
+export type ObjectElementOutput<
+  Properties,
+  Required extends ReadonlyArray<string>,
+  AdditionalProperties,
+> = InferObjectOutput<Properties, Required, AdditionalProperties>;
+
+/**
+ * Resolves the inferred output type of an {@link object} schema from its
+ * options. Used internally so the `validate` return annotation and the returned
+ * value share the exact same type (avoiding spurious mismatches between
+ * conditionals that differ only in `infer P` vs `infer P | undefined`).
+ *
+ * @template O - The {@link ObjectOptions}
+ * @template Required - The readonly `required` string tuple
+ */
+type ObjectOutputOf<
+  O extends ObjectOptions | undefined,
+  Required extends ReadonlyArray<string> | undefined,
+> = ObjectElementOutput<
+  O extends { properties?: infer P } ? P : never,
+  Required extends ReadonlyArray<string> ? Required : [],
+  O extends { additionalProperties?: infer AP } ? AP : undefined
+>;
+
+/**
  * Creates an object schema that validates object values.
  * Supports constraints for properties, patterns, and additional properties.
  *
+ * Type inference uses `properties`, `required`, and `additionalProperties`:
+ * - Keys listed in `required` are required; the remaining declared keys are
+ *   optional.
+ * - `additionalProperties: false` disallows extra (undeclared) keys;
+ *   `additionalProperties: <schema>` types extra values; `true`/absent allows
+ *   `unknown` extra values.
+ *
+ * @template Required - The readonly `required` string tuple, or `undefined`
+ * @template O - The object options, used to infer the output shape
  * @param options - Optional object schema options
  * @returns A schema object for object validation
  *
@@ -1080,15 +1188,33 @@ export interface ObjectOptions extends
  * });
  * const result = validate(personSchema, { name: "Alice", age: 30 });
  * // result: { value: { name: "Alice", age: 30 } }
+ * const parsed: { name: string; age?: number } = parse(personSchema, { name: "Alice" });
+ *
+ * const strict = object({
+ *   properties: { name: string() },
+ *   required: ["name"],
+ *   additionalProperties: false,
+ * });
+ * const strictParsed: { name: string } = parse(strict, { name: "Alice" });
  * ```
  */
-export function object(
-  options?: ObjectOptions,
-): SchemaObject<"object", object, object> {
+export function object<
+  const Required extends ReadonlyArray<string> | undefined = undefined,
+  O extends ObjectOptions | undefined = undefined,
+>(
+  options?: O & { required?: Required },
+): SchemaObject<
+  "object",
+  ObjectOutputOf<O, Required>,
+  ObjectOutputOf<O, Required>
+> {
   return schema(
     { type: "object", ...options },
     {
-      validate: (value, _opts) => {
+      validate: (
+        value,
+        _opts,
+      ): StandardSchemaV1.Result<ObjectOutputOf<O, Required>> => {
         if (!isObject(value)) {
           return failureResult(msg.invalidType("object", value));
         }
@@ -1238,7 +1364,9 @@ export function object(
           }
         }
 
-        return issues.length ? { issues } : { value };
+        return issues.length ? { issues } : {
+          value: value as ObjectOutputOf<O, Required>,
+        };
       },
       input: (params) => {
         return {
@@ -1291,9 +1419,32 @@ export interface CombinationOptions extends
 }
 
 /**
+ * The inferred output type for a combination schema, derived as the union of
+ * the inferred output types of its `allOf`, `anyOf` and `oneOf` members. When
+ * no members are present the result is `unknown`.
+ *
+ * @template O - The {@link CombinationOptions} passed to the builder
+ */
+export type CombinationElementOutput<O extends CombinationOptions | undefined> =
+  O extends {
+    allOf?: infer A;
+    anyOf?: infer B;
+    oneOf?: infer C;
+  } ? InferCombinationOutput<
+      A extends ReadonlyArray<unknown> ? A : [],
+      B extends ReadonlyArray<unknown> ? B : [],
+      C extends ReadonlyArray<unknown> ? C : []
+    >
+    : unknown;
+
+/**
  * Creates a combination schema that combines multiple schemas.
  * Supports allOf, anyOf, oneOf, and not for complex validation logic.
  *
+ * When `allOf`, `anyOf` or `oneOf` are provided, the schema's input and output
+ * types are inferred as the union of the member schemas' output types.
+ *
+ * @template O - The combination options, used to infer the output union
  * @param options - Optional combination schema options
  * @returns A schema object for combination validation
  *
@@ -1304,15 +1455,25 @@ export interface CombinationOptions extends
  * });
  * const result = validate(combinedSchema, "hello world");
  * // result: { value: "hello world" }
+ * const parsed: string = parse(combinedSchema, "hello world");
  * ```
  */
-export function combination(
-  options?: CombinationOptions,
-): SchemaObject<"combination", unknown, unknown> {
+export function combination<
+  O extends CombinationOptions | undefined = undefined,
+>(
+  options?: O,
+): SchemaObject<
+  "combination",
+  CombinationElementOutput<O>,
+  CombinationElementOutput<O>
+> {
   return schema(
     { type: "combination", ...options },
     {
-      validate: (value, _opts) => {
+      validate: (
+        value,
+        _opts,
+      ): StandardSchemaV1.Result<CombinationElementOutput<O>> => {
         const validateAndCount = (
           schemas: StandardSchemaV1 | StandardSchemaV1[],
         ) => {
@@ -1364,7 +1525,7 @@ export function combination(
             return { issues };
           }
         }
-        return { value };
+        return { value: value as CombinationElementOutput<O> };
       },
       input: (params) => {
         return {
