@@ -2,7 +2,6 @@
   "version": "0.1.0",
   "name": "@stdext/xml",
   "exports": {
-    ".": "./mod.ts",
-    "./xml": "./xml.ts"
+    ".": "./mod.ts"
   }
 }
