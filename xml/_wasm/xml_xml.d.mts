@@ -2,16 +2,17 @@
 // deno-lint-ignore-file
 // deno-fmt-ignore-file
 
-/** A single XSD validation issue. */
-export interface XmlValidationIssue {
-  readonly message: string;
-}
+import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { XmlDocument } from "@std/xml";
 
-/** Result of `validate`: the document tree plus any validation issues. */
-export interface XmlValidationResult {
-  readonly value: import("@std/xml").XmlDocument;
-  readonly issues: ReadonlyArray<XmlValidationIssue>;
-}
+/**
+ * StandardSchemaV1 compatible result
+ *
+ * Result of `validate`: the Standard Schema `Result` union shape.
+ *   - success: `{ value: XmlDocument }` (`issues` is undefined — falsy)
+ *   - failure: `{ issues: StandardSchemaV1.Issue[] }` (no `value`)
+ */
+export type XmlValidationResult = StandardSchemaV1.Result<XmlDocument>;
 
 /**
  * Parse an XML string into a plain document tree, identical in shape to
@@ -59,10 +60,14 @@ export function stringify(doc: any, options?: any | null): string;
  * Both `document` and `schema` accept either an XML string or the plain
  * document/schema object (the same shape `parse` produces).
  *
- * Returns `{ value: XmlDocument, issues: { message: string }[] }`:
- *   - `value` is the document as a plain @std/xml-compatible tree
- *     (round-tripped through the validator)
- *   - `issues` is empty when the document conforms to the schema
+ * Returns the Standard Schema `Result` union (https://standardschema.dev):
+ *   - success: `{ value: XmlDocument }` — `issues` is undefined (falsy)
+ *   - failure: `{ issues: XmlValidationIssue[] }` — no `value`
+ *
+ * Each issue carries `message` and, best-effort, `path` (the chain of
+ * enclosing element names with 0-based indices for repeated siblings —
+ * derived on the Rust side from uppsala's line/column position) plus
+ * `line`/`column` themselves.
  *
  * Error layering:
  *   - a schema that is not well-formed XML *throws*
@@ -75,8 +80,7 @@ export function stringify(doc: any, options?: any | null): string;
  * @example
  * ```ts
  * const result = validate("<age>25</age>", xsdString);
- * result.issues.length;          // 0
- * result.value.root.name.local;   // "age"
+ * result.value.root.name.local;   // "age" (success: issues is undefined)
  * ```
  */
 export function validate(document: any, schema: any): any;
