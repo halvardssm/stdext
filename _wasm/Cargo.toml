@@ -25,6 +25,7 @@ argon2 = "0.5"
 bcrypt = "0.15"
 scrypt = "0.11"
 uppsala = "0.10"
+indexmap = { version = "2", features = ["serde"] }
 
 [profile.release]
 codegen-units = 1
