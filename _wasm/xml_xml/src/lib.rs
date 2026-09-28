@@ -824,7 +824,7 @@ fn path_at(elems: &[PathElem], offset: usize) -> Option<Vec<StdPathSegment>> {
   // ties (open == offset) prefer the child (smaller range).
   let mut best: Option<usize> = None;
   for (i, e) in elems.iter().enumerate() {
-    if e.open <= offset && offset <= e.close {
+    if e.open <= offset && offset < e.close {
       match best {
         Some(b) if elems[b].open <= e.open && elems[b].close >= e.close => {
           best = Some(i);
