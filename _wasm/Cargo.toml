@@ -4,7 +4,8 @@ members = [
   "crypto_hash_argon2",
   "crypto_hash_bcrypt",
   "crypto_hash_scrypt",
-  "json_jsonpath"
+  "json_jsonpath",
+  "xml_xml"
 ]
 
 [workspace.package]
@@ -23,6 +24,7 @@ js-sys = "=0.3.85"
 argon2 = "0.5"
 bcrypt = "0.15"
 scrypt = "0.11"
+uppsala = "0.10"
 
 [profile.release]
 codegen-units = 1
