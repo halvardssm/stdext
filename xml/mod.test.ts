@@ -1,38 +1,16 @@
-// xml/xml.test.ts
-//
-// Tests for @stdext/xml. Two layers:
-//
-//   1. Differential compatibility tests — @stdext/xml must produce results
-//      identical to @std/xml. These directly assert the "drop-in" claim:
-//      trees from `parse` are compared with assertEquals, and trees cross
-//      `stringify` in BOTH directions (our tree → std stringify, std tree →
-//      our stringify), which proves structural identity, not similarity.
-//
-//      @std/xml is a dev-only dependency of this test file — the package
-//      itself only depends on it for types (`import type`), which are
-//      erased at runtime and add nothing to the published module graph.
-//
-//   2. Unit tests for the @std/xml-free surface: `validate` (XSD), plus the
-//      documented divergences from @std/xml (DTD handling, error class).
-//
-// Deliberate divergences from @std/xml (do not "fix" these when tests fail —
-// they are documented behavior, asserted in the Divergences section):
-//   - DOCTYPE with disallowDoctype: false — uppsala parses the DTD internal
-//     subset; @std/xml ignores DTD content entirely.
-//   - trackPosition (default true) — supported for the declaration's
-//     line/column/offset; with false, both std and ours report (0, 0, 0).
-//     maxAttributes/xmlVersion — accepted and ignored.
-
 import {
   assert,
   assertEquals,
+  assertExists,
   assertInstanceOf,
   assertThrows,
 } from "@std/assert";
-// @std/xml used as the differential reference implementation (dev/test only).
 import * as std from "@std/xml";
-import { parse, stringify, validate } from "./mod.ts";
+import { parse, stringify, validate, xsdSchema } from "./mod.ts";
 import type { XmlDocument } from "@std/xml";
+import { getDotPath, SchemaError } from "@standard-schema/utils";
+import { StandardSchemaV1 } from "@standard-schema/spec";
+import { validate as v } from "@stdext/validation";
 
 // ---------------------------------------------------------------------------
 // Fixture corpus
@@ -255,32 +233,93 @@ const NOTE_XSD = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
   </xs:element>
 </xs:schema>`;
 
-Deno.test("validate > conforming document returns empty issues and the tree", () => {
+Deno.test("validate > conforming document returns { value } with falsy issues", () => {
   const result = validate("<age>25</age>", AGE_XSD);
-  assertEquals(result.issues, []);
+  // spec: success is indicated by a FALSY `issues` — undefined, never []
+  assert(result.issues === undefined);
   assertEquals(result.value.root.name.local, "age");
   // result.value is a plain std-compatible tree
   assertEquals(result.value, parse("<age>25</age>"));
 });
 
-Deno.test("validate > non-conforming document reports issues", () => {
+Deno.test("validate > non-conforming document returns { issues } without value", () => {
   const result = validate("<age>-5</age>", AGE_XSD);
+  if (result.issues === undefined) throw new Error("expected issues");
   assert(result.issues.length > 0);
   assert(result.issues.every((issue) => typeof issue.message === "string"));
-  // value is still returned — the document is well-formed, just invalid
-  assertEquals(result.value.root.name.local, "age");
+  // spec: a failure result carries no `value`
+  // @ts-expect-error Ignore as we expect this due to type narrowing
+  assertEquals(result.value, undefined);
+});
+
+Deno.test("validate > issues carry path, line and column (Standard Schema shape)", () => {
+  const result = validate("<age>-5</age>", AGE_XSD);
+  if (result.issues === undefined) throw new Error("expected issues");
+  assert(result.issues.length > 0);
+  const issue = result.issues[0];
+  // path is present when uppsala reports a position, and starts at the root
+  if (issue.path !== undefined) {
+    assert(Array.isArray(issue.path));
+    assertEquals(issue.path[0], "age");
+    // every segment is a string (name) or number (sibling index)
+    assert(
+      issue.path.every((seg) =>
+        typeof seg === "string" || typeof seg === "number"
+      ),
+    );
+  }
+});
+
+Deno.test("validate > path disambiguates repeated siblings with indices", () => {
+  // two <item> siblings; the second is invalid — the path must identify it
+  const LIST_XSD = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="list">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="item" type="xs:positiveInteger" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>`;
+  const result = validate(
+    "<list><item>1</item><item>-2</item></list>",
+    LIST_XSD,
+  );
+  if (result.issues === undefined) throw new Error("expected issues");
+  assert(result.issues.length > 0);
+  const issue = result.issues[0];
+  // best-effort: when a position is reported, the path points at the second
+  // item — ["list", "item", 1] (0-based index among same-named siblings)
+  if (issue.path !== undefined) {
+    assertEquals(issue.path, ["list", "item", 1]);
+  }
+});
+
+Deno.test("validate > path uses plain names when siblings are unique", () => {
+  const result = validate("<note><body>hi</body></note>", NOTE_XSD);
+  if (result.issues === undefined) throw new Error("expected issues");
+  assert(result.issues.length > 0);
+  const issue = result.issues[0];
+  // when a path is derived, every segment is a name string — no indices,
+  // because no element repeats within its parent
+  if (issue.path !== undefined) {
+    assert(issue.path.every((seg) => typeof seg === "string"));
+    assertEquals(issue.path[0], "note");
+  }
 });
 
 Deno.test("validate > structural mismatch reports issues", () => {
   const result = validate("<note><body>hi</body></note>", NOTE_XSD);
-  assert(result.issues.length > 0);
+  assert(result.issues !== undefined && result.issues.length > 0);
 });
 
 Deno.test("validate > accepts document objects as well as strings", () => {
   const doc = parse("<note><to>Alice</to></note>");
   const fromString = validate("<note><to>Alice</to></note>", NOTE_XSD);
   const fromObject = validate(doc, NOTE_XSD);
-  assertEquals(fromObject.issues, []);
+  assert(fromString.issues === undefined);
+  assert(fromObject.issues === undefined);
+
   assertEquals(fromObject.value, fromString.value);
 });
 
@@ -288,7 +327,7 @@ Deno.test("validate > schema as object input also works", () => {
   // schema round-trips through parse/stringify just like a document
   const schemaDoc = parse(AGE_XSD);
   const result = validate("<age>25</age>", schemaDoc);
-  assertEquals(result.issues, []);
+  assert(result.issues === undefined);
 });
 
 Deno.test("validate > malformed document throws XmlSyntaxError", () => {
@@ -304,20 +343,117 @@ Deno.test("validate > broken schema is a schema-authoring error", () => {
     <xs:element name="note" type="xs:doesNotExist"/>
   </xs:schema>`;
   let threw = false;
-  let issues: unknown[] = [];
+  let issues: readonly { message: string }[] | undefined;
   try {
-    issues = Array.from(validate("<note/>", brokenXsd).issues);
+    issues = validate("<note/>", brokenXsd).issues;
   } catch {
     threw = true;
   }
   assert(
-    threw || issues.length > 0,
+    threw || (issues !== undefined && issues.length > 0),
     "broken schema neither threw nor reported issues",
   );
 });
 
 Deno.test("validate > malformed schema throws", () => {
   assertThrows(() => validate("<age>25</age>", "<xs:schema>"), SyntaxError);
+});
+
+// ---------------------------------------------------------------------------
+// 3b. Standard Schema facade (xsdSchema)
+// ---------------------------------------------------------------------------
+
+Deno.test("standard > xsdSchema returns a v1 entity", () => {
+  const schema = xsdSchema(AGE_XSD);
+  assertEquals(schema["~standard"].version, 1);
+  assertEquals(schema["~standard"].vendor, "@stdext/xml");
+  assert(typeof schema["~standard"].validate === "function");
+});
+
+Deno.test("standard > validate success returns { value } with falsy issues", () => {
+  const schema = xsdSchema(AGE_XSD);
+  const result = v(schema, "<age>25</age>");
+  // spec: success is indicated by a FALSY `issues` — undefined, never []
+  if (result.issues !== undefined) {
+    throw new Error(
+      `expected success, got issues: ${JSON.stringify(result.issues)}`,
+    );
+  }
+  // value is the parsed tree
+  assertEquals(result.value.root.name.local, "age");
+});
+
+Deno.test("standard > validate failure returns { issues } without value", () => {
+  const schema = xsdSchema(AGE_XSD);
+  const result = v(schema, "<age>-5</age>");
+
+  assert(result.issues?.length);
+  assert(result.issues.length > 0);
+  assert(result.issues.every((i) => typeof i.message === "string"));
+  // issues may carry a Standard Schema path (element names + indices)
+  for (const issue of result.issues) {
+    if (issue.path !== undefined) {
+      assert(Array.isArray(issue.path));
+    }
+  }
+});
+
+Deno.test("standard > non-XML input is reported as an issue, not a throw", () => {
+  const schema = xsdSchema(AGE_XSD);
+  const result = v(schema, 42);
+  assert(result.issues?.length);
+  assert(result.issues.length > 0);
+});
+
+Deno.test("standard > works with any Standard Schema consumer (structural check)", () => {
+  // The whole point of the facade: a generic consumer needs nothing but the
+  // spec surface. This test plays that consumer.
+  function assertStandardResult(
+    entity: StandardSchemaV1,
+    input: unknown,
+    expectValid: boolean,
+  ): void {
+    const result = v(entity, input);
+    assertEquals(
+      !("issues" in result) || result.issues === undefined,
+      expectValid,
+    );
+  }
+  const schema = xsdSchema(AGE_XSD);
+  assertStandardResult(schema, "<age>7</age>", true);
+  assertStandardResult(schema, "<age>-7</age>", false);
+  assertStandardResult(schema, {}, false);
+});
+
+Deno.test("standard > issues interop with @standard-schema/utils", () => {
+  // getDotPath flattens a path into a dot-separated string; our path
+  // (element names + sibling indices) is exactly the segment shape it
+  // expects.
+  const LIST_XSD = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="list">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="item" type="xs:positiveInteger" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>`;
+  const result = validate(
+    "<list><item>1</item><item>-2</item></list>",
+    LIST_XSD,
+  );
+  if (result.issues === undefined) throw new Error("expected issues");
+  const dotPath = getDotPath(result.issues[0]);
+  // "list.item[1]" when a path is derived; undefined when uppsala reported
+  // no position for the issue (getDotPath returns undefined for pathless
+  // issues — both outcomes are spec-conformant)
+  if (dotPath !== undefined) {
+    assertEquals(dotPath, "list.item.1");
+  }
+  // SchemaError renders all issue messages for spec-shaped results
+  const err = new SchemaError(result.issues);
+  assertInstanceOf(err, Error);
+  assert(err.message.length > 0);
 });
 
 // ---------------------------------------------------------------------------

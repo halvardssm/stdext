@@ -21,9 +21,13 @@
 //                              order follows the input object's key order (JS
 //                              objects preserve string-key insertion order).
 //
-//   validate(doc, schema)    → { value: XmlDocument, issues: { message: string }[] }
+//   validate(doc, schema)    → { value: XmlDocument, issues: XmlValidationIssue[] }
 //                              both arguments accept either an XML string or the
-//                              plain document/schema object.
+//                              plain document/schema object. Each issue carries
+//                              `message` plus best-effort `path` (Standard Schema
+//                              Issue["path"] shape: enclosing element names with
+//                              sibling indices for repeated elements) and
+//                              `line`/`column` when uppsala reports a position.
 //
 // Options parity (parse):
 //   ignoreWhitespace  — supported (filtered during tree conversion)
@@ -88,16 +92,17 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(typescript_custom_section)]
 const IXML_TYPES: &'static str = r#"
-/** A single XSD validation issue. */
-export interface XmlValidationIssue {
-  readonly message: string;
-}
+import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { XmlDocument } from "@std/xml";
 
-/** Result of `validate`: the document tree plus any validation issues. */
-export interface XmlValidationResult {
-  readonly value: import("@std/xml").XmlDocument;
-  readonly issues: ReadonlyArray<XmlValidationIssue>;
-}
+/**
+ * StandardSchemaV1 compatible result
+ * 
+ * Result of `validate`: the Standard Schema `Result` union shape.
+ *   - success: `{ value: XmlDocument }` (`issues` is undefined — falsy)
+ *   - failure: `{ issues: StandardSchemaV1.Issue[] }` (no `value`)
+ */
+export type XmlValidationResult = StandardSchemaV1.Result<XmlDocument>
 "#;
 
 // ---------------------------------------------------------------------------
@@ -198,16 +203,38 @@ struct StdXmlDocument {
   root: StdXmlNode,
 }
 
-/// Result of validate(): the document as a std tree plus validation issues.
+/// Result of validate(): the Standard Schema Result union. On success only
+/// `value` is serialized; on failure only `issues` — the JS side receives
+/// `{ value }` or `{ issues }`, exactly the spec's SuccessResult/FailureResult.
 #[derive(Serialize)]
-struct ValidateResult {
-  value: StdXmlDocument,
-  issues: Vec<ValidateIssue>,
+#[serde(untagged)]
+enum ValidateResult {
+  Success { value: StdXmlDocument },
+  Failure { issues: Vec<ValidateIssue> },
 }
 
 #[derive(Serialize)]
 struct ValidateIssue {
   message: String,
+  /// Best-effort chain of enclosing element names (+ sibling indices),
+  /// matching Standard Schema's Issue["path"]. None when uppsala does not
+  /// report a position for this issue.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  path: Option<Vec<StdPathSegment>>,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  line: Option<usize>,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  column: Option<usize>,
+}
+
+/// One Standard Schema path segment: an element's qualified name or the
+/// 0-based index among same-named siblings. Serialized untagged so it
+/// round-trips as `string | number` on the JS side.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum StdPathSegment {
+  Name(String),
+  Index(u32),
 }
 
 // ---------------------------------------------------------------------------
@@ -597,6 +624,254 @@ fn js_serializer() -> serde_wasm_bindgen::Serializer {
 }
 
 // ---------------------------------------------------------------------------
+// Position → path (Standard Schema issue paths)
+// ---------------------------------------------------------------------------
+
+/// One element seen by the lexical scanner: its qualified name, byte range
+/// in the document, occurrence index among same-named siblings within the
+/// same parent, and the record index of its parent (None for the root).
+struct PathElem {
+  name: String,
+  open: usize,
+  close: usize,
+  occurrence: u32,
+  parent: Option<usize>,
+}
+
+/// Lexically scan a *well-formed* document (validate only runs on those)
+/// and record every element's range, so a line/column position can be
+/// mapped to its chain of enclosing elements. Comments, CDATA sections,
+/// processing instructions, and quoted attribute values are skipped so
+/// their contents cannot open/close tags spuriously.
+fn scan_elements(input: &str) -> Vec<PathElem> {
+  let bytes = input.as_bytes();
+  let len = bytes.len();
+  let mut elems: Vec<PathElem> = Vec::new();
+  let mut stack: Vec<usize> = Vec::new(); // record indices of open elements
+  let mut sibling_counts: Vec<std::collections::HashMap<String, u32>> =
+    Vec::new(); // per open element: name -> children seen so far
+  let mut i = 0usize;
+  while i < len {
+    if bytes[i] != b'<' {
+      i += 1;
+      continue;
+    }
+    match bytes.get(i + 1) {
+      // <!-- comment -->
+      Some(b'!') if input[i..].starts_with("<!--") => {
+        i = match input[i + 4..].find("-->") {
+          Some(rel) => i + 4 + rel + 3,
+          None => len,
+        };
+      }
+      // <![CDATA[ ... ]]> (and DOCTYPE — skipped to its '>')
+      Some(b'!') => {
+        if input[i..].starts_with("<![CDATA[") {
+          i = match input[i + 9..].find("]]>") {
+            Some(rel) => i + 9 + rel + 3,
+            None => len,
+          };
+        } else {
+          // DOCTYPE: skip to '>' (internal subset quotes/brackets handled
+          // crudely; DOCTYPE precedes the root so it cannot hold elements)
+          i = match input[i..].find('>') {
+            Some(rel) => i + rel + 1,
+            None => len,
+          };
+        }
+      }
+      // <?processing instruction?>
+      Some(b'?') => {
+        i = match input[i + 2..].find("?>") {
+          Some(rel) => i + 2 + rel + 2,
+          None => len,
+        };
+      }
+      // closing tag </name>
+      Some(b'/') => {
+        let start = i;
+        i = match input[i..].find('>') {
+          Some(rel) => i + rel + 1,
+          None => len,
+        };
+        if let Some(idx) = stack.pop() {
+          elems[idx].close = i;
+          // the popped element had its own children-map on the stack
+          sibling_counts.pop();
+        }
+        let _ = start;
+      }
+      // opening (or self-closing) tag
+      _ => {
+        let open = i;
+        let mut j = i + 1;
+        let mut name_end = None;
+        let mut quote: Option<u8> = None;
+        let mut self_closing = false;
+        while j < len {
+          let b = bytes[j];
+          if let Some(q) = quote {
+            if b == q {
+              quote = None;
+            }
+          } else if b == b'"' || b == b'\'' {
+            quote = Some(b);
+          } else if b == b'>' {
+            if j > 0 && bytes[j - 1] == b'/' {
+              self_closing = true;
+            }
+            name_end = name_end.or(Some(j));
+            break;
+          } else if name_end.is_none()
+            && (b == b' '
+              || b == b'\t'
+              || b == b'\n'
+              || b == b'\r'
+              || b == b'/')
+          {
+            name_end = Some(j);
+          }
+          j += 1;
+        }
+        let Some(name_end) = name_end else { break };
+        let name = input[i + 1..name_end].trim().to_string();
+        if name.is_empty() || name.starts_with('!') {
+          i = j + 1;
+          continue;
+        }
+        let close = j + 1;
+        let parent = stack.last().copied();
+        // occurrence index among same-named siblings within this parent
+        let occurrence = match parent {
+          Some(_) => {
+            let map = sibling_counts
+              .last_mut()
+              .expect("children map per open element");
+            let entry = map.entry(name.clone()).or_insert(0);
+            let occ = *entry;
+            *entry += 1;
+            occ
+          }
+          None => 0, // root has no siblings
+        };
+        let record = PathElem {
+          name,
+          open,
+          close,
+          occurrence,
+          parent,
+        };
+        let idx = elems.len();
+        elems.push(record);
+        if self_closing {
+          elems[idx].close = close;
+        } else {
+          stack.push(idx);
+          sibling_counts.push(std::collections::HashMap::new());
+        }
+        i = close;
+      }
+    }
+  }
+  // Unclosed elements (shouldn't happen for well-formed input): close them
+  for idx in stack {
+    elems[idx].close = len;
+  }
+  elems
+}
+
+/// Convert a 1-based line/column (uppsala's convention) into a byte offset
+/// in the input. Column is counted in characters from the last '\n'
+/// (uppsala counts the same way it reports parse errors).
+fn line_col_to_offset(
+  input: &str,
+  line: usize,
+  column: usize,
+) -> Option<usize> {
+  let mut current_line = 1usize;
+  let mut line_start = 0usize;
+  let mut offset = 0usize;
+  if line == 0 || column == 0 {
+    return None;
+  }
+  let mut chars = input.char_indices().peekable();
+  let mut col = 1usize;
+  while let Some((byte_i, ch)) = chars.next() {
+    if current_line == line && col == column {
+      return Some(byte_i);
+    }
+    if ch == '\n' {
+      current_line += 1;
+      col = 1;
+      line_start = byte_i + 1;
+      if current_line > line {
+        return None;
+      }
+    } else {
+      col += 1;
+    }
+    offset = byte_i + ch.len_utf8();
+  }
+  let _ = (line_start, offset);
+  None
+}
+
+/// Build the Standard Schema path for a position: the chain of enclosing
+/// element names from the root down, inserting a 0-based occurrence index
+/// after a name only when the parent has more than one same-named child.
+fn path_at(elems: &[PathElem], offset: usize) -> Option<Vec<StdPathSegment>> {
+  // deepest element whose [open, close] range contains the offset;
+  // ties (open == offset) prefer the child (smaller range).
+  let mut best: Option<usize> = None;
+  for (i, e) in elems.iter().enumerate() {
+    if e.open <= offset && offset <= e.close {
+      match best {
+        Some(b) if elems[b].open <= e.open && elems[b].close >= e.close => {
+          best = Some(i);
+        }
+        None => best = Some(i),
+        _ => {}
+      }
+    }
+  }
+  let mut chain: Vec<usize> = Vec::new();
+  let mut cur = best?;
+  loop {
+    chain.push(cur);
+    match elems[cur].parent {
+      Some(p) => cur = p,
+      None => break,
+    }
+  }
+  chain.reverse();
+  let mut path: Vec<StdPathSegment> = Vec::new();
+  for &idx in &chain {
+    let e = &elems[idx];
+    let repeated = elems.iter().any(|other| {
+      other.parent == e.parent && other.name == e.name && other.parent.is_some()
+    });
+    path.push(StdPathSegment::Name(e.name.clone()));
+    if repeated {
+      path.push(StdPathSegment::Index(e.occurrence));
+    }
+  }
+  Some(path)
+}
+
+/// Full best-effort derivation: uppsala issue position → Standard Schema
+/// path. Returns None when the position is missing or unmappable.
+fn issue_path(
+  input: &str,
+  line: Option<usize>,
+  column: Option<usize>,
+) -> Option<Vec<StdPathSegment>> {
+  let (line, column) = (line?, column?);
+  let offset = line_col_to_offset(input, line, column)?;
+  let elems = scan_elements(input);
+  path_at(&elems, offset)
+}
+
+// ---------------------------------------------------------------------------
 // Public wasm API
 // ---------------------------------------------------------------------------
 
@@ -675,10 +950,14 @@ pub fn stringify(
 /// Both `document` and `schema` accept either an XML string or the plain
 /// document/schema object (the same shape `parse` produces).
 ///
-/// Returns `{ value: XmlDocument, issues: { message: string }[] }`:
-///   - `value` is the document as a plain @std/xml-compatible tree
-///     (round-tripped through the validator)
-///   - `issues` is empty when the document conforms to the schema
+/// Returns the Standard Schema `Result` union (https://standardschema.dev):
+///   - success: `{ value: XmlDocument }` — `issues` is undefined (falsy)
+///   - failure: `{ issues: XmlValidationIssue[] }` — no `value`
+///
+/// Each issue carries `message` and, best-effort, `path` (the chain of
+/// enclosing element names with 0-based indices for repeated siblings —
+/// derived on the Rust side from uppsala's line/column position) plus
+/// `line`/`column` themselves.
 ///
 /// Error layering:
 ///   - a schema that is not well-formed XML *throws*
@@ -691,8 +970,7 @@ pub fn stringify(
 /// @example
 /// ```ts
 /// const result = validate("<age>25</age>", xsdString);
-/// result.issues.length;          // 0
-/// result.value.root.name.local;   // "age"
+/// result.value.root.name.local;   // "age" (success: issues is undefined)
 /// ```
 #[wasm_bindgen(js_name = "validate")]
 pub fn validate(
@@ -716,12 +994,23 @@ pub fn validate(
     .iter()
     .map(|e| ValidateIssue {
       message: e.to_string(),
+      // Best-effort Standard Schema path, derived from uppsala's position.
+      path: issue_path(&doc_xml, e.line, e.column),
+      line: e.line,
+      column: e.column,
     })
     .collect();
 
-  // Return the document as a std tree alongside the issues.
-  let value = document_to_std(&doc, &ParseOptions::default(), &doc_xml)?;
-  ValidateResult { value, issues }
+  // Standard Schema Result union: success carries only `value`, failure
+  // only `issues`. (Untagged serde emits exactly `{ value, ... }` or
+  // `{ issues, ... }` — no sentinel fields on the JS side.)
+  let result = if issues.is_empty() {
+    let value = document_to_std(&doc, &ParseOptions::default(), &doc_xml)?;
+    ValidateResult::Success { value }
+  } else {
+    ValidateResult::Failure { issues }
+  };
+  result
     .serialize(&js_serializer())
     .map_err(|e| JsError::new(&e.to_string()))
 }

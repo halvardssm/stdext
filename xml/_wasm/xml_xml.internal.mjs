@@ -92,10 +92,14 @@ export function stringify(doc, options) {
  * Both `document` and `schema` accept either an XML string or the plain
  * document/schema object (the same shape `parse` produces).
  *
- * Returns `{ value: XmlDocument, issues: { message: string }[] }`:
- *   - `value` is the document as a plain @std/xml-compatible tree
- *     (round-tripped through the validator)
- *   - `issues` is empty when the document conforms to the schema
+ * Returns the Standard Schema `Result` union (https://standardschema.dev):
+ *   - success: `{ value: XmlDocument }` — `issues` is undefined (falsy)
+ *   - failure: `{ issues: XmlValidationIssue[] }` — no `value`
+ *
+ * Each issue carries `message` and, best-effort, `path` (the chain of
+ * enclosing element names with 0-based indices for repeated siblings —
+ * derived on the Rust side from uppsala's line/column position) plus
+ * `line`/`column` themselves.
  *
  * Error layering:
  *   - a schema that is not well-formed XML *throws*
@@ -108,8 +112,7 @@ export function stringify(doc, options) {
  * @example
  * ```ts
  * const result = validate("<age>25</age>", xsdString);
- * result.issues.length;          // 0
- * result.value.root.name.local;   // "age"
+ * result.value.root.name.local;   // "age" (success: issues is undefined)
  * ```
  * @param {any} document
  * @param {any} schema
