@@ -14,7 +14,7 @@ const rawCargo = Deno.readTextFileSync("./_wasm/Cargo.toml");
 
 const parsedCargo = parse(rawCargo) as { workspace: { members: string[] } };
 
-const members = cliArgs.project
+const members = cliArgs.project.length
   ? parsedCargo.workspace.members.filter((m) => cliArgs.project.includes(m))
   : parsedCargo.workspace.members;
 

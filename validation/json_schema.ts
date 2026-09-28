@@ -1086,10 +1086,10 @@ export interface ObjectOptions extends
  * // result: { value: { name: "Alice", age: 30 } }
  * ```
  */
-export function object<Input = object, Output = object>(
+export function object(
   options?: ObjectOptions,
-): SchemaObject<"object", Input, Output> {
-  return schema<"object", Input, Output>(
+): SchemaObject<"object"> {
+  return schema<"object">(
     { type: "object", ...options },
     {
       validate: (value, _opts) => {
