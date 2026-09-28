@@ -714,7 +714,11 @@ export function string(
             );
           }
         }
-        if (options?.pattern && !new RegExp(options.pattern).test(value)) {
+        if (
+          options?.pattern &&
+          !(options.pattern === value ||
+            new RegExp(options.pattern).test(value))
+        ) {
           return failureResult(
             msg.expected("matching the pattern", options.pattern, value),
           );
@@ -1082,10 +1086,10 @@ export interface ObjectOptions extends
  * // result: { value: { name: "Alice", age: 30 } }
  * ```
  */
-export function object(
+export function object<Input = object, Output = object>(
   options?: ObjectOptions,
-): SchemaObject<"object", object, object> {
-  return schema(
+): SchemaObject<"object", Input, Output> {
+  return schema<"object", Input, Output>(
     { type: "object", ...options },
     {
       validate: (value, _opts) => {
