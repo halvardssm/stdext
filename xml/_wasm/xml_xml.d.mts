@@ -15,72 +15,33 @@ import type { XmlDocument } from "@std/xml";
 export type XmlValidationResult = StandardSchemaV1.Result<XmlDocument>;
 
 /**
- * Parse an XML string into a plain document tree, identical in shape to
- * @std/xml's `parse` output.
+ * Parse XML text into a JSON-encoded @std/xml `XmlDocument`.
  *
- * Options follow @std/xml's `ParseOptions` (camelCase): `ignoreWhitespace`,
- * `ignoreComments`, `disallowDoctype` (default true), `maxDepth` (root
- * element counts as depth 1, as in @std/xml), `trackPosition` (default
- * true — controls the declaration's position fields).
- * `maxAttributes` and `xmlVersion` are accepted but ignored (see the
- * crate-level notes above).
- *
- * @example
- * ```ts
- * const doc = parse('<root id="1"><child/></root>');
- * doc.root.name.local;          // "root"
- * doc.root.attributes["id"];    // "1"
- * ```
+ * `options` is a JSON-encoded @std/xml `ParseOptions`.
  *
  * @throws {Error} formatted like @std/xml's XmlSyntaxError when the input
  * is not well-formed, or when maxDepth is exceeded.
  */
-export function parse(input: string, options?: any | null): any;
+export function parse(input: string, options: string): string;
 
 /**
- * Serialize a document tree back to an XML string, with @std/xml's
- * `StringifyOptions` semantics (`indent` for pretty-printing, `declaration`
- * defaulting to true when the document has one). Attributes are emitted in
- * the input object's key order, which for parse output is document order.
+ * Serialize a JSON-encoded @std/xml `XmlDocument` to XML text.
  *
- * @example
- * ```ts
- * stringify(doc);                         // declaration kept if present
- * stringify(doc, { indent: "  " });        // pretty-printed
- * stringify(doc, { declaration: false }); // never emit <?xml ...?>
- * ```
+ * `options` is a JSON-encoded @std/xml `StringifyOptions`.
  *
- * @throws {Error} if the input is not a valid XmlDocument object.
+ * @throws {Error} if the input is not a valid XmlDocument, or contains a
+ * comment that cannot be serialized.
  */
-export function stringify(doc: any, options?: any | null): string;
+export function stringify(doc: string, options: string): string;
 
 /**
- * Validate a document against an XSD schema.
+ * Validate XML text against an XSD schema (also XML text).
  *
- * Both `document` and `schema` accept either an XML string or the plain
- * document/schema object (the same shape `parse` produces).
+ * Returns a JSON-encoded Standard Schema result: `{ value: XmlDocument }`
+ * on success, `{ issues }` on failure. Issues carry `message` and, when
+ * uppsala reports a position, `line`, `column` and a best-effort `path`.
  *
- * Returns the Standard Schema `Result` union (https://standardschema.dev):
- *   - success: `{ value: XmlDocument }` — `issues` is undefined (falsy)
- *   - failure: `{ issues: XmlValidationIssue[] }` — no `value`
- *
- * Each issue carries `message` and, best-effort, `path` (the chain of
- * enclosing element names with 0-based indices for repeated siblings —
- * derived on the Rust side from uppsala's line/column position) plus
- * `line`/`column` themselves.
- *
- * Error layering:
- *   - a schema that is not well-formed XML *throws*
- *   - an invalid XSD may *throw* (schema compilation error) — uppsala
- *     compiles leniently, so some authoring mistakes surface as validation
- *     issues on the document instead. Both behaviors are supported by the
- *     TS wrapper's callers.
- *   - a document that does not conform returns issues (does not throw)
- *
- * @example
- * ```ts
- * const result = validate("<age>25</age>", xsdString);
- * result.value.root.name.local;   // "age" (success: issues is undefined)
- * ```
+ * @throws {Error} if the document or schema is not well-formed, or the
+ * schema cannot be compiled.
  */
-export function validate(document: any, schema: any): any;
+export function validate(document: string, schema: string): string;

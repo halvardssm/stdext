@@ -1,15 +1,14 @@
 import {
   assert,
   assertEquals,
-  assertExists,
   assertInstanceOf,
   assertThrows,
 } from "@std/assert";
 import * as std from "@std/xml";
-import { parse, stringify, validate, xsdSchema } from "./mod.ts";
+import { parse, stringify, validate, xml } from "./mod.ts";
 import type { XmlDocument } from "@std/xml";
 import { getDotPath, SchemaError } from "@standard-schema/utils";
-import { StandardSchemaV1 } from "@standard-schema/spec";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { validate as v } from "@stdext/validation";
 
 // ---------------------------------------------------------------------------
@@ -308,6 +307,16 @@ Deno.test("validate > path uses plain names when siblings are unique", () => {
   }
 });
 
+Deno.test("validate > path has no index for a non-repeated child", () => {
+  const result = validate("<note><body>hi</body></note>", NOTE_XSD);
+  if (result.issues === undefined) throw new Error("expected issues");
+  const paths = result.issues.map((issue) => issue.path);
+  assert(
+    paths.some((path) => JSON.stringify(path) === '["note","body"]'),
+    `unexpected paths: ${JSON.stringify(paths)}`,
+  );
+});
+
 Deno.test("validate > structural mismatch reports issues", () => {
   const result = validate("<note><body>hi</body></note>", NOTE_XSD);
   assert(result.issues !== undefined && result.issues.length > 0);
@@ -364,14 +373,14 @@ Deno.test("validate > malformed schema throws", () => {
 // ---------------------------------------------------------------------------
 
 Deno.test("standard > xsdSchema returns a v1 entity", () => {
-  const schema = xsdSchema(AGE_XSD);
+  const schema = xml(AGE_XSD);
   assertEquals(schema["~standard"].version, 1);
   assertEquals(schema["~standard"].vendor, "@stdext/xml");
   assert(typeof schema["~standard"].validate === "function");
 });
 
 Deno.test("standard > validate success returns { value } with falsy issues", () => {
-  const schema = xsdSchema(AGE_XSD);
+  const schema = xml(AGE_XSD);
   const result = v(schema, "<age>25</age>");
   // spec: success is indicated by a FALSY `issues` — undefined, never []
   if (result.issues !== undefined) {
@@ -384,7 +393,7 @@ Deno.test("standard > validate success returns { value } with falsy issues", () 
 });
 
 Deno.test("standard > validate failure returns { issues } without value", () => {
-  const schema = xsdSchema(AGE_XSD);
+  const schema = xml(AGE_XSD);
   const result = v(schema, "<age>-5</age>");
 
   assert(result.issues?.length);
@@ -399,7 +408,7 @@ Deno.test("standard > validate failure returns { issues } without value", () => 
 });
 
 Deno.test("standard > non-XML input is reported as an issue, not a throw", () => {
-  const schema = xsdSchema(AGE_XSD);
+  const schema = xml(AGE_XSD);
   const result = v(schema, 42);
   assert(result.issues?.length);
   assert(result.issues.length > 0);
@@ -419,7 +428,7 @@ Deno.test("standard > works with any Standard Schema consumer (structural check)
       expectValid,
     );
   }
-  const schema = xsdSchema(AGE_XSD);
+  const schema = xml(AGE_XSD);
   assertStandardResult(schema, "<age>7</age>", true);
   assertStandardResult(schema, "<age>-7</age>", false);
   assertStandardResult(schema, {}, false);

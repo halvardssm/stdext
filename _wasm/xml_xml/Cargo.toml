@@ -10,7 +10,5 @@ crate-type = ["cdylib"]
 wasm-bindgen.workspace = true
 uppsala.workspace = true
 serde.workspace = true
-serde-wasm-bindgen.workspace = true
 serde_json.workspace = true
-serde_json_path.workspace = true
 indexmap.workspace = true
