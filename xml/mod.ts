@@ -1,6 +1,8 @@
 // xml/xml.ts
 //
-// JS wrapper for the generated wasm module (xml/_wasm/xml_xml.mjs).
+// JS wrapper for the generated wasm module (xml/_wasm/xml_xml.mjs). Trees
+// cross the wasm boundary as JSON strings (one JSON.parse is far cheaper
+// than building the tree through per-node FFI calls).
 //
 // Shared types are imported from @std/xml — never redeclared — so this
 // package is a true drop-in for @std/xml consumers. The only types declared
@@ -15,8 +17,8 @@
 //   2. A std-shaped public surface:
 //        parse(xml, options?)    → XmlDocument
 //        stringify(doc, opts?)   → string
-//        validate(doc, schema)   → { value: XmlDocument, issues: XmlValidationIssue[] }
-//   3. compileSchema(schema) → a Standard Schema v1 entity
+//        validate(doc, schema)   → { value: XmlDocument } | { issues: Issue[] }
+//   3. xsdSchema(schema) → a Standard Schema v1 entity
 //      (https://standardschema.dev): issues carry Standard-Schema-shaped
 //      `path` segments (element names + sibling indices) derived from the
 //      validator's line/column positions, so any Standard Schema consumer
@@ -38,6 +40,7 @@ import type {
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { XmlSyntaxError } from "@std/xml";
 import { isObject } from "@stdext/validation";
+import { SchemaError } from "@standard-schema/utils";
 
 // Shared types come straight from @std/xml and are re-exported as-is.
 // The document tree produced by the wasm `parse` is structurally identical,
@@ -66,52 +69,46 @@ export type { XmlValidationResult } from "./_wasm/xml_xml.mjs";
 export type { StandardSchemaV1 } from "@standard-schema/spec";
 
 // ---------------------------------------------------------------------------
-// Tree fixups
+// Helpers
 // ---------------------------------------------------------------------------
 
 /**
  * @std/xml creates attribute maps with a null prototype (so that attribute
  * names like "__proto__" or "constructor" cannot collide with Object
- * prototype members). The wasm/serde boundary can only produce plain
- * objects, so rebuild the attribute maps here to be prototype-identical
- * to @std/xml's output. Key order is preserved by Object.assign.
+ * prototype members). JSON.parse produces plain objects, so swap their
+ * prototype in place to match @std/xml's output.
  */
 function fixAttributePrototypes(node: XmlNode): void {
   if (node.type !== "element") return;
-  if (Object.getPrototypeOf(node.attributes) !== null) {
-    const attrs = Object.create(null) as Record<string, string>;
-    Object.assign(attrs, node.attributes);
-    (node as { attributes: Record<string, string> }).attributes = attrs;
-  }
-  for (const child of node.children) {
-    fixAttributePrototypes(child);
-  }
+  Object.setPrototypeOf(node.attributes, null);
+  for (const child of node.children) fixAttributePrototypes(child);
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 const POSITION_RE = / at line (\d+), column (\d+)$/;
 
 /** Re-throw a wasm `Error` as @std/xml's `XmlSyntaxError`. */
 function rethrowAsXmlSyntaxError(error: unknown): never {
-  if (error instanceof Error) {
-    const match = error.message.match(POSITION_RE);
-    if (match) {
-      throw new XmlSyntaxError(
-        error.message.slice(0, match.index!),
-        { line: Number(match[1]), column: Number(match[2]), offset: 0 },
-      );
-    }
-    throw new XmlSyntaxError(error.message, {
-      line: 0,
-      column: 0,
-      offset: 0, // 0/0/0: @std/xml's sentinel for "position unavailable"
-    });
-  }
-  throw error;
+  if (!(error instanceof Error)) throw error;
+  const match = error.message.match(POSITION_RE);
+  // 0/0/0 is @std/xml's sentinel for "position unavailable"
+  throw new XmlSyntaxError(
+    match ? error.message.slice(0, match.index) : error.message,
+    {
+      line: Number(match?.[1] ?? 0),
+      column: Number(match?.[2] ?? 0),
+      offset: 0,
+    },
+  );
 }
+
+/** Serialize a document tree (or pass XML text through) for the wasm side. */
+function toXml(value: string | XmlDocument): string {
+  return typeof value === "string" ? value : stringify(value);
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 /**
  * Parses an XML string into a document tree.
@@ -140,7 +137,9 @@ function rethrowAsXmlSyntaxError(error: unknown): never {
  */
 export function parse(xml: string, options?: ParseOptions): XmlDocument {
   try {
-    const doc = wasmParse(xml, options) as XmlDocument;
+    const doc: XmlDocument = JSON.parse(
+      wasmParse(xml, JSON.stringify(options ?? {})),
+    );
     fixAttributePrototypes(doc.root);
     return doc;
   } catch (error) {
@@ -173,7 +172,7 @@ export function stringify(
   doc: XmlDocument,
   options?: StringifyOptions,
 ): string {
-  return wasmStringify(doc, options);
+  return wasmStringify(JSON.stringify(doc), JSON.stringify(options ?? {}));
 }
 
 /**
@@ -217,17 +216,47 @@ export function stringify(
  * @throws {Error} If the schema is an invalid XSD.
  */
 export function validate(
-  document: string | XmlDocument,
   schema: string | XmlDocument,
+  document: string | XmlDocument,
 ): XmlValidationResult {
   try {
-    const result = wasmValidate(document, schema) as XmlValidationResult;
-    if (result.issues === undefined) {
-      fixAttributePrototypes(result.value.root);
-    }
+    const result: XmlValidationResult = JSON.parse(
+      wasmValidate(toXml(document), toXml(schema)),
+    );
+    if (result.issues === undefined) fixAttributePrototypes(result.value.root);
     return result;
   } catch (error) {
     rethrowAsXmlSyntaxError(error);
+  }
+}
+
+export class XmlValidator {
+  schema: XmlDocument;
+
+  constructor(schema: string | XmlDocument) {
+    this.schema = typeof schema === "string" ? parse(schema) : schema;
+  }
+
+  validate(doc: string | XmlDocument): StandardSchemaV1.Result<XmlDocument> {
+    const res = validate(this.schema, doc);
+
+    if (res.issues) {
+      return {
+        issues: res.issues,
+      };
+    }
+
+    return { value: res.value };
+  }
+
+  parse(doc: string | XmlDocument): XmlDocument {
+    const res = validate(this.schema, doc);
+
+    if (res.issues) {
+      throw new SchemaError(res.issues);
+    }
+
+    return res.value;
   }
 }
 
@@ -250,10 +279,10 @@ export function validate(
  *
  * @example Usage
  * ```ts
- * import { compileSchema } from "@stdext/xml";
+ * import { xsdSchema } from "@stdext/xml";
  * import { assert } from "@std/assert";
  *
- * const schema = compileSchema(`<xs:schema
+ * const schema = xsdSchema(`<xs:schema
  *   xmlns:xs="http://www.w3.org/2001/XMLSchema">
  *   <xs:element name="age" type="xs:positiveInteger"/>
  * </xs:schema>`);
@@ -265,7 +294,7 @@ export function validate(
  * @param schema The XSD schema (XML string or document tree).
  * @returns A Standard Schema v1 entity validating against that schema.
  */
-export function xsdSchema(
+export function xml(
   schema: string | XmlDocument,
 ): StandardSchemaV1<string | XmlDocument, XmlDocument> {
   return {
@@ -276,22 +305,15 @@ export function xsdSchema(
         value: unknown,
         _options?: StandardSchemaV1.Options,
       ): StandardSchemaV1.Result<XmlDocument> => {
-        if (
-          typeof value !== "string" &&
-          (!isObject(value) ||
-            !("root" in (value as Record<string, unknown>)))
-        ) {
-          return {
-            issues: [
-              {
-                message: "expected an XML string or an XmlDocument object",
-              },
-            ],
-          };
+        if (typeof value === "string" || (isObject(value) && "root" in value)) {
+          // `validate` already returns the spec's Result union.
+          return validate(value as string | XmlDocument, schema);
         }
-        // `validate` already returns the spec's Result union — pass it
-        // through unchanged.
-        return validate(value as string | XmlDocument, schema);
+        return {
+          issues: [{
+            message: "expected an XML string or an XmlDocument object",
+          }],
+        };
       },
     },
   };
