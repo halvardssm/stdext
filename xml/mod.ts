@@ -295,8 +295,10 @@ export class XmlValidator {
  * @returns A Standard Schema v1 entity validating against that schema.
  */
 export function xml(
-  schema: string | XmlDocument,
+  schema?: string | XmlDocument,
 ): StandardSchemaV1<string | XmlDocument, XmlDocument> {
+  const xmlValidator = schema ? new XmlValidator(schema) : undefined;
+
   return {
     "~standard": {
       version: 1,
@@ -305,15 +307,23 @@ export function xml(
         value: unknown,
         _options?: StandardSchemaV1.Options,
       ): StandardSchemaV1.Result<XmlDocument> => {
-        if (typeof value === "string" || (isObject(value) && "root" in value)) {
-          // `validate` already returns the spec's Result union.
-          return validate(value as string | XmlDocument, schema);
+        if (xmlValidator) {
+          return xmlValidator.validate(value as string | XmlDocument);
         }
-        return {
-          issues: [{
-            message: "expected an XML string or an XmlDocument object",
-          }],
-        };
+
+        try {
+          const res = parse(value as string);
+
+          return { value: res };
+        } catch (error) {
+          if (error instanceof SchemaError) {
+            return { issues: error.issues };
+          }
+
+          return {
+            issues: [{ message: `Unknown error: ${(error as Error).message}` }],
+          };
+        }
       },
     },
   };
