@@ -21,7 +21,7 @@
 // tree conversion; disallowDoctype is uppsala's `with_forbid_dtd` (default
 // true, as in std — when false, uppsala parses the DTD internal subset,
 // whereas @std/xml ignores it); maxDepth uses std semantics (root element =
-// depth 1) and is checked during tree conversion, with uppsala's limit as a
+// depth 0), checked during tree conversion, with uppsala's limit as a
 // backstop; trackPosition is honored for the declaration's position
 // (default true); maxAttributes and xmlVersion are accepted and ignored.
 //
@@ -238,6 +238,11 @@ fn tree_from_js_value(doc: JsValue) -> Result<StdXmlDocument, String> {
 }
 
 /// Format an uppsala error in @std/xml's XmlSyntaxError message style.
+///
+/// The "… at line L, column C" suffix is a contract with the JS wrapper
+/// (POSITION_RE in xml/mod.ts derives XmlSyntaxError positions and issue
+/// `line`/`column` fields from it) — do not change the format without
+/// updating the wrapper.
 fn error_message(e: &XmlError) -> String {
   match e {
     XmlError::Parse(p) => {
@@ -262,12 +267,34 @@ fn qname_raw(name: &QName<'_>) -> String {
 // ---------------------------------------------------------------------------
 
 /// The declaration's position in @std/xml's terms. uppsala does not expose
-/// it, but the declaration must come first, so it sits at the first '<'.
-/// Line is 1-based, column is 1-based within the line, offset is in UTF-16
+/// it, but the declaration must come first, so it sits at the first '<'
+/// that is not a comment (lenient input may put comments before it). Line
+/// is 1-based, column is 1-based within the line, offset is in UTF-16
 /// code units.
 fn declaration_position(input: &str) -> (usize, usize, usize) {
-  let Some(lt) = input.find('<') else {
-    return (0, 0, 0);
+  let lt = {
+    let mut from = 0;
+    loop {
+      match input[from..].find('<') {
+        None => return (0, 0, 0),
+        Some(i) => {
+          let at = from + i;
+          if input[at..].starts_with("<?xml") {
+            break at;
+          }
+          if input[at..].starts_with("<!--") {
+            // Skip the comment and keep looking.
+            match input[at..].find("-->") {
+              Some(end) => from = at + end + 3,
+              None => return (0, 0, 0),
+            }
+          } else {
+            // Some other construct precedes the declaration.
+            return (0, 0, 0);
+          }
+        }
+      }
+    }
   };
   let (mut line, mut line_start, mut offset) = (1, 0, 0);
   for ch in input[..lt].chars() {
@@ -282,7 +309,7 @@ fn declaration_position(input: &str) -> (usize, usize, usize) {
 
 /// Convert a node and its subtree. Returns `Ok(None)` for nodes std's tree
 /// has no equivalent for (PIs) or that the options filter out. `depth` is
-/// the element depth in std's terms (root = 1).
+/// the element depth in std's terms (root = 0).
 fn node_to_std(
   doc: &Document<'_>,
   id: NodeId,
@@ -376,7 +403,7 @@ fn document_to_std(
       offset,
     }
   });
-  let root = node_to_std(doc, root_id, opts, 1)?
+  let root = node_to_std(doc, root_id, opts, 0)?
     .ok_or_else(|| "document element is not an element".to_string())?;
   Ok(StdXmlDocument { declaration, root })
 }
@@ -592,7 +619,10 @@ fn path_at(doc: &Document<'_>, offset: usize) -> Option<Vec<PathSegment>> {
 fn parse_text(text: &str, opts: &ParseOptions) -> Outcome {
   let mut parser = Parser::new();
   if let Some(max_depth) = opts.max_depth {
-    parser = parser.with_max_depth(max_depth);
+    // std counts the root element as depth 0, uppsala as 1 — pass one more
+    // so the backstop only fires beyond std's limit (checked again, with
+    // std's counting, during tree conversion).
+    parser = parser.with_max_depth(max_depth.saturating_add(1));
   }
   if opts.disallow_doctype.unwrap_or(true) {
     parser = parser.with_forbid_dtd(true);
