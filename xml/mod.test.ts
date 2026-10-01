@@ -5,7 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import * as std from "@std/xml";
-import { parse, stringify, validate, xml } from "./mod.ts";
+import { parse, stringify, validate, xml, XMLValidator } from "./mod.ts";
 import type { XmlDocument } from "@std/xml";
 import { getDotPath, SchemaError } from "@standard-schema/utils";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
@@ -233,7 +233,7 @@ const NOTE_XSD = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
 </xs:schema>`;
 
 Deno.test("validate > conforming document returns { value } with falsy issues", () => {
-  const result = validate("<age>25</age>", AGE_XSD);
+  const result = validate(AGE_XSD, "<age>25</age>");
   // spec: success is indicated by a FALSY `issues` — undefined, never []
   assert(result.issues === undefined);
   assertEquals(result.value.root.name.local, "age");
@@ -242,7 +242,7 @@ Deno.test("validate > conforming document returns { value } with falsy issues", 
 });
 
 Deno.test("validate > non-conforming document returns { issues } without value", () => {
-  const result = validate("<age>-5</age>", AGE_XSD);
+  const result = validate(AGE_XSD, "<age>-5</age>");
   if (result.issues === undefined) throw new Error("expected issues");
   assert(result.issues.length > 0);
   assert(result.issues.every((issue) => typeof issue.message === "string"));
@@ -252,7 +252,7 @@ Deno.test("validate > non-conforming document returns { issues } without value",
 });
 
 Deno.test("validate > issues carry path, line and column (Standard Schema shape)", () => {
-  const result = validate("<age>-5</age>", AGE_XSD);
+  const result = validate(AGE_XSD, "<age>-5</age>");
   if (result.issues === undefined) throw new Error("expected issues");
   assert(result.issues.length > 0);
   const issue = result.issues[0];
@@ -281,8 +281,8 @@ Deno.test("validate > path disambiguates repeated siblings with indices", () => 
   </xs:element>
 </xs:schema>`;
   const result = validate(
-    "<list><item>1</item><item>-2</item></list>",
     LIST_XSD,
+    "<list><item>1</item><item>-2</item></list>",
   );
   if (result.issues === undefined) throw new Error("expected issues");
   assert(result.issues.length > 0);
@@ -295,7 +295,7 @@ Deno.test("validate > path disambiguates repeated siblings with indices", () => 
 });
 
 Deno.test("validate > path uses plain names when siblings are unique", () => {
-  const result = validate("<note><body>hi</body></note>", NOTE_XSD);
+  const result = validate(NOTE_XSD, "<note><body>hi</body></note>");
   if (result.issues === undefined) throw new Error("expected issues");
   assert(result.issues.length > 0);
   const issue = result.issues[0];
@@ -308,7 +308,7 @@ Deno.test("validate > path uses plain names when siblings are unique", () => {
 });
 
 Deno.test("validate > path has no index for a non-repeated child", () => {
-  const result = validate("<note><body>hi</body></note>", NOTE_XSD);
+  const result = validate(NOTE_XSD, "<note><body>hi</body></note>");
   if (result.issues === undefined) throw new Error("expected issues");
   const paths = result.issues.map((issue) => issue.path);
   assert(
@@ -318,14 +318,14 @@ Deno.test("validate > path has no index for a non-repeated child", () => {
 });
 
 Deno.test("validate > structural mismatch reports issues", () => {
-  const result = validate("<note><body>hi</body></note>", NOTE_XSD);
+  const result = validate(NOTE_XSD, "<note><body>hi</body></note>");
   assert(result.issues !== undefined && result.issues.length > 0);
 });
 
 Deno.test("validate > accepts document objects as well as strings", () => {
   const doc = parse("<note><to>Alice</to></note>");
-  const fromString = validate("<note><to>Alice</to></note>", NOTE_XSD);
-  const fromObject = validate(doc, NOTE_XSD);
+  const fromString = validate(NOTE_XSD, "<note><to>Alice</to></note>");
+  const fromObject = validate(NOTE_XSD, doc);
   assert(fromString.issues === undefined);
   assert(fromObject.issues === undefined);
 
@@ -335,12 +335,12 @@ Deno.test("validate > accepts document objects as well as strings", () => {
 Deno.test("validate > schema as object input also works", () => {
   // schema round-trips through parse/stringify just like a document
   const schemaDoc = parse(AGE_XSD);
-  const result = validate("<age>25</age>", schemaDoc);
+  const result = validate(schemaDoc, "<age>25</age>");
   assert(result.issues === undefined);
 });
 
 Deno.test("validate > malformed document throws XmlSyntaxError", () => {
-  assertThrows(() => validate("<age>", AGE_XSD), SyntaxError);
+  assertThrows(() => validate(AGE_XSD, "<age>"), SyntaxError);
 });
 
 Deno.test("validate > broken schema is a schema-authoring error", () => {
@@ -354,7 +354,7 @@ Deno.test("validate > broken schema is a schema-authoring error", () => {
   let threw = false;
   let issues: readonly { message: string }[] | undefined;
   try {
-    issues = validate("<note/>", brokenXsd).issues;
+    issues = validate(brokenXsd, "<note/>").issues;
   } catch {
     threw = true;
   }
@@ -365,11 +365,58 @@ Deno.test("validate > broken schema is a schema-authoring error", () => {
 });
 
 Deno.test("validate > malformed schema throws", () => {
-  assertThrows(() => validate("<age>25</age>", "<xs:schema>"), SyntaxError);
+  assertThrows(() => validate("<xs:schema>", "<age>25</age>"), SyntaxError);
 });
 
 // ---------------------------------------------------------------------------
-// 3b. Standard Schema facade (xsdSchema)
+// 3a. XmlValidator (compiled schema)
+// ---------------------------------------------------------------------------
+
+Deno.test("validator > reuses one compiled schema across documents", () => {
+  using validator = new XMLValidator(AGE_XSD);
+  assert(validator.validate("<age>25</age>").issues === undefined);
+  assert(validator.validate("<age>-5</age>").issues !== undefined);
+  assert(validator.validate("<age>7</age>").issues === undefined);
+});
+
+Deno.test("validator > tree input is returned as-is on success", () => {
+  using validator = new XMLValidator(parse(AGE_XSD));
+  const doc = parse("<age>25</age>");
+  const result = validator.validate(doc);
+  assert(result.issues === undefined);
+  assert(result.value === doc);
+});
+
+Deno.test("validator > tree input reports issues with paths", () => {
+  using validator = new XMLValidator(NOTE_XSD);
+  const result = validator.validate(parse("<note><body>hi</body></note>"));
+  if (result.issues === undefined) throw new Error("expected issues");
+  assert(
+    result.issues.some((issue) =>
+      JSON.stringify(issue.path) === '["note","body"]'
+    ),
+  );
+});
+
+Deno.test("validator > parse returns the tree or throws SchemaError", () => {
+  using validator = new XMLValidator(AGE_XSD);
+  assertEquals(validator.parse("<age>25</age>"), parse("<age>25</age>"));
+  assertThrows(() => validator.parse("<age>-5</age>"), SchemaError);
+  assertThrows(() => validator.parse("<age>"), std.XmlSyntaxError);
+});
+
+Deno.test("validator > schema getter returns the schema tree", () => {
+  using validator = new XMLValidator(AGE_XSD);
+  assertEquals(validator.schema, parse(AGE_XSD));
+});
+
+Deno.test("validator > invalid schema throws on construction", () => {
+  assertThrows(() => new XMLValidator("<xs:schema>"), std.XmlSyntaxError);
+  assertThrows(() => new XMLValidator(""), std.XmlSyntaxError);
+});
+
+// ---------------------------------------------------------------------------
+// 3b. Standard Schema facade (xml)
 // ---------------------------------------------------------------------------
 
 Deno.test("standard > xsdSchema returns a v1 entity", () => {
@@ -448,8 +495,8 @@ Deno.test("standard > issues interop with @standard-schema/utils", () => {
   </xs:element>
 </xs:schema>`;
   const result = validate(
-    "<list><item>1</item><item>-2</item></list>",
     LIST_XSD,
+    "<list><item>1</item><item>-2</item></list>",
   );
   if (result.issues === undefined) throw new Error("expected issues");
   const dotPath = getDotPath(result.issues[0]);
@@ -463,6 +510,40 @@ Deno.test("standard > issues interop with @standard-schema/utils", () => {
   const err = new SchemaError(result.issues);
   assertInstanceOf(err, Error);
   assert(err.message.length > 0);
+});
+
+Deno.test("standard > malformed XML is an issue with a position, not a throw", () => {
+  for (const schema of [xml(), xml(AGE_XSD)]) {
+    const result = v(schema, "<age><x></age>");
+    assert(result.issues?.length === 1);
+    assert(result.issues[0].message.length > 0);
+    assertEquals((result.issues[0] as { line?: number }).line, 1);
+  }
+});
+
+Deno.test("standard > without a schema, only well-formedness is checked", () => {
+  const schema = xml();
+  const ok = v(schema, "<anything><goes/></anything>");
+  assert(ok.issues === undefined);
+  assertEquals(ok.value, parse("<anything><goes/></anything>"));
+
+  const tree = parse("<a/>");
+  const fromTree = v(schema, tree);
+  assert(fromTree.issues === undefined && fromTree.value === tree);
+
+  for (const bad of [42, null, {}, { root: "x" }, [], undefined]) {
+    assert(v(schema, bad).issues?.length, `accepted ${JSON.stringify(bad)}`);
+  }
+});
+
+Deno.test("standard > invalid document trees are issues, not throws", () => {
+  const badTree = { root: { type: "element" } } as unknown as XmlDocument;
+  assert(v(xml(), badTree).issues?.length);
+  assert(v(xml(AGE_XSD), badTree).issues?.length);
+});
+
+Deno.test("standard > an empty-string schema is compiled, not ignored", () => {
+  assertThrows(() => xml(""), std.XmlSyntaxError);
 });
 
 // ---------------------------------------------------------------------------

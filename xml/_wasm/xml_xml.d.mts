@@ -15,6 +15,50 @@ import type { XmlDocument } from "@std/xml";
 export type XmlValidationResult = StandardSchemaV1.Result<XmlDocument>;
 
 /**
+ * A compiled XSD schema. Compile once, then validate any number of
+ * documents given as XML text or as JSON-encoded `XmlDocument` trees.
+ */
+export class XmlSchema {
+  free(): void;
+  [Symbol.dispose](): void;
+  /**
+   * Compile a schema from a JSON-encoded `XmlDocument`.
+   *
+   * @throws {Error} if the tree is invalid or not a valid XSD.
+   */
+  static fromTree(schema: string): XmlSchema;
+  /**
+   * Compile a schema from XML text.
+   *
+   * @throws {Error} if the schema is not well-formed or not a valid XSD.
+   */
+  constructor(schema: string);
+  /**
+   * Validate XML text. Returns a JSON-encoded Standard Schema result:
+   * `{ value: XmlDocument }` on success, `{ issues }` on failure.
+   *
+   * @throws {Error} if the document is not well-formed.
+   */
+  validate(document: string): string;
+  /**
+   * Validate a JSON-encoded `XmlDocument`. Returns the JSON-encoded issues,
+   * or `undefined` when the document is valid — the caller already holds
+   * the tree, so it is not sent back.
+   *
+   * @throws {Error} if the tree is invalid or not well-formed.
+   */
+  validateTree(document: string): string | undefined;
+}
+
+/**
+ * Check that a JSON-encoded @std/xml `XmlDocument` is well-formed XML.
+ *
+ * @throws {Error} if the tree is not a valid XmlDocument, or does not
+ * serialize to well-formed XML.
+ */
+export function checkTree(doc: string): void;
+
+/**
  * Parse XML text into a JSON-encoded @std/xml `XmlDocument`.
  *
  * `options` is a JSON-encoded @std/xml `ParseOptions`.
@@ -33,15 +77,3 @@ export function parse(input: string, options: string): string;
  * comment that cannot be serialized.
  */
 export function stringify(doc: string, options: string): string;
-
-/**
- * Validate XML text against an XSD schema (also XML text).
- *
- * Returns a JSON-encoded Standard Schema result: `{ value: XmlDocument }`
- * on success, `{ issues }` on failure. Issues carry `message` and, when
- * uppsala reports a position, `line`, `column` and a best-effort `path`.
- *
- * @throws {Error} if the document or schema is not well-formed, or the
- * schema cannot be compiled.
- */
-export function validate(document: string, schema: string): string;

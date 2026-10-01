@@ -9,7 +9,9 @@
 //
 //   parse(xml, options)       → JSON `XmlDocument` ({ declaration?, root })
 //   stringify(doc, options)   → XML text (std's StringifyOptions semantics)
-//   validate(xml, schemaXml)  → JSON Standard Schema result:
+//   checkTree(doc)            → throws unless the tree is well-formed XML
+//   XmlSchema                 → compiled XSD; validates XML text or trees,
+//                               returning a JSON Standard Schema result:
 //                               `{ value }` or `{ issues }`
 //
 // Options parity (parse):
@@ -167,6 +169,16 @@ fn js_err(message: impl std::fmt::Display) -> JsError {
 /// Lenient options decoding: invalid options fall back to the defaults.
 fn from_json_or_default<T: DeserializeOwned + Default>(json: &str) -> T {
   serde_json::from_str(json).unwrap_or_default()
+}
+
+fn tree_from_json(doc: &str) -> Result<StdXmlDocument, JsError> {
+  serde_json::from_str(doc)
+    .map_err(|e| js_err(format_args!("invalid XmlDocument object: {e}")))
+}
+
+/// JSON-encoded `XmlDocument` → XML text, declaration included.
+fn tree_to_xml(doc: &str) -> Result<String, JsError> {
+  std_document_to_xml(&tree_from_json(doc)?, &StringifyOptions::default())
 }
 
 fn to_json(value: &impl Serialize) -> Result<String, JsError> {
@@ -552,35 +564,94 @@ pub fn parse(input: &str, options: &str) -> Result<String, JsError> {
 /// comment that cannot be serialized.
 #[wasm_bindgen]
 pub fn stringify(doc: &str, options: &str) -> Result<String, JsError> {
-  let doc: StdXmlDocument = serde_json::from_str(doc)
-    .map_err(|e| js_err(format_args!("invalid XmlDocument object: {e}")))?;
-  std_document_to_xml(&doc, &from_json_or_default(options))
+  std_document_to_xml(&tree_from_json(doc)?, &from_json_or_default(options))
 }
 
-/// Validate XML text against an XSD schema (also XML text).
+/// Check that a JSON-encoded @std/xml `XmlDocument` is well-formed XML.
 ///
-/// Returns a JSON-encoded Standard Schema result: `{ value: XmlDocument }`
-/// on success, `{ issues }` on failure. Issues carry `message` and, when
-/// uppsala reports a position, `line`, `column` and a best-effort `path`.
-///
-/// @throws {Error} if the document or schema is not well-formed, or the
-/// schema cannot be compiled.
+/// @throws {Error} if the tree is not a valid XmlDocument, or does not
+/// serialize to well-formed XML.
+#[wasm_bindgen(js_name = checkTree)]
+pub fn check_tree(doc: &str) -> Result<(), JsError> {
+  uppsala::parse(&tree_to_xml(doc)?).map_err(to_js_error)?;
+  Ok(())
+}
+
+/// A compiled XSD schema. Compile once, then validate any number of
+/// documents given as XML text or as JSON-encoded `XmlDocument` trees.
 #[wasm_bindgen]
-pub fn validate(document: &str, schema: &str) -> Result<String, JsError> {
-  let schema_doc = uppsala::parse(schema).map_err(to_js_error)?;
-  let validator = XsdValidator::from_schema(&schema_doc)
-    .map_err(|e| js_err(format_args!("invalid schema: {e}")))?;
+pub struct XmlSchema {
+  validator: XsdValidator,
+}
 
-  // Validation sees the full document: no whitespace/comment filtering.
-  let doc = uppsala::parse(document).map_err(to_js_error)?;
-  let errors = validator.validate(&doc);
+#[wasm_bindgen]
+impl XmlSchema {
+  /// Compile a schema from XML text.
+  ///
+  /// @throws {Error} if the schema is not well-formed or not a valid XSD.
+  #[wasm_bindgen(constructor)]
+  pub fn new(schema: &str) -> Result<XmlSchema, JsError> {
+    let schema_doc = uppsala::parse(schema).map_err(to_js_error)?;
+    let validator = XsdValidator::from_schema(&schema_doc)
+      .map_err(|e| js_err(format_args!("invalid schema: {e}")))?;
+    Ok(XmlSchema { validator })
+  }
 
-  let result = if errors.is_empty() {
-    ValidateResult::Success {
-      value: document_to_std(&doc, document, &ParseOptions::default())?,
+  /// Compile a schema from a JSON-encoded `XmlDocument`.
+  ///
+  /// @throws {Error} if the tree is invalid or not a valid XSD.
+  #[wasm_bindgen(js_name = fromTree)]
+  pub fn from_tree(schema: &str) -> Result<XmlSchema, JsError> {
+    XmlSchema::new(&tree_to_xml(schema)?)
+  }
+
+  /// Validate XML text. Returns a JSON-encoded Standard Schema result:
+  /// `{ value: XmlDocument }` on success, `{ issues }` on failure.
+  ///
+  /// @throws {Error} if the document is not well-formed.
+  pub fn validate(&self, document: &str) -> Result<String, JsError> {
+    let doc = uppsala::parse(document).map_err(to_js_error)?;
+    let result = match self.issues(&doc, document) {
+      Some(issues) => ValidateResult::Failure { issues },
+      None => ValidateResult::Success {
+        value: document_to_std(&doc, document, &ParseOptions::default())?,
+      },
+    };
+    to_json(&result)
+  }
+
+  /// Validate a JSON-encoded `XmlDocument`. Returns the JSON-encoded issues,
+  /// or `undefined` when the document is valid — the caller already holds
+  /// the tree, so it is not sent back.
+  ///
+  /// @throws {Error} if the tree is invalid or not well-formed.
+  #[wasm_bindgen(js_name = validateTree)]
+  pub fn validate_tree(
+    &self,
+    document: &str,
+  ) -> Result<Option<String>, JsError> {
+    let xml = tree_to_xml(document)?;
+    let doc = uppsala::parse(&xml).map_err(to_js_error)?;
+    self
+      .issues(&doc, &xml)
+      .map(|issues| to_json(&issues))
+      .transpose()
+  }
+}
+
+impl XmlSchema {
+  /// Validation issues for a parsed document, or `None` when it is valid.
+  /// Validation sees the full document: no whitespace/comment filtering.
+  fn issues(
+    &self,
+    doc: &Document<'_>,
+    input: &str,
+  ) -> Option<Vec<ValidateIssue>> {
+    let errors = self.validator.validate(doc);
+    if errors.is_empty() {
+      return None;
     }
-  } else {
-    let starts = line_starts(document);
+    let starts = line_starts(input);
     let issues = errors
       .into_iter()
       .map(|e| {
@@ -591,14 +662,13 @@ pub fn validate(document: &str, schema: &str) -> Result<String, JsError> {
           .and_then(|(line, column)| {
             starts.get(line - 1).map(|s| s + column - 1)
           })
-          .and_then(|offset| path_at(&doc, offset));
+          .and_then(|offset| path_at(doc, offset));
         ValidateIssue {
           message: e.to_string(),
           path,
         }
       })
       .collect();
-    ValidateResult::Failure { issues }
-  };
-  to_json(&result)
+    Some(issues)
+  }
 }
