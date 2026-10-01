@@ -25,8 +25,8 @@
 //      (https://standardschema.dev): issues carry Standard-Schema-shaped
 //      `path` segments (element names + sibling indices) derived from the
 //      validator's line/column positions, plus std-style `line`/`column`
-//      for well-formedness problems, so any Standard Schema consumer can
-//      use @stdext/xml schemas.
+//      when the message carries a position, so any Standard Schema consumer
+//      can use @stdext/xml schemas.
 
 import {
   parse as wasmParse,
@@ -74,8 +74,19 @@ export type { StandardSchemaV1 } from "@standard-schema/spec";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Position suffix in @std/xml's XmlSyntaxError message style. */
+/**
+ * Position suffix of the wasm crate's parse and well-formedness errors.
+ *
+ * CONTRACT with the wasm crate (`error_message` in
+ * _wasm/xml_xml/src/lib.rs): those errors are formatted as
+ * "… at line L, column C". The wrapper derives XmlSyntaxError positions and
+ * issue `line`/`column` fields from this suffix — do not change one side
+ * without the other.
+ */
 const POSITION_RE = / at line (\d+), column (\d+)$/;
+
+/** Position prefix of uppsala's XSD validation errors ("L: C: "). */
+const VALIDATION_POSITION_RE = /^(\d+):(\d+): /;
 
 /** Convert a wasm `Error` into @std/xml's XmlSyntaxError. */
 function toXmlSyntaxError(error: unknown): XmlSyntaxError {
@@ -96,10 +107,11 @@ function toXmlSyntaxError(error: unknown): XmlSyntaxError {
 
 /**
  * Attach std-style `line`/`column` to an issue when its message carries a
- * position (wasm parse errors; XSD validation errors do not have one).
+ * position — either format the wasm crate produces.
  */
 function withPosition(issue: StandardSchemaV1.Issue): StandardSchemaV1.Issue {
-  const match = issue.message.match(POSITION_RE);
+  const match = issue.message.match(POSITION_RE) ??
+    issue.message.match(VALIDATION_POSITION_RE);
   if (match === null) {
     return issue;
   }
@@ -108,6 +120,54 @@ function withPosition(issue: StandardSchemaV1.Issue): StandardSchemaV1.Issue {
     line: Number(match[1]),
     column: Number(match[2]),
   } as StandardSchemaV1.Issue;
+}
+
+/**
+ * Whether an issue reports an XSD validation error rather than a
+ * well-formedness problem. uppsala's XSD errors carry an "L: C: " prefix;
+ * parse and well-formedness errors never do (some carry the
+ * "… at line L, column C" suffix instead, some have no position at all —
+ * e.g. Unexpected end of input).
+ */
+function isValidationIssue(issue: StandardSchemaV1.Issue): boolean {
+  return VALIDATION_POSITION_RE.test(issue.message);
+}
+
+/**
+ * Parse XML text into a raw-tree Standard Schema result, attaching
+ * std-style line/column to the issues. Never throws.
+ */
+function parseText(
+  text: string,
+  options?: ParseOptions,
+): StandardSchemaV1.Result<XmlDocument> {
+  const res = wasmParse(text, options);
+  if (res.issues !== undefined || res.value === undefined) {
+    return {
+      issues: res.issues?.map(withPosition) ?? [{
+        message: "cannot parse XML",
+      }],
+    };
+  }
+  return { value: res.value };
+}
+
+/**
+ * Check a document tree the caller already holds by round-tripping it
+ * through serialize + parse: a tree is well-formed iff it reparses. A
+ * shape check alone would let an illegal element name through. Returns the
+ * issues, or `undefined` when the tree is fine. Never throws.
+ */
+function treeIssues(
+  document: XmlDocument,
+): readonly StandardSchemaV1.Issue[] | undefined {
+  try {
+    const result = parseText(wasmStringify(document, undefined));
+    return "issues" in result ? result.issues : undefined;
+  } catch (error) {
+    // A tree that cannot be serialized at all (e.g. a comment with "--").
+    return [{ message: toXmlSyntaxError(error).message }];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -145,8 +205,7 @@ export class XML implements XmlDocument {
    * throwing: every problem is an issue.
    *
    * On success the value is the parsed tree; for a tree input it is that
-   * same tree (only its shape is checked — a tree that serializes is
-   * representable XML).
+   * same tree (verified to round-trip through the serializer first).
    *
    * @param document The XML string or document tree.
    * @param options Options for configuring the parser (@std/xml's
@@ -159,22 +218,14 @@ export class XML implements XmlDocument {
     options?: ParseOptions,
   ): StandardSchemaV1.Result<XML> {
     if (typeof document !== "string") {
-      try {
-        wasmStringify(document, undefined);
-        return { value: new XML(document) };
-      } catch (error) {
-        return { issues: [{ message: toXmlSyntaxError(error).message }] };
+      const issues = treeIssues(document);
+      if (issues !== undefined) {
+        return { issues };
       }
+      return { value: new XML(document) };
     }
-    const res = wasmParse(document, options);
-    if (res.value === undefined || res.issues !== undefined) {
-      return {
-        issues: res.issues?.map(withPosition) ?? [{
-          message: "cannot parse XML",
-        }],
-      };
-    }
-    return { value: new XML(res.value) };
+    const result = parseText(document, options);
+    return "value" in result ? { value: new XML(result.value) } : result;
   }
 
   /**
@@ -229,7 +280,8 @@ export class XML implements XmlDocument {
  *
  * The schema is compiled once, in the constructor. The compiled schema
  * lives in wasm memory: it is released when the validator is garbage
- * collected, or immediately with `using` / `[Symbol.dispose]()`.
+ * collected, or immediately with `using` / `[Symbol.dispose]()` (idempotent
+ * — using a validator after disposal throws).
  *
  * @example Usage
  * ```ts
@@ -247,8 +299,10 @@ export class XML implements XmlDocument {
  * ```
  */
 export class XMLValidator {
-  #schema: XmlDocument;
+  #schema: string | XmlDocument;
+  #schemaDoc: XmlDocument | undefined;
   #validator: WasmXmlSchema;
+  #disposed = false;
 
   /**
    * Compiles the schema.
@@ -259,21 +313,31 @@ export class XMLValidator {
    */
   constructor(schema: string | XmlDocument) {
     try {
-      this.#schema = XML.parse(schema).document;
+      this.#schema = schema;
       this.#validator = new WasmXmlSchema(schema);
     } catch (error) {
       throw toXmlSyntaxError(error);
     }
   }
 
-  /** The schema document tree. */
+  /** The schema document tree (parsed on first use). */
   get schema(): XmlDocument {
-    return this.#schema;
+    return this.#schemaDoc ??= XML.parse(this.#schema).document;
   }
 
-  /** Releases the compiled schema in wasm memory. */
+  /** Releases the compiled schema in wasm memory. Idempotent. */
   [Symbol.dispose](): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#disposed = true;
     this.#validator.free();
+  }
+
+  #assertLive(): void {
+    if (this.#disposed) {
+      throw new Error("XMLValidator has been disposed");
+    }
   }
 
   /**
@@ -283,10 +347,12 @@ export class XMLValidator {
    * @param doc The document (XML string, document tree, or `XML`).
    * @returns The Standard Schema result: `{ value }` (the tree — the very
    * same object for a tree input) or `{ issues }`.
+   * @throws {Error} If the validator has been disposed.
    */
   validate(
     doc: string | XmlDocument | XML,
   ): StandardSchemaV1.Result<XmlDocument> {
+    this.#assertLive();
     const input = doc instanceof XML ? doc.document : doc;
     const result = this.#validator.validate(input);
     if (result.issues !== undefined) {
@@ -305,15 +371,16 @@ export class XMLValidator {
    * @returns The document tree.
    * @throws {XmlSyntaxError} If the document is not well-formed XML.
    * @throws {SchemaError} If the document does not conform to the schema.
+   * @throws {Error} If the validator has been disposed.
    */
   parse(doc: string | XmlDocument | XML): XmlDocument {
-    const parsed = XML.safeParse(doc instanceof XML ? doc.document : doc);
-    if (parsed.issues !== undefined) {
-      throw toXmlSyntaxError(new Error(parsed.issues[0].message));
-    }
     const result = this.validate(doc);
     if (result.issues !== undefined) {
-      throw new SchemaError(result.issues);
+      // An XSD violation is a SchemaError; anything else is a
+      // well-formedness problem — std's XmlSyntaxError.
+      throw isValidationIssue(result.issues[0])
+        ? new SchemaError(result.issues)
+        : toXmlSyntaxError(new Error(result.issues[0].message));
     }
     return result.value;
   }
@@ -376,21 +443,16 @@ export function xml(
           if (validator) {
             return validator.validate(value as string | XmlDocument);
           }
-          if (typeof value !== "string") {
-            // A tree the caller already holds: shape-check it, hand it back.
-            wasmStringify(value, undefined);
-            return { value: value as XmlDocument };
+          if (typeof value === "string") {
+            return parseText(value);
           }
-          const result = wasmParse(value, undefined);
-          if (result.issues !== undefined || result.value === undefined) {
-            return {
-              issues: result.issues?.map(withPosition) ?? [{
-                message: "cannot parse XML",
-              }],
-            };
-          }
-          return { value: result.value };
+          // A tree the caller already holds: check it, hand it back.
+          const issues = treeIssues(value as XmlDocument);
+          return issues === undefined
+            ? { value: value as XmlDocument }
+            : { issues };
         } catch (error) {
+          // Safety net: the facade never throws for bad input.
           return {
             issues: [{ message: toXmlSyntaxError(error).message }],
           };

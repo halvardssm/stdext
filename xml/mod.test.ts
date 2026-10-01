@@ -156,12 +156,33 @@ Deno.test("compat > disallowDoctype rejects DOCTYPE by default", () => {
   assertThrows(() => std.parse(xml), SyntaxError);
 });
 
-Deno.test("compat > maxDepth is enforced", () => {
-  const deep = `<a><b><c/></b></a>`;
-  assertThrows(() => parse(deep, { maxDepth: 2 }), SyntaxError);
-  // assertThrows(() => std.parse(deep, { maxDepth: 2 }), SyntaxError);
-  // depth 3 must pass in both
-  assertEquals(parse(deep, { maxDepth: 3 }), std.parse(deep, { maxDepth: 3 }));
+Deno.test("compat > maxDepth follows std's counting (root element = depth 0)", () => {
+  // std throws iff maxDepth < levels - 1. The differential check pins the
+  // exact threshold in both implementations — this used to be off by one
+  // here (the root was counted as depth 1).
+  const docs: [string, number][] = [
+    [`<a/>`, 1],
+    [`<a><b/></a>`, 2],
+    [`<a><b><c/></b></a>`, 3],
+    [`<a><b><c><d/></c></b></a>`, 4],
+  ];
+  const throws = (fn: () => unknown): boolean => {
+    try {
+      fn();
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  for (const [doc, levels] of docs) {
+    for (let maxDepth = 0; maxDepth <= levels; maxDepth++) {
+      assertEquals(
+        throws(() => parse(doc, { maxDepth })),
+        throws(() => std.parse(doc, { maxDepth })),
+        `maxDepth ${maxDepth} divergence for: ${doc}`,
+      );
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -572,6 +593,116 @@ Deno.test("standard > invalid document trees are issues, not throws", () => {
 
 Deno.test("standard > an empty-string schema is compiled, not ignored", () => {
   assertThrows(() => xml(""), std.XmlSyntaxError);
+});
+
+// ---------------------------------------------------------------------------
+// 3c. XML class surface
+// ---------------------------------------------------------------------------
+
+Deno.test("class > XML wraps the tree and exposes std getters", () => {
+  const doc = XML.parse(`<root id="1">text</root>`);
+  assert(doc instanceof XML);
+  assert(doc.document.root === doc.root);
+  assertEquals(doc.root.name.local, "root");
+  assertEquals(doc.root.attributes, { id: "1" });
+  assertEquals(doc.declaration, undefined);
+});
+
+Deno.test("class > declaration getter exposes the declaration", () => {
+  const doc = XML.parse(`<?xml version="1.0" encoding="UTF-8"?><root/>`);
+  assertEquals(doc.declaration?.version, "1.0");
+  assertEquals(doc.declaration?.encoding, "UTF-8");
+});
+
+Deno.test("class > safeParse success value is an XML, issues on failure", () => {
+  const ok = XML.safeParse("<a/>");
+  if (ok.issues !== undefined) throw new Error("expected success");
+  assert(ok.value instanceof XML);
+  const bad = XML.safeParse("<a>");
+  assert(bad.issues !== undefined && bad.issues.length > 0);
+});
+
+Deno.test("class > tree input round-trips and is returned as-is", () => {
+  const tree = parse(`<a x="1"/>`);
+  const ok = XML.safeParse(tree);
+  if (ok.issues !== undefined) throw new Error("expected success");
+  assert(ok.value.document === tree);
+  // an illegal element name passes a shape check but fails the round-trip
+  const bad = XML.safeParse({
+    root: {
+      type: "element",
+      name: { raw: "1<bad", local: "1<bad" },
+      attributes: {},
+      children: [],
+    },
+  } as unknown as XmlDocument);
+  assert(bad.issues !== undefined && bad.issues.length > 0);
+});
+
+Deno.test("class > instance stringify honors options", () => {
+  const doc = XML.parse(`<root><x/></root>`);
+  assertEquals(doc.stringify(), `<root><x/></root>`);
+  assertEquals(doc.stringify({ indent: "  " }), `<root>\n  <x/>\n</root>`);
+});
+
+Deno.test("class > instance validate with a compiled validator and on the fly", () => {
+  using validator = new XMLValidator(AGE_XSD);
+  const doc = XML.parse("<age>25</age>");
+  assert(doc.validate(validator).issues === undefined);
+  assert(XML.parse("<age>-5</age>").validate(validator).issues !== undefined);
+  // compiling the schema on the fly
+  assert(doc.validate(AGE_XSD).issues === undefined);
+});
+
+// ---------------------------------------------------------------------------
+// 3d. XMLValidator extras
+// ---------------------------------------------------------------------------
+
+Deno.test("validator > schema getter is lazy and reflects the input", () => {
+  using validator = new XMLValidator(AGE_XSD);
+  assertEquals(validator.schema, parse(AGE_XSD));
+  // a tree input is reflected as that very tree
+  const tree = parse(AGE_XSD);
+  using fromTree = new XMLValidator(tree);
+  assert(fromTree.schema === tree);
+});
+
+Deno.test("validator > parse accepts an XML instance", () => {
+  using validator = new XMLValidator(AGE_XSD);
+  const doc = XML.parse("<age>25</age>");
+  assertEquals(validator.parse(doc), doc.document);
+  assertThrows(() => validator.parse(XML.parse("<age>-5</age>")), SchemaError);
+});
+
+Deno.test("validator > use after dispose throws, dispose is idempotent", () => {
+  const validator = new XMLValidator(AGE_XSD);
+  validator[Symbol.dispose]();
+  validator[Symbol.dispose]();
+  assertThrows(() => validator.validate("<age>25</age>"), Error, "disposed");
+  assertThrows(() => validator.parse("<age>25</age>"), Error, "disposed");
+});
+
+// ---------------------------------------------------------------------------
+// 3e. Issue positions (Standard Schema extras)
+// ---------------------------------------------------------------------------
+
+Deno.test("validate > issues carry line/column for XSD validation errors", () => {
+  const result = validate(AGE_XSD, "<age>-5</age>");
+  if (result.issues === undefined) throw new Error("expected issues");
+  assertEquals((result.issues[0] as { line?: number }).line, 1);
+  assert(typeof (result.issues[0] as { column?: number }).column === "number");
+});
+
+Deno.test("standard > illegal tree names are issues even without a schema", () => {
+  const bad = {
+    root: {
+      type: "element",
+      name: { raw: "1<bad", local: "1<bad" },
+      attributes: {},
+      children: [],
+    },
+  } as unknown as XmlDocument;
+  assert(v(xml(), bad).issues?.length);
 });
 
 // ---------------------------------------------------------------------------
