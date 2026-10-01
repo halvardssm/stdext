@@ -5,11 +5,34 @@ import {
   assertThrows,
 } from "@std/assert";
 import * as std from "@std/xml";
-import { parse, stringify, validate, xml, XMLValidator } from "./mod.ts";
-import type { XmlDocument } from "@std/xml";
+import { XML, xml, XMLValidator } from "./mod.ts";
+import type { ParseOptions, StringifyOptions, XmlDocument } from "@std/xml";
 import { getDotPath, SchemaError } from "@standard-schema/utils";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { validate as v } from "@stdext/validation";
+
+// ---------------------------------------------------------------------------
+// Helpers (thin class-API adapters, so the fixtures below stay declarative)
+// ---------------------------------------------------------------------------
+
+/** Parse XML text into a plain std-shaped document tree. */
+function parse(xmlText: string, options?: ParseOptions): XmlDocument {
+  return XML.parse(xmlText, options).document;
+}
+
+/** Serialize a document tree (ours or @std/xml's) to XML text. */
+function stringify(doc: XmlDocument, options?: StringifyOptions): string {
+  return new XML(doc).stringify(options);
+}
+
+/** Validate a document against an XSD schema, compiling it once for the call. */
+function validate(
+  schema: string | XmlDocument,
+  doc: string | XmlDocument,
+): StandardSchemaV1.Result<XmlDocument> {
+  using validator = new XMLValidator(schema);
+  return validator.validate(doc);
+}
 
 // ---------------------------------------------------------------------------
 // Fixture corpus
@@ -179,13 +202,13 @@ Deno.test("compat > cross-serialization both directions (structural identity)", 
     const stdDoc = std.parse(xml);
     // our tree → std stringify: proves our tree is consumable by std code
     assertEquals(
-      std.stringify(ourDoc as never),
+      std.stringify(ourDoc),
       std.stringify(stdDoc),
       `our tree rejected by std stringify: ${xml}`,
     );
     // std tree → our stringify: proves we accept genuine std trees
     assertEquals(
-      stringify(stdDoc as XmlDocument),
+      stringify(stdDoc),
       stringify(ourDoc),
       `std tree rejected by our stringify: ${xml}`,
     );
@@ -235,7 +258,7 @@ const NOTE_XSD = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
 Deno.test("validate > conforming document returns { value } with falsy issues", () => {
   const result = validate(AGE_XSD, "<age>25</age>");
   // spec: success is indicated by a FALSY `issues` — undefined, never []
-  assert(result.issues === undefined);
+  if (result.issues !== undefined) throw new Error("expected success");
   assertEquals(result.value.root.name.local, "age");
   // result.value is a plain std-compatible tree
   assertEquals(result.value, parse("<age>25</age>"));
@@ -247,8 +270,7 @@ Deno.test("validate > non-conforming document returns { issues } without value",
   assert(result.issues.length > 0);
   assert(result.issues.every((issue) => typeof issue.message === "string"));
   // spec: a failure result carries no `value`
-  // @ts-expect-error Ignore as we expect this due to type narrowing
-  assertEquals(result.value, undefined);
+  assertEquals("value" in result, false);
 });
 
 Deno.test("validate > issues carry path, line and column (Standard Schema shape)", () => {
@@ -326,8 +348,9 @@ Deno.test("validate > accepts document objects as well as strings", () => {
   const doc = parse("<note><to>Alice</to></note>");
   const fromString = validate(NOTE_XSD, "<note><to>Alice</to></note>");
   const fromObject = validate(NOTE_XSD, doc);
-  assert(fromString.issues === undefined);
-  assert(fromObject.issues === undefined);
+  if (fromString.issues !== undefined || fromObject.issues !== undefined) {
+    throw new Error("expected success");
+  }
 
   assertEquals(fromObject.value, fromString.value);
 });
@@ -339,8 +362,10 @@ Deno.test("validate > schema as object input also works", () => {
   assert(result.issues === undefined);
 });
 
-Deno.test("validate > malformed document throws XmlSyntaxError", () => {
-  assertThrows(() => validate(AGE_XSD, "<age>"), SyntaxError);
+Deno.test("validate > malformed document is an issue, not a throw", () => {
+  // validate never throws: a document that is not well-formed XML is an issue
+  const result = validate(AGE_XSD, "<age>");
+  assert(result.issues !== undefined && result.issues.length > 0);
 });
 
 Deno.test("validate > broken schema is a schema-authoring error", () => {
@@ -365,11 +390,14 @@ Deno.test("validate > broken schema is a schema-authoring error", () => {
 });
 
 Deno.test("validate > malformed schema throws", () => {
-  assertThrows(() => validate("<xs:schema>", "<age>25</age>"), SyntaxError);
+  assertThrows(
+    () => validate("<xs:schema>", "<age>25</age>"),
+    std.XmlSyntaxError,
+  );
 });
 
 // ---------------------------------------------------------------------------
-// 3a. XmlValidator (compiled schema)
+// 3a. XMLValidator (compiled schema)
 // ---------------------------------------------------------------------------
 
 Deno.test("validator > reuses one compiled schema across documents", () => {
@@ -419,7 +447,7 @@ Deno.test("validator > invalid schema throws on construction", () => {
 // 3b. Standard Schema facade (xml)
 // ---------------------------------------------------------------------------
 
-Deno.test("standard > xsdSchema returns a v1 entity", () => {
+Deno.test("standard > xml() returns a v1 entity", () => {
   const schema = xml(AGE_XSD);
   assertEquals(schema["~standard"].version, 1);
   assertEquals(schema["~standard"].vendor, "@stdext/xml");
@@ -500,7 +528,7 @@ Deno.test("standard > issues interop with @standard-schema/utils", () => {
   );
   if (result.issues === undefined) throw new Error("expected issues");
   const dotPath = getDotPath(result.issues[0]);
-  // "list.item[1]" when a path is derived; undefined when uppsala reported
+  // "list.item.1" when a path is derived; undefined when uppsala reported
   // no position for the issue (getDotPath returns undefined for pathless
   // issues — both outcomes are spec-conformant)
   if (dotPath !== undefined) {
@@ -564,10 +592,10 @@ Deno.test("divergence > DOCTYPE with disallowDoctype: false (uppsala parses the 
 });
 
 Deno.test("divergence > ignored options are accepted without error", () => {
-  // Accepted and ignored by design (see lib.rs header): must not throw,
-  // must not change results. (trackPosition is NOT ignored — it is honored
-  // for the declaration's position — but this fixture has no declaration,
-  // so it makes no difference here.)
+  // Accepted and ignored by design (see the wasm crate header): must not
+  // throw, must not change results. (trackPosition is NOT ignored — it is
+  // honored for the declaration's position — but this fixture has no
+  // declaration, so it makes no difference here.)
   const xml = `<root><x/></root>`;
   assertEquals(
     parse(xml, { trackPosition: false, maxAttributes: 5, xmlVersion: "1.1" }),
