@@ -6,74 +6,72 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { XmlDocument } from "@std/xml";
 
 /**
- * StandardSchemaV1 compatible result
- *
- * Result of `validate`: the Standard Schema `Result` union shape.
- *   - success: `{ value: XmlDocument }` (`issues` is undefined — falsy)
- *   - failure: `{ issues: StandardSchemaV1.Issue[] }` (no `value`)
+ * A Standard Schema shaped issue: `message`, plus a best-effort `path` —
+ * the chain of enclosing element names with 0-based indices for repeated
+ * siblings.
+ */
+export type XmlIssue = {
+  message: string;
+  path?: (string | number)[];
+};
+
+/**
+ * Result of `parse` — it never throws, every problem is an issue:
+ *   - well-formed XML text → `{ value: XmlDocument }`
+ *   - otherwise            → `{ issues: XmlIssue[] }`
+ */
+export type XmlParseResult = {
+  value?: XmlDocument;
+  issues?: XmlIssue[];
+};
+
+/**
+ * Result of `XmlSchema.validate` — it never throws, every problem is an
+ * issue:
+ *   - XML text input, valid → `{ value: XmlDocument }`
+ *   - tree input, valid     → `{}` — the caller already holds the tree
+ *   - otherwise             → `{ issues: StandardSchemaV1.Issue[] }`
  */
 export type XmlValidationResult = StandardSchemaV1.Result<XmlDocument>;
 
 /**
  * A compiled XSD schema. Compile once, then validate any number of
- * documents given as XML text or as JSON-encoded `XmlDocument` trees.
+ * documents given as XML text or as `XmlDocument` trees.
  */
 export class XmlSchema {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Compile a schema from a JSON-encoded `XmlDocument`.
-   *
-   * @throws {Error} if the tree is invalid or not a valid XSD.
-   */
-  static fromTree(schema: string): XmlSchema;
-  /**
-   * Compile a schema from XML text.
+   * Compile a schema from XML text or an `XmlDocument` tree.
    *
    * @throws {Error} if the schema is not well-formed or not a valid XSD.
    */
-  constructor(schema: string);
+  constructor(schema: any);
   /**
-   * Validate XML text. Returns a JSON-encoded Standard Schema result:
-   * `{ value: XmlDocument }` on success, `{ issues }` on failure.
+   * Validate a document — XML text or an `XmlDocument` tree — against the
+   * schema. Never throws: every problem is an issue.
    *
-   * @throws {Error} if the document is not well-formed.
+   * Returns `{ value }` for valid XML text (the parsed tree), `{}` for a
+   * valid tree (the caller already holds it), `{ issues }` otherwise.
    */
-  validate(document: string): string;
-  /**
-   * Validate a JSON-encoded `XmlDocument`. Returns the JSON-encoded issues,
-   * or `undefined` when the document is valid — the caller already holds
-   * the tree, so it is not sent back.
-   *
-   * @throws {Error} if the tree is invalid or not well-formed.
-   */
-  validateTree(document: string): string | undefined;
+  validate(document: any): XmlValidationResult;
 }
 
 /**
- * Check that a JSON-encoded @std/xml `XmlDocument` is well-formed XML.
+ * Parse XML text into a Standard Schema result. Never throws: every
+ * problem is an issue. Tree input is not accepted — the wrapper already
+ * holds any tree it could pass.
  *
- * @throws {Error} if the tree is not a valid XmlDocument, or does not
- * serialize to well-formed XML.
+ * Returns `{ value }` (the parsed tree) on success, `{ issues }` otherwise.
  */
-export function checkTree(doc: string): void;
+export function parse(input: any, options: any): XmlParseResult;
 
 /**
- * Parse XML text into a JSON-encoded @std/xml `XmlDocument`.
+ * Serialize an @std/xml `XmlDocument` tree to XML text.
  *
- * `options` is a JSON-encoded @std/xml `ParseOptions`.
- *
- * @throws {Error} formatted like @std/xml's XmlSyntaxError when the input
- * is not well-formed, or when maxDepth is exceeded.
- */
-export function parse(input: string, options: string): string;
-
-/**
- * Serialize a JSON-encoded @std/xml `XmlDocument` to XML text.
- *
- * `options` is a JSON-encoded @std/xml `StringifyOptions`.
+ * `options` is @std/xml's `StringifyOptions`.
  *
  * @throws {Error} if the input is not a valid XmlDocument, or contains a
  * comment that cannot be serialized.
  */
-export function stringify(doc: string, options: string): string;
+export function stringify(doc: any, options: any): string;

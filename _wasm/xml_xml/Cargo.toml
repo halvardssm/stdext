@@ -8,6 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen.workspace = true
+serde-wasm-bindgen.workspace = true
 uppsala.workspace = true
 serde.workspace = true
 serde_json.workspace = true

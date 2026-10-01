@@ -3,36 +3,37 @@
 // @stdext/xml — wasm bindings for the `uppsala` crate, producing trees that
 // are drop-in compatible with @std/xml (https://jsr.io/@std/xml).
 //
-// Values cross the wasm boundary as JSON strings: a single `JSON.parse` on
-// the JS side is much cheaper than building the tree object-by-object
-// through FFI calls. The JS wrapper (xml/mod.ts) owns the (de)serialization.
+// Values cross the wasm boundary as plain JS values (serde-wasm-bindgen):
+// the JS wrapper (xml/mod.ts) passes options and document trees as objects
+// and receives Standard Schema result objects — no JSON (de)serialization
+// on the JS side.
 //
-//   parse(xml, options)       → JSON `XmlDocument` ({ declaration?, root })
-//   stringify(doc, options)   → XML text (std's StringifyOptions semantics)
-//   checkTree(doc)            → throws unless the tree is well-formed XML
-//   XmlSchema                 → compiled XSD; validates XML text or trees,
-//                               returning a JSON Standard Schema result:
-//                               `{ value }` or `{ issues }`
+//   parse(text, options?)  → { value: XmlDocument } | { issues } — never
+//                            throws. XML text only: tree input is handled
+//                            by the wrapper, which already holds the tree.
+//   stringify(doc, opts?)  → XML text (@std/xml's StringifyOptions)
+//   XmlSchema              → compiled XSD; `new` accepts XML text or a tree
+//                            (throws on an invalid schema — a schema-
+//                            authoring error); `validate` accepts either
+//                            and never throws: problems are issues.
 //
-// Options parity (parse):
-//   ignoreWhitespace, ignoreComments — filtered during tree conversion
-//   disallowDoctype — uppsala's `with_forbid_dtd`; default true, as in std.
-//                     When false, uppsala parses the DTD internal subset,
-//                     whereas @std/xml ignores it.
-//   maxDepth        — std semantics (root element = depth 1), checked during
-//                     tree conversion; also passed to uppsala as a backstop.
-//   trackPosition   — honored for the declaration's position (default true)
-//   maxAttributes, xmlVersion — accepted and ignored
+// Options parity (parse): ignoreWhitespace and ignoreComments filter during
+// tree conversion; disallowDoctype is uppsala's `with_forbid_dtd` (default
+// true, as in std — when false, uppsala parses the DTD internal subset,
+// whereas @std/xml ignores it); maxDepth uses std semantics (root element =
+// depth 1) and is checked during tree conversion, with uppsala's limit as a
+// backstop; trackPosition is honored for the declaration's position
+// (default true); maxAttributes and xmlVersion are accepted and ignored.
 //
-// Errors carry std's XmlSyntaxError message style ("… at line L, column C")
-// when uppsala reports a position; the wrapper turns them into
-// XmlSyntaxError instances.
+// Issue messages carry std's XmlSyntaxError style ("… at line L, column C")
+// when uppsala reports a position.
 //
 // NEVER use QName::to_string() for raw names — it emits Clark notation
 // ({uri}local). Raw names are rebuilt from prefix + local name.
 
 use indexmap::IndexMap;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_wasm_bindgen::Serializer;
 use uppsala::dom::{Document, NodeId, NodeKind, QName};
 use uppsala::error::XmlError;
 use uppsala::{Parser, XsdValidator};
@@ -46,14 +47,42 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { XmlDocument } from "@std/xml";
 
 /**
- * StandardSchemaV1 compatible result
- *
- * Result of `validate`: the Standard Schema `Result` union shape.
- *   - success: `{ value: XmlDocument }` (`issues` is undefined — falsy)
- *   - failure: `{ issues: StandardSchemaV1.Issue[] }` (no `value`)
+ * A Standard Schema shaped issue: `message`, plus a best-effort `path` —
+ * the chain of enclosing element names with 0-based indices for repeated
+ * siblings.
+ */
+export type XmlIssue = {
+  message: string;
+  path?: (string | number)[];
+};
+
+/**
+ * Result of `parse` — it never throws, every problem is an issue:
+ *   - well-formed XML text → `{ value: XmlDocument }`
+ *   - otherwise            → `{ issues: XmlIssue[] }`
+ */
+export type XmlParseResult = {
+  value?: XmlDocument;
+  issues?: XmlIssue[];
+};
+
+/**
+ * Result of `XmlSchema.validate` — it never throws, every problem is an
+ * issue:
+ *   - XML text input, valid → `{ value: XmlDocument }`
+ *   - tree input, valid     → `{}` — the caller already holds the tree
+ *   - otherwise             → `{ issues: StandardSchemaV1.Issue[] }`
  */
 export type XmlValidationResult = StandardSchemaV1.Result<XmlDocument>
 "#;
+
+#[wasm_bindgen]
+extern "C" {
+  #[wasm_bindgen(typescript_type = "XmlParseResult")]
+  pub type XmlParseResult;
+  #[wasm_bindgen(typescript_type = "XmlValidationResult")]
+  pub type XmlValidationResult;
+}
 
 // ---------------------------------------------------------------------------
 // @std/xml-compatible types
@@ -118,14 +147,8 @@ struct StdXmlDocument {
   root: StdXmlNode,
 }
 
-/// Standard Schema result union: `{ value }` or `{ issues }`.
-#[derive(Serialize)]
-#[serde(untagged)]
-enum ValidateResult {
-  Success { value: StdXmlDocument },
-  Failure { issues: Vec<ValidateIssue> },
-}
-
+/// Standard Schema shaped issue; `path` is derived best-effort from the
+/// validator's (line, column) position.
 #[derive(Serialize)]
 struct ValidateIssue {
   message: String,
@@ -139,6 +162,33 @@ struct ValidateIssue {
 enum PathSegment {
   Name(String),
   Index(usize),
+}
+
+/// The result of `parse` and `XmlSchema.validate`: on the JS side either
+/// `{ value }` or `{ issues }`.
+#[derive(Serialize)]
+struct Outcome {
+  #[serde(skip_serializing_if = "Option::is_none")]
+  value: Option<StdXmlDocument>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  issues: Option<Vec<ValidateIssue>>,
+}
+
+fn ok_outcome(value: Option<StdXmlDocument>) -> Outcome {
+  Outcome {
+    value,
+    issues: None,
+  }
+}
+
+fn issue_outcome(message: String) -> Outcome {
+  Outcome {
+    value: None,
+    issues: Some(vec![ValidateIssue {
+      message,
+      path: None,
+    }]),
+  }
 }
 
 #[derive(Deserialize, Default)]
@@ -166,37 +216,37 @@ fn js_err(message: impl std::fmt::Display) -> JsError {
   JsError::new(&message.to_string())
 }
 
+/// Serialize a value into a JS value: plain objects for maps, `undefined`
+/// for missing fields — the same shapes `JSON.parse` would produce.
+fn to_js_value(value: &impl Serialize) -> Result<JsValue, JsError> {
+  value
+    .serialize(&Serializer::new().serialize_maps_as_objects(true))
+    .map_err(js_err)
+}
+
 /// Lenient options decoding: invalid options fall back to the defaults.
-fn from_json_or_default<T: DeserializeOwned + Default>(json: &str) -> T {
-  serde_json::from_str(json).unwrap_or_default()
+fn from_js_value_or_default<T: DeserializeOwned + Default>(
+  value: JsValue,
+) -> T {
+  serde_wasm_bindgen::from_value(value).unwrap_or_default()
 }
 
-fn tree_from_json(doc: &str) -> Result<StdXmlDocument, JsError> {
-  serde_json::from_str(doc)
-    .map_err(|e| js_err(format_args!("invalid XmlDocument object: {e}")))
-}
-
-/// JSON-encoded `XmlDocument` → XML text, declaration included.
-fn tree_to_xml(doc: &str) -> Result<String, JsError> {
-  std_document_to_xml(&tree_from_json(doc)?, &StringifyOptions::default())
-}
-
-fn to_json(value: &impl Serialize) -> Result<String, JsError> {
-  serde_json::to_string(value).map_err(js_err)
+/// Decode a JS value as an @std/xml `XmlDocument` tree.
+fn tree_from_js_value(doc: JsValue) -> Result<StdXmlDocument, String> {
+  serde_wasm_bindgen::from_value(doc)
+    .map_err(|e| format!("invalid XmlDocument object: {e}"))
 }
 
 /// Format an uppsala error in @std/xml's XmlSyntaxError message style.
-fn to_js_error(e: XmlError) -> JsError {
-  match &e {
-    XmlError::Parse(p) => js_err(format_args!(
-      "{} at line {}, column {}",
-      p.message, p.line, p.column
-    )),
-    XmlError::WellFormedness(w) => js_err(format_args!(
-      "{} at line {}, column {}",
-      w.message, w.line, w.column
-    )),
-    _ => js_err(e),
+fn error_message(e: &XmlError) -> String {
+  match e {
+    XmlError::Parse(p) => {
+      format!("{} at line {}, column {}", p.message, p.line, p.column)
+    }
+    XmlError::WellFormedness(w) => {
+      format!("{} at line {}, column {}", w.message, w.line, w.column)
+    }
+    _ => e.to_string(),
   }
 }
 
@@ -238,13 +288,13 @@ fn node_to_std(
   id: NodeId,
   opts: &ParseOptions,
   depth: u32,
-) -> Result<Option<StdXmlNode>, JsError> {
+) -> Result<Option<StdXmlNode>, String> {
   let node = match doc.node_kind(id) {
     Some(NodeKind::Element(el)) => {
       if let Some(max) = opts.max_depth.filter(|&max| depth > max) {
-        return Err(js_err(format_args!(
+        return Err(format!(
           "maximum element nesting depth ({max}) exceeded at depth {depth}"
-        )));
+        ));
       }
       // std keeps namespace declarations as plain attributes; uppsala
       // stores them separately.
@@ -307,10 +357,10 @@ fn document_to_std(
   doc: &Document<'_>,
   input: &str,
   opts: &ParseOptions,
-) -> Result<StdXmlDocument, JsError> {
+) -> Result<StdXmlDocument, String> {
   let root_id = doc
     .document_element()
-    .ok_or_else(|| js_err("document has no root element"))?;
+    .ok_or_else(|| "document has no root element".to_string())?;
   let declaration = doc.xml_declaration.as_ref().map(|d| {
     let (line, column, offset) = if opts.track_position.unwrap_or(true) {
       declaration_position(input)
@@ -327,7 +377,7 @@ fn document_to_std(
     }
   });
   let root = node_to_std(doc, root_id, opts, 1)?
-    .ok_or_else(|| js_err("document element is not an element"))?;
+    .ok_or_else(|| "document element is not an element".to_string())?;
   Ok(StdXmlDocument { declaration, root })
 }
 
@@ -363,7 +413,7 @@ fn write_node(
   out: &mut String,
   indent: Option<&str>,
   depth: usize,
-) -> Result<(), JsError> {
+) -> Result<(), String> {
   let push_prefix = |out: &mut String| {
     if let Some(indent) = indent {
       for _ in 0..depth {
@@ -425,14 +475,15 @@ fn write_node(
     // @std/xml rejects comments that cannot be serialized (XML 1.0 §2.5).
     StdXmlNode::Comment { text } => {
       if text.contains("--") {
-        return Err(js_err(
-          "Cannot serialize comment: XML forbids \"--\" within comments",
-        ));
+        return Err(
+          "Cannot serialize comment: XML forbids \"--\" within comments"
+            .to_string(),
+        );
       }
       if text.ends_with('-') {
-        return Err(js_err(
-          "Cannot serialize comment: trailing \"-\" would produce invalid \"--->\"",
-        ));
+        return Err(
+          "Cannot serialize comment: trailing \"-\" would produce invalid \"--->\"".to_string(),
+        );
       }
       push_prefix(out);
       out.push_str("<!--");
@@ -446,7 +497,7 @@ fn write_node(
 fn std_document_to_xml(
   doc: &StdXmlDocument,
   opts: &StringifyOptions,
-) -> Result<String, JsError> {
+) -> Result<String, String> {
   let mut out = String::new();
   if let Some(decl) = doc
     .declaration
@@ -536,15 +587,9 @@ fn path_at(doc: &Document<'_>, offset: usize) -> Option<Vec<PathSegment>> {
 // Public wasm API
 // ---------------------------------------------------------------------------
 
-/// Parse XML text into a JSON-encoded @std/xml `XmlDocument`.
-///
-/// `options` is a JSON-encoded @std/xml `ParseOptions`.
-///
-/// @throws {Error} formatted like @std/xml's XmlSyntaxError when the input
-/// is not well-formed, or when maxDepth is exceeded.
-#[wasm_bindgen]
-pub fn parse(input: &str, options: &str) -> Result<String, JsError> {
-  let opts: ParseOptions = from_json_or_default(options);
+/// Parse XML text with std's `ParseOptions` semantics into a Standard
+/// Schema result. Never throws: every problem is an issue.
+fn parse_text(text: &str, opts: &ParseOptions) -> Outcome {
   let mut parser = Parser::new();
   if let Some(max_depth) = opts.max_depth {
     parser = parser.with_max_depth(max_depth);
@@ -552,33 +597,47 @@ pub fn parse(input: &str, options: &str) -> Result<String, JsError> {
   if opts.disallow_doctype.unwrap_or(true) {
     parser = parser.with_forbid_dtd(true);
   }
-  let doc = parser.parse(input).map_err(to_js_error)?;
-  to_json(&document_to_std(&doc, input, &opts)?)
+  let doc = match parser.parse(text) {
+    Ok(doc) => doc,
+    Err(e) => return issue_outcome(error_message(&e)),
+  };
+  match document_to_std(&doc, text, opts) {
+    Ok(tree) => ok_outcome(Some(tree)),
+    Err(e) => issue_outcome(e),
+  }
 }
 
-/// Serialize a JSON-encoded @std/xml `XmlDocument` to XML text.
+/// Parse XML text into a Standard Schema result. Never throws: every
+/// problem is an issue. Tree input is not accepted — the wrapper already
+/// holds any tree it could pass.
 ///
-/// `options` is a JSON-encoded @std/xml `StringifyOptions`.
+/// Returns `{ value }` (the parsed tree) on success, `{ issues }` otherwise.
+#[wasm_bindgen]
+pub fn parse(
+  input: JsValue,
+  options: JsValue,
+) -> Result<XmlParseResult, JsError> {
+  let outcome = match input.as_string() {
+    Some(text) => parse_text(&text, &from_js_value_or_default(options)),
+    None => issue_outcome("expected an XML string".to_string()),
+  };
+  Ok(XmlParseResult::from(to_js_value(&outcome)?))
+}
+
+/// Serialize an @std/xml `XmlDocument` tree to XML text.
+///
+/// `options` is @std/xml's `StringifyOptions`.
 ///
 /// @throws {Error} if the input is not a valid XmlDocument, or contains a
 /// comment that cannot be serialized.
 #[wasm_bindgen]
-pub fn stringify(doc: &str, options: &str) -> Result<String, JsError> {
-  std_document_to_xml(&tree_from_json(doc)?, &from_json_or_default(options))
-}
-
-/// Check that a JSON-encoded @std/xml `XmlDocument` is well-formed XML.
-///
-/// @throws {Error} if the tree is not a valid XmlDocument, or does not
-/// serialize to well-formed XML.
-#[wasm_bindgen(js_name = checkTree)]
-pub fn check_tree(doc: &str) -> Result<(), JsError> {
-  uppsala::parse(&tree_to_xml(doc)?).map_err(to_js_error)?;
-  Ok(())
+pub fn stringify(doc: JsValue, options: JsValue) -> Result<String, JsError> {
+  let tree = tree_from_js_value(doc).map_err(js_err)?;
+  std_document_to_xml(&tree, &from_js_value_or_default(options)).map_err(js_err)
 }
 
 /// A compiled XSD schema. Compile once, then validate any number of
-/// documents given as XML text or as JSON-encoded `XmlDocument` trees.
+/// documents given as XML text or as `XmlDocument` trees.
 #[wasm_bindgen]
 pub struct XmlSchema {
   validator: XsdValidator,
@@ -586,62 +645,96 @@ pub struct XmlSchema {
 
 #[wasm_bindgen]
 impl XmlSchema {
-  /// Compile a schema from XML text.
+  /// Compile a schema from XML text or an `XmlDocument` tree.
   ///
   /// @throws {Error} if the schema is not well-formed or not a valid XSD.
   #[wasm_bindgen(constructor)]
-  pub fn new(schema: &str) -> Result<XmlSchema, JsError> {
-    let schema_doc = uppsala::parse(schema).map_err(to_js_error)?;
+  pub fn new(schema: JsValue) -> Result<XmlSchema, JsError> {
+    let text = match schema.as_string() {
+      Some(text) => text,
+      None => {
+        let tree = tree_from_js_value(schema).map_err(js_err)?;
+        std_document_to_xml(&tree, &StringifyOptions::default())
+          .map_err(js_err)?
+      }
+    };
+    let schema_doc =
+      uppsala::parse(&text).map_err(|e| js_err(error_message(&e)))?;
     let validator = XsdValidator::from_schema(&schema_doc)
       .map_err(|e| js_err(format_args!("invalid schema: {e}")))?;
     Ok(XmlSchema { validator })
   }
 
-  /// Compile a schema from a JSON-encoded `XmlDocument`.
+  /// Validate a document — XML text or an `XmlDocument` tree — against the
+  /// schema. Never throws: every problem is an issue.
   ///
-  /// @throws {Error} if the tree is invalid or not a valid XSD.
-  #[wasm_bindgen(js_name = fromTree)]
-  pub fn from_tree(schema: &str) -> Result<XmlSchema, JsError> {
-    XmlSchema::new(&tree_to_xml(schema)?)
-  }
-
-  /// Validate XML text. Returns a JSON-encoded Standard Schema result:
-  /// `{ value: XmlDocument }` on success, `{ issues }` on failure.
-  ///
-  /// @throws {Error} if the document is not well-formed.
-  pub fn validate(&self, document: &str) -> Result<String, JsError> {
-    let doc = uppsala::parse(document).map_err(to_js_error)?;
-    let result = match self.issues(&doc, document) {
-      Some(issues) => ValidateResult::Failure { issues },
-      None => ValidateResult::Success {
-        value: document_to_std(&doc, document, &ParseOptions::default())?,
-      },
-    };
-    to_json(&result)
-  }
-
-  /// Validate a JSON-encoded `XmlDocument`. Returns the JSON-encoded issues,
-  /// or `undefined` when the document is valid — the caller already holds
-  /// the tree, so it is not sent back.
-  ///
-  /// @throws {Error} if the tree is invalid or not well-formed.
-  #[wasm_bindgen(js_name = validateTree)]
-  pub fn validate_tree(
+  /// Returns `{ value }` for valid XML text (the parsed tree), `{}` for a
+  /// valid tree (the caller already holds it), `{ issues }` otherwise.
+  pub fn validate(
     &self,
-    document: &str,
-  ) -> Result<Option<String>, JsError> {
-    let xml = tree_to_xml(document)?;
-    let doc = uppsala::parse(&xml).map_err(to_js_error)?;
-    self
-      .issues(&doc, &xml)
-      .map(|issues| to_json(&issues))
-      .transpose()
+    document: JsValue,
+  ) -> Result<XmlValidationResult, JsError> {
+    let outcome = match document.as_string() {
+      Some(text) => self.validate_text(&text),
+      None => self.validate_tree(document),
+    };
+    Ok(XmlValidationResult::from(to_js_value(&outcome)?))
   }
 }
 
 impl XmlSchema {
+  /// Validate XML text: the parsed tree is returned on success.
+  fn validate_text(&self, text: &str) -> Outcome {
+    match uppsala::parse(text) {
+      Ok(doc) => self.validate_doc(&doc, text, true),
+      Err(e) => issue_outcome(error_message(&e)),
+    }
+  }
+
+  /// Validate a tree: it is serialized and re-parsed for validation, and
+  /// never sent back on success.
+  fn validate_tree(&self, document: JsValue) -> Outcome {
+    let tree = match tree_from_js_value(document) {
+      Ok(tree) => tree,
+      Err(e) => return issue_outcome(e),
+    };
+    let text = match std_document_to_xml(&tree, &StringifyOptions::default()) {
+      Ok(text) => text,
+      Err(e) => return issue_outcome(e),
+    };
+    match uppsala::parse(&text) {
+      Ok(doc) => self.validate_doc(&doc, &text, false),
+      Err(e) => issue_outcome(error_message(&e)),
+    }
+  }
+
+  /// Validation outcome for a parsed document. `send_tree` decides whether
+  /// the std tree is built and returned (text input) or the result stays
+  /// empty (tree input — the caller already holds it). Validation sees the
+  /// full document: no whitespace/comment filtering.
+  fn validate_doc(
+    &self,
+    doc: &Document<'_>,
+    input: &str,
+    send_tree: bool,
+  ) -> Outcome {
+    if let Some(issues) = self.issues(doc, input) {
+      return Outcome {
+        value: None,
+        issues: Some(issues),
+      };
+    }
+    match if send_tree {
+      document_to_std(doc, input, &ParseOptions::default()).map(Some)
+    } else {
+      Ok(None)
+    } {
+      Ok(tree) => ok_outcome(tree),
+      Err(e) => issue_outcome(e),
+    }
+  }
+
   /// Validation issues for a parsed document, or `None` when it is valid.
-  /// Validation sees the full document: no whitespace/comment filtering.
   fn issues(
     &self,
     doc: &Document<'_>,
