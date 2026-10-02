@@ -28,6 +28,11 @@
 // Issue messages carry std's XmlSyntaxError style ("… at line L, column C")
 // when uppsala reports a position.
 //
+// Namespaces 1.0 forbids binding a prefix to an empty URI; uppsala accepts
+// it, so the crate rejects it on the parse and validate paths (std rejects
+// it at parse time). The default xmlns="" undeclaration is legal and
+// unaffected.
+//
 // NEVER use QName::to_string() for raw names — it emits Clark notation
 // ({uri}local). Raw names are rebuilt from prefix + local name.
 
@@ -262,6 +267,29 @@ fn qname_raw(name: &QName<'_>) -> String {
   }
 }
 
+/// The first prefix bound to an empty URI in the document, if any.
+/// Namespaces 1.0 forbids undeclaring a prefix this way; uppsala allows it,
+/// @std/xml rejects it, so the crate rejects it too. Undeclaring the default
+/// namespace (xmlns="") is legal and unaffected.
+fn unbind_error(doc: &Document<'_>) -> Option<String> {
+  fn check(doc: &Document<'_>, id: NodeId) -> Option<String> {
+    if let Some(NodeKind::Element(el)) = doc.node_kind(id) {
+      if el
+        .namespace_declarations
+        .iter()
+        .any(|(prefix, uri)| !prefix.is_empty() && uri.is_empty())
+      {
+        return Some(
+          "Cannot unbind namespace prefix (empty URI) in Namespaces 1.0"
+            .to_string(),
+        );
+      }
+    }
+    doc.children_iter(id).find_map(|child| check(doc, child))
+  }
+  doc.document_element().and_then(|root| check(doc, root))
+}
+
 // ---------------------------------------------------------------------------
 // uppsala DOM → std tree
 // ---------------------------------------------------------------------------
@@ -385,6 +413,9 @@ fn document_to_std(
   input: &str,
   opts: &ParseOptions,
 ) -> Result<StdXmlDocument, String> {
+  if let Some(e) = unbind_error(doc) {
+    return Err(e);
+  }
   let root_id = doc
     .document_element()
     .ok_or_else(|| "document has no root element".to_string())?;
@@ -748,6 +779,9 @@ impl XmlSchema {
     input: &str,
     send_tree: bool,
   ) -> Outcome {
+    if let Some(e) = unbind_error(doc) {
+      return issue_outcome(e);
+    }
     if let Some(issues) = self.issues(doc, input) {
       return Outcome {
         value: None,
