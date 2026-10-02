@@ -31,8 +31,8 @@ extern "C" {
 ///
 /// @example
 /// ```ts
-/// const jp = new JSONPath({a: "b"})
-/// jp.query("$.a") as JSONPathResult;
+/// const jp = new JSONPath({ a: "b" });
+/// const result = jp.query("$.a") as JSONPathResult[];
 /// ```
 #[wasm_bindgen]
 pub struct JSONPath {

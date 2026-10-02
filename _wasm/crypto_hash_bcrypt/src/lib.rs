@@ -46,12 +46,16 @@ pub fn hash(
 }
 
 /// Verify a password using Bcrypt
+///
+/// Returns `false` for a wrong password and for a hash that cannot be
+/// parsed; `bcrypt::verify` returns `Ok(false)` for the former and an
+/// `Err` for the latter, so both collapse to `false` here.
 #[wasm_bindgen]
 pub fn verify(
   password: String,
   hash: String,
   _options: BcryptOptions,
 ) -> Result<bool, JsError> {
-  let is_ok = bcrypt_verify(password, hash.as_str()).is_ok();
+  let is_ok = bcrypt_verify(password, hash.as_str()).unwrap_or(false);
   Ok(is_ok)
 }

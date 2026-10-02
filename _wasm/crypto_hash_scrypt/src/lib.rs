@@ -72,10 +72,7 @@ fn get_parsed_options(i: ScryptOptions) -> Params {
     parsed_options.log_n.unwrap_or(Params::RECOMMENDED_LOG_N),
     parsed_options.block_size.unwrap_or(Params::RECOMMENDED_R),
     parsed_options.parallelism.unwrap_or(Params::RECOMMENDED_P),
-    parsed_options
-      .key_length
-      .or(parsed_options.key_length)
-      .unwrap_or(Params::RECOMMENDED_LEN),
+    parsed_options.key_length.unwrap_or(Params::RECOMMENDED_LEN),
   )
   .expect_throw("Failed to parse parameters")
 }

@@ -37,6 +37,10 @@ export function hash(password, options) {
 
 /**
  * Verify a password using Bcrypt
+ *
+ * Returns `false` for a wrong password and for a hash that cannot be
+ * parsed; `bcrypt::verify` returns `Ok(false)` for the former and an
+ * `Err` for the latter, so both collapse to `false` here.
  * @param {string} password
  * @param {string} hash
  * @param {BcryptOptions} _options
