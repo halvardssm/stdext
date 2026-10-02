@@ -37,7 +37,7 @@
 // ({uri}local). Raw names are rebuilt from prefix + local name.
 
 use indexmap::IndexMap;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_wasm_bindgen::Serializer;
 use uppsala::dom::{Document, NodeId, NodeKind, QName};
 use uppsala::error::XmlError;
@@ -273,17 +273,16 @@ fn qname_raw(name: &QName<'_>) -> String {
 /// namespace (xmlns="") is legal and unaffected.
 fn unbind_error(doc: &Document<'_>) -> Option<String> {
   fn check(doc: &Document<'_>, id: NodeId) -> Option<String> {
-    if let Some(NodeKind::Element(el)) = doc.node_kind(id) {
-      if el
+    if let Some(NodeKind::Element(el)) = doc.node_kind(id)
+      && el
         .namespace_declarations
         .iter()
         .any(|(prefix, uri)| !prefix.is_empty() && uri.is_empty())
-      {
-        return Some(
-          "Cannot unbind namespace prefix (empty URI) in Namespaces 1.0"
-            .to_string(),
-        );
-      }
+    {
+      return Some(
+        "Cannot unbind namespace prefix (empty URI) in Namespaces 1.0"
+          .to_string(),
+      );
     }
     doc.children_iter(id).find_map(|child| check(doc, child))
   }

@@ -37,7 +37,7 @@ export interface ScryptOptions {
    *
    * @default 32
    */
-  keyLenght?: number;
+  keyLength?: number;
 }
 
 /**

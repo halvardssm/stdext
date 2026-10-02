@@ -1,4 +1,4 @@
-use bcrypt::{hash as bcrypt_hash, verify as bcrypt_verify, DEFAULT_COST};
+use bcrypt::{DEFAULT_COST, hash as bcrypt_hash, verify as bcrypt_verify};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -50,8 +50,8 @@ pub fn hash(
 pub fn verify(
   password: String,
   hash: String,
-  options: BcryptOptions,
+  _options: BcryptOptions,
 ) -> Result<bool, JsError> {
-  let is_ok = bcrypt_verify(password, &hash.as_str()).is_ok();
+  let is_ok = bcrypt_verify(password, hash.as_str()).is_ok();
   Ok(is_ok)
 }

@@ -10,20 +10,19 @@ members = [
 
 [workspace.package]
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 
 [workspace.dependencies]
+# Pinned: @deno/wasmbuild@0.23.0 requires exactly this wasm-bindgen version.
 wasm-bindgen = "=0.2.108"
 serde = { version = "1", features = ["derive"] }
-serde-wasm-bindgen = "0.4"
+serde-wasm-bindgen = "0.6"
 serde_json = "1"
-serde_json_path = "0.6"
-getrandom = { version = "0.2", features = ["js"] }
-rand_core = { version = "0.6", features = ["std"] }
-js-sys = "=0.3.85"
-argon2 = "0.5"
-bcrypt = "0.15"
-scrypt = "0.11"
+serde_json_path = "0.7"
+getrandom = { version = "0.4", features = ["wasm_js"] }
+argon2 = "0.6"
+bcrypt = "0.19"
+scrypt = { version = "0.12", features = ["alloc", "getrandom", "phc"] }
 uppsala = "0.10"
 indexmap = { version = "2", features = ["serde"] }
 

@@ -25,5 +25,5 @@ export function hash(password: string, options: BcryptOptions): string;
 export function verify(
   password: string,
   hash: string,
-  options: BcryptOptions,
+  _options: BcryptOptions,
 ): boolean;
