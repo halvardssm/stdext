@@ -13,7 +13,7 @@ Deno.test("hash() and verify() with all options", () => {
     logN: 1,
     blockSize: 1,
     parallelism: 2,
-    keyLenght: 16,
+    keyLength: 16,
   } as ScryptOptions;
   const h = hash("password", o);
   assertMatch(h, /^\$scrypt\$ln=1,r=1,p=2\$/);

@@ -13,6 +13,7 @@
     "@deno/wasmbuild": "jsr:@deno/wasmbuild@^0"
   },
   "tasks": {
+    "fix": "deno task format && deno lint --fix",
     "check": "deno task format:check && deno lint && deno check **/*.ts",
     "test": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks",
     "test:inspect": "RUST_BACKTRACE=1 deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks --inspect-wait",
@@ -22,8 +23,7 @@
     "format:wasm": "cd _wasm && cargo fmt --all",
     "format:wasm:check": "cd _wasm && cargo fmt --all -- --check",
     "format": "deno fmt && deno task format:wasm",
-    "format:check": "deno fmt --check && deno task format:wasm:check",
-    "fix": "deno task format && deno lint --fix"
+    "format:check": "deno fmt --check && deno task format:wasm:check"
   },
   "workspace": [
     "./assert",

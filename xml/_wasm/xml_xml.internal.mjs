@@ -106,7 +106,11 @@ export function __wbg_Error_8c4e43fe74559d73(arg0, arg1) {
   const ret = Error(getStringFromWasm0(arg0, arg1));
   return ret;
 }
-export function __wbg_String_fed4d24b68977888(arg0, arg1) {
+export function __wbg_Number_04624de7d0e8332d(arg0) {
+  const ret = Number(arg0);
+  return ret;
+}
+export function __wbg_String_8f0eb39a4a4c2f66(arg0, arg1) {
   const ret = String(arg1);
   const ptr1 = passStringToWasm0(
     ret,
@@ -226,7 +230,7 @@ export function __wbg_get_b3ed3ad4be2bc8ac() {
     return ret;
   }, arguments);
 }
-export function __wbg_get_with_ref_key_bb8f74a92cb2e784(arg0, arg1) {
+export function __wbg_get_with_ref_key_1dc361bd10053bfe(arg0, arg1) {
   const ret = arg0[arg1];
   return ret;
 }
@@ -234,6 +238,16 @@ export function __wbg_instanceof_ArrayBuffer_c367199e2fa2aa04(arg0) {
   let result;
   try {
     result = arg0 instanceof ArrayBuffer;
+  } catch (_) {
+    result = false;
+  }
+  const ret = result;
+  return ret;
+}
+export function __wbg_instanceof_Map_53af74335dec57f4(arg0) {
+  let result;
+  try {
+    result = arg0 instanceof Map;
   } catch (_) {
     result = false;
   }
@@ -303,7 +317,7 @@ export function __wbg_set_1eb0999cf5d27fc8(arg0, arg1, arg2) {
   const ret = arg0.set(arg1, arg2);
   return ret;
 }
-export function __wbg_set_3fda3bac07393de4(arg0, arg1, arg2) {
+export function __wbg_set_3f1d0b984ed272ed(arg0, arg1, arg2) {
   arg0[arg1] = arg2;
 }
 export function __wbg_set_f43e577aea94465b(arg0, arg1, arg2) {
