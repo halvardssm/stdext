@@ -1,0 +1,59 @@
+[tools]
+deno = "latest"
+rust = "latest"
+
+[tasks.check]
+description = "Format check, lint, and type-check"
+depends = ["format:check", "lint"]
+run = "deno check **/*.ts"
+
+[tasks.lint]
+description = "Lint the TypeScript code"
+run = "deno lint"
+
+[tasks.test]
+description = "Run the full test suite with coverage"
+env = { RUST_BACKTRACE = "1" }
+run = "deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks"
+
+[tasks."test:inspect"]
+description = "Run the test suite with the inspector enabled"
+env = { RUST_BACKTRACE = "1" }
+run = "deno test --unstable-http --unstable-webgpu --allow-all --parallel --coverage --trace-leaks --inspect-wait"
+
+[tasks."cov:gen"]
+description = "Generate lcov report from the coverage data"
+run = "deno coverage coverage --lcov --output=cov.lcov"
+
+[tasks."build:wasm"]
+description = "Build the wasm crates into each package's _wasm/"
+run = "deno run --allow-read --allow-run _tools/build_wasm.ts"
+
+[tasks."build:wasm:check"]
+description = "Verify committed wasm matches the Rust sources"
+depends = [{ task = "build:wasm", args = ["--check"] }]
+
+[tasks.format]
+description = "Format JS/TS and Rust code"
+depends = ["format:wasm"]
+run = "deno fmt"
+
+[tasks."format:check"]
+description = "Check JS/TS and Rust formatting"
+depends = ["format:wasm:check"]
+run = "deno fmt --check"
+
+[tasks."format:wasm"]
+description = "Format the Rust code"
+dir = "_wasm"
+run = "cargo fmt --all"
+
+[tasks."format:wasm:check"]
+description = "Check the Rust formatting"
+dir = "_wasm"
+run = "cargo fmt --all -- --check"
+
+[tasks.fix]
+description = "Format (JS + Rust) and auto-fix lint rules"
+depends = ["format"]
+run = "deno lint --fix"
