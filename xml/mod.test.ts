@@ -87,6 +87,10 @@ const MALFORMED_CASES: string[] = [
   // be asserted symmetrically here. uppsala also treats it as a well-formedness
   // error with a position. Documented divergence.
   `<a attr="unterminated/>`,
+  // Namespaces 1.0 forbids binding a prefix to an empty URI. std rejects it
+  // at parse time; uppsala accepts it, so the crate rejects it during tree
+  // conversion (a default xmlns="" undeclaration is legal and unaffected).
+  `<root xmlns:a="" a:b="v"/>`,
 ];
 
 // ---------------------------------------------------------------------------
@@ -410,6 +414,28 @@ Deno.test("validate > broken schema is a schema-authoring error", () => {
   );
 });
 
+Deno.test("validate > empty prefix binding is an issue, for text and trees", () => {
+  // Namespaces 1.0 forbids binding a prefix to an empty URI; uppsala accepts
+  // it, so the crate reports it before XSD validation — the message is
+  // deterministic even when the document would also fail the schema.
+  const expected = /Cannot unbind namespace prefix/;
+  const fromText = validate(AGE_XSD, `<age xmlns:a="">25</age>`);
+  assert(fromText.issues?.some((issue) => expected.test(issue.message)));
+
+  // tree input: the check runs on the re-parsed serialization
+  const tree = {
+    declaration: undefined,
+    root: {
+      type: "element",
+      name: { raw: "age", local: "age" },
+      attributes: { "xmlns:a": "" },
+      children: [{ type: "text", text: "25" }],
+    },
+  } as unknown as XmlDocument;
+  const fromTree = validate(AGE_XSD, tree);
+  assert(fromTree.issues?.some((issue) => expected.test(issue.message)));
+});
+
 Deno.test("validate > malformed schema throws", () => {
   assertThrows(
     () => validate("<xs:schema>", "<age>25</age>"),
@@ -708,6 +734,23 @@ Deno.test("standard > illegal tree names are issues even without a schema", () =
 // ---------------------------------------------------------------------------
 // 4. Documented divergences from @std/xml
 // ---------------------------------------------------------------------------
+
+Deno.test("divergence > literal whitespace in attribute values is not normalized", () => {
+  // XML 1.0 §3.3.3: literal #x9/#xA/#xD in attribute values normalize to a
+  // single space. @std/xml normalizes; uppsala preserves them, so we do too.
+  // NOT fixable in the crate: uppsala expands character references at parse
+  // time, so a literal tab and &#9; are indistinguishable by the time the
+  // crate sees the value — normalizing there would clobber references, a
+  // worse divergence. Needs an upstream fix; remove this test when uppsala
+  // normalizes and we bump.
+  const xml = `<root a="a\tb"/>`;
+  assertEquals(parse(xml).root.attributes.a, "a\tb");
+  assertEquals(std.parse(xml).root.attributes.a, "a b");
+  // character references are correctly kept unnormalized by both
+  const ref = `<root a="&#9;b"/>`;
+  assertEquals(parse(ref).root.attributes.a, "\tb");
+  assertEquals(std.parse(ref).root.attributes.a, "\tb");
+});
 
 Deno.test("divergence > DOCTYPE with disallowDoctype: false (uppsala parses the subset)", () => {
   const xml = `<!DOCTYPE root [<!ELEMENT root EMPTY>]><root/>`;
