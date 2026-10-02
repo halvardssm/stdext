@@ -10,7 +10,7 @@ import { ValueOf } from "jsr:@stdext/types";
 const SOME_MAP = {
   a: "b",
   c: "d",
-};
+} as const;
 
 type SomeMapValues = ValueOf<typeof SOME_MAP>; // "b" | "d"
 ```

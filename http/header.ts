@@ -4,12 +4,10 @@
  * This module is generated from {@link https://www.iana.org/assignments/http-fields/http-fields.xhtml#field-names | IANA Hypertext Transfer Protocol (HTTP) Field Name Registry}
  *
  * @module
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
  */
 
 /**
  * HTTP Headers with status permanent
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
  */
 export const HttpHeaderPermanent = {
   /**
@@ -1195,14 +1193,13 @@ export const HttpHeaderPermanent = {
 } as const;
 
 /**
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
+ * HTTP header names with status permanent.
  */
 export type HttpHeaderPermanent =
   typeof HttpHeaderPermanent[keyof typeof HttpHeaderPermanent];
 
 /**
  * HTTP Headers with status deprecated
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
  */
 export const HttpHeaderDeprecated = {
   /**
@@ -1266,14 +1263,13 @@ export const HttpHeaderDeprecated = {
 } as const;
 
 /**
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
+ * HTTP header names with status deprecated.
  */
 export type HttpHeaderDeprecated =
   typeof HttpHeaderDeprecated[keyof typeof HttpHeaderDeprecated];
 
 /**
  * HTTP Headers with status obsoleted
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
  */
 export const HttpHeaderObsoleted = {
   /**
@@ -1566,14 +1562,13 @@ export const HttpHeaderObsoleted = {
 } as const;
 
 /**
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
+ * HTTP header names with status obsoleted.
  */
 export type HttpHeaderObsoleted =
   typeof HttpHeaderObsoleted[keyof typeof HttpHeaderObsoleted];
 
 /**
  * HTTP Headers with status provisional
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
  */
 export const HttpHeaderProvisional = {
   /**
@@ -1686,7 +1681,7 @@ export const HttpHeaderProvisional = {
 } as const;
 
 /**
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
+ * HTTP header names with status provisional.
  */
 export type HttpHeaderProvisional =
   typeof HttpHeaderProvisional[keyof typeof HttpHeaderProvisional];
@@ -1695,7 +1690,6 @@ export type HttpHeaderProvisional =
  * All HTTP Headers according to {@link https://www.iana.org/assignments/http-fields/http-fields.xhtml#field-names | IANA Hypertext Transfer Protocol (HTTP) Field Name Registry}
  *
  * @see {@link https://www.iana.org/assignments/http-fields/http-fields.xhtml#field-names | IANA Hypertext Transfer Protocol (HTTP) Field Name Registry}
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
  */
 export const HttpHeader = {
   ...HttpHeaderPermanent,
@@ -1705,6 +1699,6 @@ export const HttpHeader = {
 };
 
 /**
- * @deprecated (0.0.5) Use @std/http/header instead, see DEPRECATION.md for more info
+ * All HTTP header names.
  */
 export type HttpHeader = typeof HttpHeader[keyof typeof HttpHeader];

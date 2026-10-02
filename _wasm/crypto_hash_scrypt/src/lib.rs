@@ -1,9 +1,6 @@
 use scrypt::{
-  password_hash::{
-    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier,
-    SaltString,
-  },
   Params, Scrypt,
+  password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -45,7 +42,7 @@ export interface ScryptOptions {
    * 
    * @default 32
    */
-  keyLenght?: number;
+  keyLength?: number;
 }
 "#;
 
@@ -56,16 +53,8 @@ pub struct WasmScryptOptionsRaw {
   #[serde(rename = "blockSize")]
   pub block_size: Option<u32>,
   pub parallelism: Option<u32>,
-  #[serde(rename = "keyLenght")]
-  pub key_lenght: Option<usize>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct WasmScryptOptionsParsed {
-  pub log_n: u8,
-  pub block_size: u32,
-  pub parallelism: u32,
-  pub key_lenght: usize,
+  #[serde(rename = "keyLength")]
+  pub key_length: Option<usize>,
 }
 
 #[wasm_bindgen]
@@ -79,11 +68,11 @@ fn get_parsed_options(i: ScryptOptions) -> Params {
     serde_wasm_bindgen::from_value(i.into())
       .expect_throw("Options could not be parsed");
 
-  Params::new(
+  Params::new_with_output_len(
     parsed_options.log_n.unwrap_or(Params::RECOMMENDED_LOG_N),
     parsed_options.block_size.unwrap_or(Params::RECOMMENDED_R),
     parsed_options.parallelism.unwrap_or(Params::RECOMMENDED_P),
-    parsed_options.key_lenght.unwrap_or(Params::RECOMMENDED_LEN),
+    parsed_options.key_length.unwrap_or(Params::RECOMMENDED_LEN),
   )
   .expect_throw("Failed to parse parameters")
 }
@@ -93,9 +82,8 @@ fn get_parsed_options(i: ScryptOptions) -> Params {
 pub fn hash(data: String, options: ScryptOptions) -> Result<String, JsError> {
   let parsed_options = get_parsed_options(options);
   let data_bytes = data.as_bytes();
-  let salt = SaltString::generate(&mut OsRng);
-  let hasher = Scrypt
-    .hash_password_customized(data_bytes, None, None, parsed_options, &salt)
+  let hasher = Scrypt::new_with_params(parsed_options)
+    .hash_password(data_bytes)
     .expect_throw("Failed to generate hash");
   Ok(hasher.to_string())
 }
@@ -110,6 +98,8 @@ pub fn verify(
   let data_bytes = data.as_bytes();
   let parsed_hash = PasswordHash::new(&hash)
     .expect_throw("Failed to parse hash, invalid hash provided");
-  let is_ok = Scrypt.verify_password(data_bytes, &parsed_hash).is_ok();
+  let is_ok = Scrypt::new()
+    .verify_password(data_bytes, &parsed_hash)
+    .is_ok();
   Ok(is_ok)
 }

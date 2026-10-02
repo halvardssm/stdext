@@ -37,12 +37,16 @@ export function hash(password, options) {
 
 /**
  * Verify a password using Bcrypt
+ *
+ * Returns `false` for a wrong password and for a hash that cannot be
+ * parsed; `bcrypt::verify` returns `Ok(false)` for the former and an
+ * `Err` for the latter, so both collapse to `false` here.
  * @param {string} password
  * @param {string} hash
- * @param {BcryptOptions} options
+ * @param {BcryptOptions} _options
  * @returns {boolean}
  */
-export function verify(password, hash, options) {
+export function verify(password, hash, _options) {
   const ptr0 = passStringToWasm0(
     password,
     wasm.__wbindgen_malloc,
@@ -55,7 +59,7 @@ export function verify(password, hash, options) {
     wasm.__wbindgen_realloc,
   );
   const len1 = WASM_VECTOR_LEN;
-  const ret = wasm.verify(ptr0, len0, ptr1, len1, options);
+  const ret = wasm.verify(ptr0, len0, ptr1, len1, _options);
   if (ret[2]) {
     throw takeFromExternrefTable0(ret[1]);
   }
@@ -63,6 +67,10 @@ export function verify(password, hash, options) {
 }
 export function __wbg_Error_8c4e43fe74559d73(arg0, arg1) {
   const ret = Error(getStringFromWasm0(arg0, arg1));
+  return ret;
+}
+export function __wbg_Number_04624de7d0e8332d(arg0) {
+  const ret = Number(arg0);
   return ret;
 }
 export function __wbg___wbindgen_boolean_get_bbbb1c18aa2f5e25(arg0) {
@@ -85,17 +93,9 @@ export function __wbg___wbindgen_in_47fa6863be6f2f25(arg0, arg1) {
   const ret = arg0 in arg1;
   return ret;
 }
-export function __wbg___wbindgen_is_function_0095a73b8b156f76(arg0) {
-  const ret = typeof arg0 === "function";
-  return ret;
-}
 export function __wbg___wbindgen_is_object_5ae8e5880f2c1fbd(arg0) {
   const val = arg0;
   const ret = typeof val === "object" && val !== null;
-  return ret;
-}
-export function __wbg___wbindgen_is_string_cd444516edc5b180(arg0) {
-  const ret = typeof arg0 === "string";
   return ret;
 }
 export function __wbg___wbindgen_is_undefined_9e4d92534c42d778(arg0) {
@@ -129,28 +129,12 @@ export function __wbg___wbindgen_string_get_72fb696202c56729(arg0, arg1) {
 export function __wbg___wbindgen_throw_be289d5034ed271b(arg0, arg1) {
   throw new Error(getStringFromWasm0(arg0, arg1));
 }
-export function __wbg_call_389efe28435a9388() {
+export function __wbg_getRandomValues_a8ddca022803a145() {
   return handleError(function (arg0, arg1) {
-    const ret = arg0.call(arg1);
-    return ret;
+    globalThis.crypto.getRandomValues(getArrayU8FromWasm0(arg0, arg1));
   }, arguments);
 }
-export function __wbg_call_4708e0c13bdc8e95() {
-  return handleError(function (arg0, arg1, arg2) {
-    const ret = arg0.call(arg1, arg2);
-    return ret;
-  }, arguments);
-}
-export function __wbg_crypto_dd1b8f71596b161a(arg0) {
-  const ret = arg0.crypto;
-  return ret;
-}
-export function __wbg_getRandomValues_760c8e927227643e() {
-  return handleError(function (arg0, arg1) {
-    arg0.getRandomValues(arg1);
-  }, arguments);
-}
-export function __wbg_get_with_ref_key_bb8f74a92cb2e784(arg0, arg1) {
+export function __wbg_get_with_ref_key_1dc361bd10053bfe(arg0, arg1) {
   const ret = arg0[arg1];
   return ret;
 }
@@ -182,74 +166,14 @@ export function __wbg_length_32ed9a279acd054c(arg0) {
   const ret = arg0.length;
   return ret;
 }
-export function __wbg_msCrypto_60a4979188f6b80b(arg0) {
-  const ret = arg0.msCrypto;
-  return ret;
-}
 export function __wbg_new_dd2b680c8bf6ae29(arg0) {
   const ret = new Uint8Array(arg0);
-  return ret;
-}
-export function __wbg_new_no_args_1c7c842f08d00ebb(arg0, arg1) {
-  const ret = new Function(getStringFromWasm0(arg0, arg1));
-  return ret;
-}
-export function __wbg_new_with_length_a2c39cbe88fd8ff1(arg0) {
-  const ret = new Uint8Array(arg0 >>> 0);
-  return ret;
-}
-export function __wbg_node_0deadde112ce24bb(arg0) {
-  const ret = arg0.node;
-  return ret;
-}
-export function __wbg_process_0caa4f154b97e834(arg0) {
-  const ret = arg0.process;
   return ret;
 }
 export function __wbg_prototypesetcall_bdcdcc5842e4d77d(arg0, arg1, arg2) {
   Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
 }
-export function __wbg_randomFillSync_82e8b56b81896e30() {
-  return handleError(function (arg0, arg1) {
-    arg0.randomFillSync(arg1);
-  }, arguments);
-}
-export function __wbg_require_1a22b236558b5786() {
-  return handleError(function () {
-    const ret = module.require;
-    return ret;
-  }, arguments);
-}
-export function __wbg_static_accessor_GLOBAL_12837167ad935116() {
-  const ret = typeof global === "undefined" ? null : global;
-  return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-}
-export function __wbg_static_accessor_GLOBAL_THIS_e628e89ab3b1c95f() {
-  const ret = typeof globalThis === "undefined" ? null : globalThis;
-  return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-}
-export function __wbg_static_accessor_SELF_a621d3dfbb60d0ce() {
-  const ret = typeof self === "undefined" ? null : self;
-  return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-}
-export function __wbg_static_accessor_WINDOW_f8727f0cf888e0bd() {
-  const ret = typeof window === "undefined" ? null : window;
-  return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-}
-export function __wbg_subarray_a96e1fef17ed23cb(arg0, arg1, arg2) {
-  const ret = arg0.subarray(arg1 >>> 0, arg2 >>> 0);
-  return ret;
-}
-export function __wbg_versions_134d8f3c6de79566(arg0) {
-  const ret = arg0.versions;
-  return ret;
-}
 export function __wbindgen_cast_0000000000000001(arg0, arg1) {
-  // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
-  const ret = getArrayU8FromWasm0(arg0, arg1);
-  return ret;
-}
-export function __wbindgen_cast_0000000000000002(arg0, arg1) {
   // Cast intrinsic for `Ref(String) -> Externref`.
   const ret = getStringFromWasm0(arg0, arg1);
   return ret;

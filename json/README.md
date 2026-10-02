@@ -13,11 +13,10 @@ JSONPath ([RFC9535](https://datatracker.ietf.org/doc/html/rfc9535))
 
 ```ts
 import { JSONPath } from "@stdext/json";
-// OR
-import { JSONPath } from "@stdext/json/jsonpath";
+// or: import { JSONPath } from "@stdext/json/jsonpath";
 
 const jp = new JSONPath({ a: "b" });
-jp.query("$.a"); // "b"
+jp.query("$.a"); // ["b"]
 ```
 
 ### JSON Schema
@@ -25,9 +24,12 @@ jp.query("$.a"); // "b"
 JSON Schema ([see](https://json-schema.org))
 
 ```ts
-import type { JSONSchema } from "@stdext/json";
-// OR
-import type { JSONSchema } from "@stdext/json/json-schema";
+import type { JSONSchema } from "@stdext/json/json-schema/2020-12";
 
-const schema: JSONSchema. = /** some schema */
+const schema: JSONSchema = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  type: "object",
+  properties: { name: { type: "string" } },
+  required: ["name"],
+};
 ```

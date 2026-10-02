@@ -1,16 +1,26 @@
 import { parse } from "@std/toml";
 import { resolve } from "@std/path";
+import { parseArgs } from "@std/cli";
+
 import denoConfig from "../deno.json" with { type: "json" };
-const isCheck = Deno.args.some((a) => a === "--check");
-const failFast = Deno.args.some((a) => a === "--fail-fast");
+
+const cliArgs = parseArgs(Deno.args, {
+  "boolean": ["check", "fail-fast"],
+  string: ["project"],
+  collect: ["project"],
+});
 
 const rawCargo = Deno.readTextFileSync("./_wasm/Cargo.toml");
 
 const parsedCargo = parse(rawCargo) as { workspace: { members: string[] } };
 
+const members = cliArgs.project.length
+  ? parsedCargo.workspace.members.filter((m) => cliArgs.project.includes(m))
+  : parsedCargo.workspace.members;
+
 let didFail = false;
 
-for (const member of parsedCargo.workspace.members) {
+for (const member of members) {
   const [folder] = member.split("_");
   const outPath = resolve(
     folder,
@@ -30,7 +40,7 @@ for (const member of parsedCargo.workspace.members) {
     outPath,
   ];
 
-  if (isCheck) {
+  if (cliArgs.check) {
     args.push("--check");
   }
 
@@ -43,7 +53,7 @@ for (const member of parsedCargo.workspace.members) {
   if (!status.success) {
     didFail = true;
   }
-  if (failFast && didFail) {
+  if (cliArgs["fail-fast"] && didFail) {
     Deno.exit(1);
   }
 }

@@ -1,3 +1,39 @@
+/**
+ * JSON Schema builders producing Standard Schema v1 entities.
+ *
+ * Each builder (`string`, `number`, `object`, ...) returns a value that is
+ * simultaneously:
+ *
+ * - a **Standard Schema v1** entity (`~standard.validate`), usable with
+ *   the validators in `./validator.ts` and any Standard Schema consumer
+ * - a **Standard JSON Schema v1** entity (`~standard.jsonSchema`), with
+ *   `input`/`output` converters for the JSON Schema representations
+ * - a plain **JSON Schema draft 2020-12** object, since the builder
+ *   options are the schema's own keywords
+ *
+ * ```ts
+ * import { getStandardJSONSchemaV1Input, object, string, validate } from "@stdext/validation";
+ * import { assert } from "@std/assert";
+ *
+ * const person = object({
+ *   properties: { name: string({ minLength: 1 }) },
+ *   required: ["name"],
+ * });
+ *
+ * // Standard Schema validation:
+ * const result = validate(person, { name: "Alice" });
+ * assert(!("issues" in result));
+ *
+ * // JSON Schema (draft 2020-12) representation:
+ * const jsonSchema = getStandardJSONSchemaV1Input(person, {
+ *   target: "draft-2020-12",
+ * });
+ * assert(jsonSchema.type === "object");
+ * ```
+ *
+ * @module
+ */
+
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
@@ -62,7 +98,7 @@ export interface CombinedProps<Input = unknown, Output = Input>
  *   "~standard": {
  *     version: 1,
  *     vendor: "@stdext/validation",
- *     validate: (value) => ({ value: parseInt(value) }),
+ *     validate: (value: unknown) => ({ value: parseInt(value as string) }),
  *     jsonSchema: {
  *       input: () => ({ type: "string" }),
  *       output: () => ({ type: "number" }),
@@ -227,20 +263,9 @@ export type SchemaProps<
  * @template Output - The output type for the schema
  * @template Props - The schema properties type
  * @param props - The schema properties to include
- * @param options - The standard schema options including validate, input, and output functions
- * @returns A complete schema object with standard metadata
- *
- * @example
- * ```typescript
- * const boolSchema = schema(
- *   { type: "boolean" },
- *   {
- *     validate: (value) => typeof value === "boolean" ? { value } : { issues: [{ message: "Not a boolean" }] },
- *     input: () => ({ type: "boolean" }),
- *     output: () => ({ type: "boolean" }),
- *   }
- * );
- * ```
+ * @param options - The standard schema options: `validate` for the Standard
+ * Schema validation, `input` and `output` for the JSON Schema converters.
+ * @returns A complete schema object with standard metadata.
  */
 function schema<
   Type extends SchemaType = SchemaType,
@@ -313,9 +338,10 @@ export interface BooleanOptions {
  * @returns A schema object for boolean validation
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { boolean, validate } from "@stdext/validation";
+ *
  * const boolSchema = boolean();
- * const result = validate(boolSchema, true);
  * // result: { value: true }
  * ```
  */
@@ -380,7 +406,9 @@ export interface NumberOptions extends
  * @returns A schema object for number validation
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { number, validate } from "@stdext/validation";
+ *
  * const numberSchema = number({ minimum: 0, maximum: 100 });
  * const result = validate(numberSchema, 42);
  * // result: { value: 42 }
@@ -511,7 +539,9 @@ export interface IntegerOptions extends NumberOptions {
  * @returns A schema object for integer validation
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { integer, validate } from "@stdext/validation";
+ *
  * const integerSchema = integer({ minimum: 0, maximum: 100 });
  * const result = validate(integerSchema, 42);
  * // result: { value: 42 }
@@ -581,7 +611,9 @@ export interface StringOptions
  * @returns A schema object for string validation
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { string, validate } from "@stdext/validation";
+ *
  * const emailSchema = string({ format: "email" });
  * const result = validate(emailSchema, "user@example.com");
  * // result: { value: "user@example.com" }
@@ -714,7 +746,11 @@ export function string(
             );
           }
         }
-        if (options?.pattern && !new RegExp(options.pattern).test(value)) {
+        if (
+          options?.pattern &&
+          !(options.pattern === value ||
+            new RegExp(options.pattern).test(value))
+        ) {
           return failureResult(
             msg.expected("matching the pattern", options.pattern, value),
           );
@@ -761,7 +797,9 @@ export interface NullableOptions {
  * @returns A schema object for null validation
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { nullable, validate } from "@stdext/validation";
+ *
  * const nullSchema = nullable();
  * const result = validate(nullSchema, null);
  * // result: { value: null }
@@ -833,7 +871,9 @@ export interface ArrayOptions extends
  * @returns A schema object for array validation
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { array, string, validate } from "@stdext/validation";
+ *
  * const stringArraySchema = array({ items: string(), minItems: 1 });
  * const result = validate(stringArraySchema, ["hello", "world"]);
  * // result: { value: ["hello", "world"] }
@@ -1070,7 +1110,9 @@ export interface ObjectOptions extends
  * @returns A schema object for object validation
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { object, string, validate } from "@stdext/validation";
+ *
  * const personSchema = object({
  *   properties: {
  *     name: string(),
@@ -1084,8 +1126,8 @@ export interface ObjectOptions extends
  */
 export function object(
   options?: ObjectOptions,
-): SchemaObject<"object", object, object> {
-  return schema(
+): SchemaObject<"object"> {
+  return schema<"object">(
     { type: "object", ...options },
     {
       validate: (value, _opts) => {
@@ -1277,9 +1319,11 @@ export function object(
  * Includes allOf, anyOf, oneOf, and not for combining multiple schemas.
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { string, type CombinationOptions } from "@stdext/validation";
+ *
  * const combinationOptions: CombinationOptions = {
- *   allOf: [string(), { minLength: 5 }],
+ *   allOf: [string({ minLength: 5 })],
  * };
  * ```
  */
@@ -1298,9 +1342,11 @@ export interface CombinationOptions extends
  * @returns A schema object for combination validation
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { combination, string, validate } from "@stdext/validation";
+ *
  * const combinedSchema = combination({
- *   allOf: [string(), { minLength: 5 }],
+ *   allOf: [string({ minLength: 5 })],
  * });
  * const result = validate(combinedSchema, "hello world");
  * // result: { value: "hello world" }

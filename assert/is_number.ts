@@ -1,14 +1,44 @@
 import { AssertionError } from "@std/assert";
 
 /**
- * Checks if a value is a number
+ * Checks if a value is a number.
+ *
+ * This is a type-safe alternative to `typeof value === "number"`, narrowing
+ * the value to `number` when used in conditionals.
+ *
+ * @param value The value to check.
+ * @returns `true` if the value is a number, `false` otherwise.
+ *
+ * @example
+ * ```ts
+ * import { isNumber } from "@stdext/assert";
+ * import { assert, assertFalse } from "@std/assert";
+ *
+ * assert(isNumber(42));
+ * assert(isNumber(Number.NaN)); // NaN is a number, see {@linkcode isNumeric}
+ * assertFalse(isNumber("42"));
+ * assertFalse(isNumber(null));
+ * ```
  */
 export function isNumber(value: unknown): value is number {
   return typeof value === "number";
 }
 
 /**
- * Asserts that a value is a number
+ * Asserts that a value is a number, narrowing the type for the rest of the
+ * block. Unlike {@linkcode assertIsNumeric}, this accepts `NaN`.
+ *
+ * @param value The value to check.
+ * @throws {AssertionError} If the value is not a number.
+ *
+ * @example
+ * ```ts
+ * import { assertIsNumber } from "@stdext/assert";
+ * import { assertThrows } from "@std/assert";
+ *
+ * assertIsNumber(42);
+ * assertThrows(() => assertIsNumber("42"));
+ * ```
  */
 export function assertIsNumber(
   value: unknown,

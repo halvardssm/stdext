@@ -1,5 +1,5 @@
 [package]
-name = "crypto_hash_argon2"
+name = "xml_xml"
 version.workspace = true
 edition.workspace = true
 
@@ -8,7 +8,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen.workspace = true
-serde.workspace = true
 serde-wasm-bindgen.workspace = true
-getrandom.workspace = true
-argon2.workspace = true
+uppsala.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true

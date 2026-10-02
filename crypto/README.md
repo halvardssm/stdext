@@ -20,14 +20,19 @@ The following algorithms are provided:
 - Scrypt
 
 ```ts
-import { hash, verify } from "@stdext/crypto/hash";
+import { AlgorithmName, hash, verify } from "@stdext/crypto/hash";
+
+// By name, using default options
 const h = hash("argon2", "password");
 verify("argon2", "password", h);
 
 // With options
-
-const h = hash({ name: "argon2", algorithm: "argon2i" }, "password");
-verify({ name: AlgorithmName.Argon2, algorithm: "argon2i" }, "password", h);
+const hWithOptions = hash({ name: "argon2", algorithm: "argon2i" }, "password");
+verify(
+  { name: AlgorithmName.Argon2, algorithm: "argon2i" },
+  "password",
+  hWithOptions,
+);
 ```
 
 Hashes can also be imported individually, although this should not be needed if
@@ -35,8 +40,9 @@ tree shaking is available in your build process.
 
 ```ts
 import { hash, verify } from "@stdext/crypto/hash/argon2";
-const h = hash("password", options);
-verify("password", h, options);
+
+const h = hash("password", {});
+verify("password", h, {});
 ```
 
 ### HOTP (HMAC One-Time Password)
@@ -45,9 +51,9 @@ verify("password", h, options);
 import { generateHotp, verifyHotp } from "@stdext/crypto/hotp";
 import { generateSecret } from "@stdext/crypto/utils";
 
-const secret = generateSecret();
-const hotp = generateHotp(secret, 42);
-verifyHotp(hotp, secret, 42);
+const secret = generateSecret(32);
+const hotp = await generateHotp(secret, 42);
+const isValid = await verifyHotp(hotp, secret, 42);
 ```
 
 ### TOTP (Time-based One-Time Password)
@@ -56,9 +62,9 @@ verifyHotp(hotp, secret, 42);
 import { generateTotp, verifyTotp } from "@stdext/crypto/totp";
 import { generateSecret } from "@stdext/crypto/utils";
 
-const secret = generateSecret();
-const totp = generateTotp(secret, 42);
-verifyTotp(totp, secret, 42);
+const secret = generateSecret(32);
+const totp = await generateTotp(secret);
+const isValid = await verifyTotp(totp, secret);
 ```
 
 ### Utils

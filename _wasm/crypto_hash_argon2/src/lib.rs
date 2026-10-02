@@ -1,9 +1,6 @@
 use argon2::{
-  password_hash::{
-    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier,
-    SaltString,
-  },
   Argon2, Version,
+  password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},
 };
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -104,11 +101,10 @@ fn get_parsed_options(i: Argon2Options) -> (argon2::Algorithm, argon2::Params) {
 #[wasm_bindgen]
 pub fn hash(data: String, options: Argon2Options) -> Result<String, JsError> {
   let (algorithm, parsed_options) = get_parsed_options(options);
-  let argon2 = Argon2::new(algorithm, Version::V0x13, parsed_options.clone());
-  let salt = SaltString::generate(&mut OsRng);
+  let argon2 = Argon2::new(algorithm, Version::V0x13, parsed_options);
   let data_bytes = data.as_bytes();
   let hash = argon2
-    .hash_password(data_bytes, &salt)
+    .hash_password(data_bytes)
     .expect_throw("Failed to generate hash")
     .to_string();
   Ok(hash)
@@ -126,7 +122,7 @@ pub fn verify(
   let data_bytes = data.as_bytes();
   let parsed_hash = PasswordHash::new(&hash)
     .expect_throw("Failed to parse hash, invalid hash provided");
-  let is_ok = Argon2::new(algorithm, Version::V0x13, parsed_options.clone())
+  let is_ok = Argon2::new(algorithm, Version::V0x13, parsed_options)
     .verify_password(data_bytes, &parsed_hash)
     .is_ok();
 

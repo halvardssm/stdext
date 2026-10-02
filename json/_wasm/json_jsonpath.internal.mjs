@@ -8,8 +8,8 @@
  *
  * @example
  * ```ts
- * const jp = new JSONPath({a: "b"})
- * jp.query("$.a") as JSONPathResult;
+ * const jp = new JSONPath({ a: "b" });
+ * const result = jp.query("$.a") as JSONPathResult[];
  * ```
  */
 export class JSONPath {
@@ -169,6 +169,16 @@ export function __wbg_instanceof_ArrayBuffer_c367199e2fa2aa04(arg0) {
   const ret = result;
   return ret;
 }
+export function __wbg_instanceof_Map_53af74335dec57f4(arg0) {
+  let result;
+  try {
+    result = arg0 instanceof Map;
+  } catch (_) {
+    result = false;
+  }
+  const ret = result;
+  return ret;
+}
 export function __wbg_instanceof_Uint8Array_9b9075935c74707c(arg0) {
   let result;
   try {
@@ -232,7 +242,7 @@ export function __wbg_set_1eb0999cf5d27fc8(arg0, arg1, arg2) {
   const ret = arg0.set(arg1, arg2);
   return ret;
 }
-export function __wbg_set_3fda3bac07393de4(arg0, arg1, arg2) {
+export function __wbg_set_3f1d0b984ed272ed(arg0, arg1, arg2) {
   arg0[arg1] = arg2;
 }
 export function __wbg_set_f43e577aea94465b(arg0, arg1, arg2) {

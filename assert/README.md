@@ -9,6 +9,8 @@ The assert package, contains validators and assertions
 ```ts
 import { assertIsString, isString } from "@stdext/assert";
 
+const someVar: unknown = "hello";
+
 if (isString(someVar)) {
   // Returns true if a value is a string
   // someVar will typewise be a string from now on
