@@ -14,12 +14,19 @@ import { stringify } from "./utils.ts";
  * @returns A validation result or a Promise of a validation result
  *
  * @example
- * ```typescript
- * const result = await validateAsync(mySchema, userInput);
+ * ```ts
+ * import { object, string, validateAsync } from "@stdext/validation";
+ *
+ * const mySchema = object({
+ *   properties: { name: string() },
+ *   required: ["name"],
+ * });
+ *
+ * const result = await validateAsync(mySchema, { name: "Alice" });
  * if (result.issues) {
- *   console.error('Validation failed:', result.issues);
+ *   console.error("Validation failed:", result.issues);
  * } else {
- *   console.log('Valid:', result.value);
+ *   console.log("Valid:", result.value);
  * }
  * ```
  */
@@ -59,12 +66,19 @@ export function validateAsync<S extends StandardSchemaV1>(
  * @throws TypeError if the schema validation is asynchronous
  *
  * @example
- * ```typescript
- * const result = validate(mySchema, userInput);
+ * ```ts
+ * import { object, string, validate } from "@stdext/validation";
+ *
+ * const mySchema = object({
+ *   properties: { name: string() },
+ *   required: ["name"],
+ * });
+ *
+ * const result = validate(mySchema, { name: "Alice" });
  * if (result.issues) {
- *   console.error('Validation failed:', result.issues);
+ *   console.error("Validation failed:", result.issues);
  * } else {
- *   console.log('Valid:', result.value);
+ *   console.log("Valid:", result.value);
  * }
  * ```
  */
@@ -91,13 +105,21 @@ export function validate<S extends StandardSchemaV1>(
  * @throws SchemaError if validation fails
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { object, parseAsync, string } from "@stdext/validation";
+ * import { SchemaError } from "@standard-schema/utils";
+ *
+ * const mySchema = object({
+ *   properties: { name: string() },
+ *   required: ["name"],
+ * });
+ *
  * try {
- *   const parsed = await parseAsync(mySchema, userInput);
- *   console.log('Parsed value:', parsed);
+ *   const parsed = await parseAsync(mySchema, { name: "Alice" });
+ *   console.log("Parsed value:", parsed);
  * } catch (error) {
  *   if (error instanceof SchemaError) {
- *     console.error('Validation errors:', error.issues);
+ *     console.error("Validation errors:", error.issues);
  *   }
  * }
  * ```
@@ -129,15 +151,23 @@ export async function parseAsync<S extends StandardSchemaV1>(
  * @throws TypeError if the schema validation is asynchronous
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { object, parse, string } from "@stdext/validation";
+ * import { SchemaError } from "@standard-schema/utils";
+ *
+ * const mySchema = object({
+ *   properties: { name: string() },
+ *   required: ["name"],
+ * });
+ *
  * try {
- *   const parsed = parse(mySchema, userInput);
- *   console.log('Parsed value:', parsed);
+ *   const parsed = parse(mySchema, { name: "Alice" });
+ *   console.log("Parsed value:", parsed);
  * } catch (error) {
  *   if (error instanceof SchemaError) {
- *     console.error('Validation errors:', error.issues);
+ *     console.error("Validation errors:", error.issues);
  *   } else if (error instanceof TypeError) {
- *     console.error('Async validation not supported in sync mode');
+ *     console.error("Async validation not supported in sync mode");
  *   }
  * }
  * ```

@@ -1,32 +1,44 @@
-// xml/mod.ts
-//
-// JS wrapper for the generated wasm module (xml/_wasm/xml_xml.mjs). Values
-// cross the wasm boundary as plain JS objects (serde-wasm-bindgen): options
-// and document trees pass through directly, and results come back as
-// Standard-Schema-shaped objects — no JSON (de)serialization on the JS side.
-//
-// Shared types are imported from @std/xml — never redeclared — so this
-// package is a true drop-in for @std/xml consumers. The only types declared
-// locally (via the wasm module's typescript_custom_section) are XmlIssue,
-// XmlParseResult and XmlValidationResult, which @std/xml does not have.
-//
-// The wrapper's added value over the raw wasm module:
-//   1. Re-throwing wasm errors as @std/xml's actual XmlSyntaxError class
-//      (the wasm module can only throw plain `Error` — it cannot construct
-//      JS classes; @std/xml's XmlSyntaxError has a public constructor taking
-//      (message, position), so we use it directly).
-//   2. A std-shaped class surface:
-//        XML.parse(doc, options?)  → XML (throws XmlSyntaxError when malformed)
-//        xml.stringify(opts?)      → string
-//        xml.validate(schema)      → { value } | { issues }
-//   3. XMLValidator — an XSD schema compiled once into wasm memory,
-//      reusable across documents, released on dispose (`using`).
-//   4. xml(schema?) → a Standard Schema v1 entity
-//      (https://standardschema.dev): issues carry Standard-Schema-shaped
-//      `path` segments (element names + sibling indices) derived from the
-//      validator's line/column positions, plus std-style `line`/`column`
-//      when the message carries a position, so any Standard Schema consumer
-//      can use @stdext/xml schemas.
+/**
+ * XML parsing, serialization and XSD validation, backed by WebAssembly and
+ * drop-in compatible with `@std/xml`.
+ *
+ * Values cross the wasm boundary as plain JS objects (serde-wasm-bindgen):
+ * options and document trees pass through directly, and results come back
+ * as Standard-Schema-shaped objects — no JSON (de)serialization on the JS
+ * side. Shared types are imported from `@std/xml` — never redeclared — so
+ * this package is a true drop-in for `@std/xml` consumers.
+ *
+ * The wrapper's added value over the raw wasm module:
+ *
+ * 1. Re-throwing wasm errors as `@std/xml`'s actual `XmlSyntaxError` class
+ *    (the wasm module can only throw plain `Error` — it cannot construct
+ *    JS classes; `@std/xml`'s `XmlSyntaxError` has a public constructor
+ *    taking `(message, position)`, so we use it directly).
+ * 2. A std-shaped class surface:
+ *    - `XML.parse(doc, options?)` → `XML` (throws `XmlSyntaxError` when
+ *      malformed)
+ *    - `xml.stringify(opts?)` → `string`
+ *    - `xml.validate(schema)` → `{ value } | { issues }`
+ * 3. `XMLValidator` — an XSD schema compiled once into wasm memory,
+ *    reusable across documents, released on dispose (`using`).
+ * 4. `xml(schema?)` → a Standard Schema v1 entity
+ *    ({@link https://standardschema.dev}): issues carry
+ *    Standard-Schema-shaped `path` segments (element names + sibling
+ *    indices) derived from the validator's line/column positions, plus
+ *    std-style `line`/`column` when the message carries a position, so
+ *    any Standard Schema consumer can use `@stdext/xml` schemas.
+ *
+ * @example
+ * ```ts
+ * import { XML } from "@stdext/xml";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const doc = XML.parse(`<root><child name="value"/></root>`);
+ * assertEquals(doc.stringify({ indent: "  " }), `<root>\n  <child name="value"/>\n</root>`);
+ * ```
+ *
+ * @module
+ */
 
 import {
   parse as wasmParse,

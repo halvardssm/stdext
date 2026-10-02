@@ -19,7 +19,20 @@ The validator module provides core validation functions for any
 schema/validation library that implements Standard Schema v1.
 
 ```ts
-import { parse, parseAsync, validate, validateAsync } from "@stdext/validation";
+import {
+  object,
+  parse,
+  parseAsync,
+  string,
+  validate,
+  validateAsync,
+} from "@stdext/validation";
+
+const mySchema = object({
+  properties: { name: string() },
+  required: ["name"],
+});
+const input = { name: "Alice" };
 
 // Synchronous validation
 const result = validate(mySchema, input);
@@ -60,6 +73,7 @@ import {
   number,
   object,
   string,
+  validate,
 } from "@stdext/validation";
 
 // String schema with format validation
@@ -89,16 +103,16 @@ const tagsSchema = array({
 });
 
 // Combination schemas
-const combinedSchema = combination({
-  // AND - true if all condition matches
+const allSchema = combination({
+  // AND - true if all conditions match
   allOf: [string(), number()],
 });
-const combinedSchema = combination({
-  // OR - true if at leas one matches
+const anySchema = combination({
+  // OR - true if at least one matches
   anyOf: [string(), integer()],
 });
 // You can also combine the conditions
-const combinedSchema = combination({
+const oneSchema = combination({
   // XOR - true if exactly one matches
   oneOf: [boolean(), number()],
   // NOT - if this matches, it will fail
@@ -118,6 +132,7 @@ import {
   isEmptyPlainObject,
   isObject,
   isStandardSchemaV1,
+  string,
 } from "@stdext/validation";
 
 // Type checking utilities

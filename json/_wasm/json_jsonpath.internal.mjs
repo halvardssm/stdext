@@ -8,8 +8,8 @@
  *
  * @example
  * ```ts
- * const jp = new JSONPath({a: "b"})
- * jp.query("$.a") as JSONPathResult;
+ * const jp = new JSONPath({ a: "b" });
+ * const result = jp.query("$.a") as JSONPathResult[];
  * ```
  */
 export class JSONPath {
