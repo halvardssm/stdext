@@ -22,7 +22,8 @@
     "format:wasm": "cd _wasm && cargo fmt --all",
     "format:wasm:check": "cd _wasm && cargo fmt --all -- --check",
     "format": "deno fmt && deno task format:wasm",
-    "format:check": "deno fmt --check && deno task format:wasm:check"
+    "format:check": "deno fmt --check && deno task format:wasm:check",
+    "fix": "deno task format && deno lint --fix"
   },
   "workspace": [
     "./assert",
