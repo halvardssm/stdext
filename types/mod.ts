@@ -1,5 +1,36 @@
 /**
- * Flips a map or object, Record<K, V> will become Record<V, K>
+ * The `@stdext/types` package.
+ *
+ * Utility types missing from TypeScript's built-ins: property modifiers
+ * (`PartialBy`, `RequiredBy`, ...), map flips, value extraction and a
+ * generic constructor type.
+ *
+ * @example
+ * ```ts
+ * import type { PartialBy, ValueOf } from "@stdext/types";
+ *
+ * type Person = { name: string; age: number };
+ * type PersonDraft = PartialBy<Person, "age">; // { name: string; age?: number }
+ *
+ * type Field = ValueOf<Person>; // string | number
+ * const _check: Field = "x";
+ * ```
+ *
+ * @module
+ */
+
+/**
+ * Flips a map or object: `Record<K, V>` becomes `Record<V, K>`.
+ *
+ * @example
+ * ```ts
+ * import type { FlipMap } from "@stdext/types";
+ *
+ * type Ages = { alice: 30, bob: 40 };
+ * type Names = FlipMap<Ages>; // { 30: "alice", 40: "bob" }
+ *
+ * const _check: Names = { 30: "alice", 40: "bob" };
+ * ```
  */
 // deno-lint-ignore no-explicit-any
 export type FlipMap<T extends Record<keyof T, keyof any>> = {
@@ -7,23 +38,32 @@ export type FlipMap<T extends Record<keyof T, keyof any>> = {
 };
 
 /**
- * Make properties K in T optional
+ * Make properties `K` in `T` optional, leaving the rest as-is (a partial
+ * version of TypeScript's `Partial`).
  *
  * @example
  * ```ts
- * type A = { a: string, b: string }
- * type B = PartialBy<A, "b"> // { a: string, b?: string }
+ * import type { PartialBy } from "@stdext/types";
+ *
+ * type A = { a: string; b: string };
+ * type B = PartialBy<A, "b">; // { a: string; b?: string }
+ *
+ * const _check: B = { a: "hello" };
  * ```
  */
 export type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
 /**
- * Make properties K in T required
+ * Make properties `K` in `T` required, leaving the rest as-is.
  *
  * @example
  * ```ts
- * type A = { a?: string, b?: string }
- * type B = RequiredBy<A, "b"> // { a?: string, b: string }
+ * import type { RequiredBy } from "@stdext/types";
+ *
+ * type A = { a?: string; b?: string };
+ * type B = RequiredBy<A, "b">; // { a?: string; b: string }
+ *
+ * const _check: B = { b: "hello" };
  * ```
  */
 export type RequiredBy<T, K extends keyof T> =
@@ -31,12 +71,16 @@ export type RequiredBy<T, K extends keyof T> =
   & Required<Pick<T, K>>;
 
 /**
- * Make properties K in T required, and the rest partial
+ * Make properties `K` in `T` required, and the rest optional.
  *
  * @example
  * ```ts
- * type A = { a: string, b?: string, c?: string }
- * type B = RequiredPartialBy<A, "b"> // { a?: string, b: string, c?: string }
+ * import type { RequiredPartialBy } from "@stdext/types";
+ *
+ * type A = { a: string; b?: string; c?: string };
+ * type B = RequiredPartialBy<A, "b">; // { a?: string; b: string; c?: string }
+ *
+ * const _check: B = { b: "hello" };
  * ```
  */
 export type RequiredPartialBy<T, K extends keyof T> =
@@ -47,58 +91,112 @@ export type RequiredPartialBy<T, K extends keyof T> =
   & Partial<Omit<T, K>>;
 
 /**
- * Make properties K in T readonly
+ * Make properties `K` in `T` readonly, leaving the rest writable.
+ *
+ * @example
+ * ```ts
+ * import type { ReadonlyBy } from "@stdext/types";
+ *
+ * type A = { a: string; b: string };
+ * type B = ReadonlyBy<A, "a">; // { readonly a: string; b: string }
+ *
+ * const _check: B = { a: "hello", b: "world" };
+ * ```
  */
 export type ReadonlyBy<T, K extends keyof T> =
   & Omit<T, K>
   & Readonly<Pick<T, K>>;
 
 /**
- * Makes an object with readonly properties writable
+ * Makes an object with readonly properties writable.
+ *
+ * @example
+ * ```ts
+ * import type { Writeable } from "@stdext/types";
+ *
+ * type A = { readonly a: string };
+ * type B = Writeable<A>; // { a: string }
+ *
+ * const writable: B = { a: "hello" };
+ * writable.a = "world"; // allowed
+ * ```
  */
 export type Writeable<T> = { -readonly [P in keyof T]: T[P] };
 
 /**
- * Make properties K in T writable
+ * Make properties `K` in `T` writable, leaving the rest readonly.
+ *
+ * @example
+ * ```ts
+ * import type { WriteableBy } from "@stdext/types";
+ *
+ * type A = { readonly a: string; readonly b: string };
+ * type B = WriteableBy<A, "a">; // { a: string; readonly b: string }
+ *
+ * const writable: B = { a: "hello", b: "world" };
+ * writable.a = "world"; // allowed
+ * ```
  */
 export type WriteableBy<T, K extends keyof T> =
   & Omit<T, K>
   & Writeable<Pick<T, K>>;
 
 /**
- * Gets the values of a Record
+ * Gets the values of a record or object type, like `keyof` for values.
  *
- * @example With type
+ * @example With a type
  * ```ts
- * type A = { a: "hello", b: "world" }
- * type B = ValueOf<A> // "hello"|"world"
+ * import type { ValueOf } from "@stdext/types";
+ *
+ * type A = { a: "hello"; b: "world" };
+ * type B = ValueOf<A>; // "hello" | "world"
+ *
+ * const _check: B = "hello";
  * ```
  *
- * @example With object
+ * @example With a const object
  * ```ts
- * const a = { a: "hello", b: "world" } as const
- * type B = ValueOf<typeof a> // "hello"|"world"
+ * import type { ValueOf } from "@stdext/types";
+ *
+ * const a = { a: "hello", b: "world" } as const;
+ * type B = ValueOf<typeof a>; // "hello" | "world"
+ *
+ * const _check: B = "world";
  * ```
  */
 export type ValueOf<T> = T[keyof T];
 
 /**
- * Represents a generic constructor
+ * Represents a generic class constructor, e.g. to accept "any class" as a
+ * parameter or to type a reference to a class.
  *
- * @example As argument
+ * @typeParam T The instance type the constructor creates.
+ * @typeParam A The tuple of constructor argument types.
+ *
+ * @example As a parameter
  * ```ts
- * import type { AnyConstructor } from "@stdext/typings";
+ * import type { AnyConstructor } from "@stdext/types";
  *
- * function(SomeClass: AnyConstructor){
- *  const c = new SomeClass()
+ * class Foo {}
+ *
+ * function instantiate(SomeClass: AnyConstructor<Foo>): Foo {
+ *   return new SomeClass();
  * }
+ *
+ * const foo = instantiate(Foo);
  * ```
  *
- * @example For other type
+ * @example For other types
  * ```ts
- * import type { AnyConstructor } from "@stdext/typings";
+ * import type { AnyConstructor } from "@stdext/types";
  *
- * type SomeConstructor = AnyConstructor<SomeClass, [string, SomeOptions]>
+ * class Foo {
+ *   constructor(_name: string) {}
+ * }
+ *
+ * type FooConstructor = AnyConstructor<Foo, [string]>;
+ *
+ * const _check: FooConstructor = Foo;
  * ```
  */
 // deno-lint-ignore no-explicit-any

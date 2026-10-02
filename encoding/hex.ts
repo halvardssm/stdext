@@ -1,19 +1,34 @@
 /**
  * Utilities for hex encoded data.
- * @module
- *
- * ```ts
- * import { dump } from "@stdext/encoding/hex";
- * const buffer = new TextEncoder().encode("Hello world!");
- * console.log(dump(buffer));
- * ```
- */
-
-/**
- * Convert a buffer to a hexdump string.
  *
  * @example
  * ```ts
+ * import { dump } from "@stdext/encoding/hex";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const buffer = new TextEncoder().encode("Hello world!");
+ * assertEquals(
+ *   dump(buffer),
+ *   `00000000  48 65 6c 6c 6f 20 77 6f  72 6c 64 21              |Hello world!|`,
+ * );
+ * ```
+ *
+ * @module
+ */
+
+/**
+ * Convert a buffer to a hexdump string, in the style of `xxd`: 16 bytes
+ * per line, each with its address, hex values and printable-ASCII view
+ * (non-printable bytes are shown as `.`).
+ *
+ * @param bufferView The buffer to dump. Can be any `ArrayBufferView` or an
+ * `ArrayBuffer`.
+ * @returns The hexdump, one line per 16 bytes, without a trailing newline.
+ *
+ * @example
+ * ```ts
+ * import { dump } from "@stdext/encoding/hex";
+ *
  * const buffer = new TextEncoder().encode("The quick brown fox jumps over the lazy dog.");
  * console.log(dump(buffer));
  * // 00000000  54 68 65 20 71 75 69 63  6b 20 62 72 6f 77 6e 20  |The quick brown |

@@ -125,7 +125,7 @@ const schema = xml(`<xs:schema
   <xs:element name="age" type="xs:positiveInteger"/>
 </xs:schema>`);
 
-const result = schema["~standard"].validate("<age>25</age>");
+const result = await schema["~standard"].validate("<age>25</age>");
 if (result.issues) {
   console.error(result.issues[0].message);
 } else {

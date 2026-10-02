@@ -1,25 +1,27 @@
 import { isNumeric } from "@stdext/assert";
 
 /**
- * The token object
+ * A token produced by {@linkcode StringTokenizer.tokenize}.
  */
 export type StringTokenizerToken<Type = string, Value = string> = {
   /**
-   * A token type
+   * The token type, decided by the handler that produced it.
    */
   type: Type;
   /**
-   * The token value
+   * The token value, decided by the handler that produced it.
    */
   value: Value;
   /**
-   * The index where the token starts
+   * The index in the data string where the token starts.
    */
   index: number;
 };
 
 /**
- * Key for the matcher, takes a string, regex or a function
+ * A matcher key: matched against the current character. A `string` is
+ * compared for equality, a `RegExp` is tested against it, and a function
+ * receives the current character, index and full data string.
  */
 export type StringTokenizerKeyMatcher =
   | string
@@ -27,17 +29,24 @@ export type StringTokenizerKeyMatcher =
   | ((value: string, index: number, data: string) => boolean);
 
 /**
- * The return type can be either a token or an touple with the token as the
- * first value andthe amount to increment the index with as the second argument
+ * What a {@linkcode StringTokenizerHandler} can return.
  *
- * @example token
+ * - a token — the index advances by one character
+ * - a number — no token, the index advances by that many characters
+ * - a tuple of `[token | undefined, increment | undefined]` — an optional
+ *   token and an optional index increment (defaulting to `1` when omitted)
+ *
+ * @example token, index advances by 1
  * ```ts
- * { type: "someType", value: "a", index: 5 }
+ * const token = { type: "someType", value: "a", index: 5 };
  * ```
  *
- * @example tuple with token and index, index will be incremented by 3
+ * @example token with an explicit increment of 3
  * ```ts
- * [{ type: "someType", value: "abc", index: 5 }, 3]
+ * const [token, increment] = [
+ *   { type: "someType", value: "abc", index: 5 },
+ *   3,
+ * ];
  * ```
  */
 export type StringTokenizerHandlerReturnType<Type = string, Value = string> =
@@ -46,11 +55,12 @@ export type StringTokenizerHandlerReturnType<Type = string, Value = string> =
   | [StringTokenizerToken<Type, Value> | undefined, number | undefined];
 
 /**
- * Handler for the matched token
+ * A handler invoked with the match, producing the token (and the index
+ * increment).
  *
- * @param value the current value at the given index
- * @param index the current index
- * @param data a clone of the full data string
+ * @param value The character at the current index.
+ * @param index The current index.
+ * @param data A clone of the full data string.
  */
 export type StringTokenizerHandler<Type = string, Value = string> = (
   value: string,
@@ -59,72 +69,94 @@ export type StringTokenizerHandler<Type = string, Value = string> = (
 ) => StringTokenizerHandlerReturnType<Type, Value>;
 
 /**
- * Matcher object that contains a key to match the value against and a handler
+ * A matcher: when the `key` matches the current character, its `handler`
+ * is invoked to produce the token.
  */
 export type StringTokenizerMatcher<Type = string, Value = string> = {
   key: StringTokenizerKeyMatcher;
   handler: StringTokenizerHandler<Type, Value>;
 };
+
+/**
+ * Options for constructing a {@linkcode StringTokenizer}.
+ */
 export type StringTokenizerOptions<Type = string, Value = string> = {
   /**
-   * The data to tokenize
+   * The data to tokenize.
    */
   data: string;
   /**
-   * The matchers, will be checked in order
+   * The matchers, checked in order — the first match wins.
    */
   matchers: StringTokenizerMatcher<Type, Value>[];
   /**
-   * A default handler in case no matcher matches
+   * A handler invoked when no matcher matches. Without it, an
+   * unmatched character throws.
    */
   defaultHandler?: StringTokenizerHandler<Type, Value>;
 };
 
 /**
- * General purpose string tokenizer
+ * A general purpose string tokenizer.
+ *
+ * The data string is walked character by character. On every index, the
+ * matchers are tried in order; the first one whose `key` matches the
+ * current character has its `handler` invoked, whose return value decides
+ * the emitted token and the index increment (see
+ * {@linkcode StringTokenizerHandlerReturnType}). Characters nothing
+ * matches fall through to the `defaultHandler`, or throw when there is
+ * none.
  *
  * @example
  * ```ts
+ * import { StringTokenizer } from "@stdext/lexer/string_tokenizer";
+ * import { assertEquals } from "@std/assert";
+ *
  * const t = new StringTokenizer({
- *   data: "testa",
+ *   data: "a1b2",
  *   matchers: [
  *     {
- *       key: (v, i) => v === "t" && i === 3,
- *       handler: (v, i) => ({
- *         index: i,
- *         type: "function",
- *         value: v,
- *       }),
+ *       key: /[a-z]/,
+ *       handler: (v, i) => ({ index: i, type: "letter", value: v }),
  *     },
  *     {
- *       key: "t",
- *       handler: (v, i) => ([
- *         {
- *           index: i,
- *           type: "string",
- *           value: v,
- *         },
- *         2
- *       ]),
+ *       key: (v, i) => /[0-9]/.test(v) && i > 1,
+ *       handler: (v, i) => ({ index: i, type: "late digit", value: v }),
  *     },
  *     {
- *       key: /[es]/,
- *       handler: (v, i) => ({
- *         index: i,
- *         type: "regex",
- *         value: v,
- *       }),
+ *       // Consume a digit without emitting a token.
+ *       key: /[0-9]/,
+ *       handler: () => 1,
  *     },
  *   ],
- *   defualtHandler:(v, i) => ({
- *     index: i,
- *     type: "default",
- *     value: v,
- *   }),
  * });
  *
- * const tokens = t.tokenize();
+ * assertEquals(t.tokenize(), [
+ *   { index: 0, type: "letter", value: "a" },
+ *   { index: 2, type: "letter", value: "b" },
+ *   { index: 3, type: "late digit", value: "2" },
+ * ]);
  * ```
+ *
+ * @example With a default handler
+ * ```ts
+ * import { StringTokenizer } from "@stdext/lexer/string_tokenizer";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const t = new StringTokenizer({
+ *   data: "ab",
+ *   matchers: [],
+ *   defaultHandler: (v, i) => ({ index: i, type: "default", value: v }),
+ * });
+ *
+ * assertEquals(t.tokenize(), [
+ *   { index: 0, type: "default", value: "a" },
+ *   { index: 1, type: "default", value: "b" },
+ * ]);
+ * ```
+ *
+ * @typeParam Type The token type. Defaults to `string`.
+ * @typeParam Value The token value. Defaults to `string`.
  */
 export class StringTokenizer<Type = string, Value = string> {
   readonly #data: string;
@@ -147,6 +179,14 @@ export class StringTokenizer<Type = string, Value = string> {
     this.#index += value;
   }
 
+  /**
+   * Tokenizes the data, restarting from the beginning. The tokenizer can
+   * be reused: calling `tokenize` again re-runs the whole string.
+   *
+   * @returns The tokens, in order.
+   * @throws {Error} If a character matches no matcher and no
+   * `defaultHandler` is set.
+   */
   tokenize(): StringTokenizerToken<Type, Value>[] {
     this.#index = 0;
     const tokens: StringTokenizerToken<Type, Value>[] = [];

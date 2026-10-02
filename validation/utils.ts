@@ -280,7 +280,9 @@ export function getMatchedName(value: unknown): string {
  * @throws TypeError if the schema is not a valid StandardJSONSchemaV1
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { getStandardJSONSchemaV1Input, string } from "@stdext/validation";
+ *
  * const schema = string({ format: "email" });
  * const inputSchema = getStandardJSONSchemaV1Input(schema, { target: "draft-2020-12" });
  * // Returns: { $schema: "https://json-schema.org/draft/2020-12/schema", type: "string", format: "email" }
@@ -307,7 +309,9 @@ export function getStandardJSONSchemaV1Input(
  * @throws TypeError if the schema is not a valid StandardJSONSchemaV1
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { getStandardJSONSchemaV1Output, string } from "@stdext/validation";
+ *
  * const schema = string({ format: "email" });
  * const outputSchema = getStandardJSONSchemaV1Output(schema, { target: "draft-2020-12" });
  * // Returns: { $schema: "https://json-schema.org/draft/2020-12/schema", type: "string", format: "email" }
@@ -324,49 +328,150 @@ export function getStandardJSONSchemaV1Output(
   return schema["~standard"].jsonSchema.output(options);
 }
 
-/**
- * REGEXP
- */
+// ---------------------------------------------------------------------------
+// Format validation regexes, used by the `format` keyword of the JSON Schema
+// builders in `./json_schema.ts`. Named after the RFC or ISO section they
+// implement.
+// ---------------------------------------------------------------------------
 
+/**
+ * ISO 8601 date-time: `YYYY-MM-DDTHH:mm:ss(.sss)?(Z|±HH:mm)?`.
+ *
+ * @see {@link https://www.iso.org/iso-8601-date-and-time-format.html | ISO 8601}
+ */
 export const ISO8601_DATETIME =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
+
+/**
+ * ISO 8601 time: `HH:mm:ss(.sss)?(Z|±HH:mm)?`.
+ *
+ * @see {@link https://www.iso.org/iso-8601-date-and-time-format.html | ISO 8601}
+ */
 export const ISO8601_TIME =
   /^\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
+
+/**
+ * ISO 8601 date: `YYYY-MM-DD`.
+ *
+ * @see {@link https://www.iso.org/iso-8601-date-and-time-format.html | ISO 8601}
+ */
 export const ISO8601_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * ISO 8601 duration: e.g. `P1Y2M3DT4H5M6S` (each component optional, but
+ * not all of them).
+ *
+ * @see {@link https://www.iso.org/iso-8601-date-and-time-format.html | ISO 8601}
+ */
 export const ISO8601_DURATION =
   /^P(?!$)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?$/;
 
-// Email
+/**
+ * RFC 5321 email address (ASCII).
+ *
+ * @see {@link https://www.iana.org/go/rfc5321 | RFC 5321}
+ */
 export const RFC5321_EMAIL = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+/**
+ * RFC 6531 email address with an internationalized domain and non-ASCII
+ * local part.
+ *
+ * @see {@link https://www.iana.org/go/rfc6531 | RFC 6531}
+ */
 export const RFC6531_IDN_EMAIL =
   /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$|^[\p{L}0-9._%+-]+@[\p{L}0-9.-]+\.[\p{L}]{2,}$/u;
 
-// Hostname
+/**
+ * RFC 1123 hostname (ASCII, dotted labels, ending in a TLD of 2+ letters).
+ *
+ * @see {@link https://www.iana.org/go/rfc1123 | RFC 1123}
+ */
 export const RFC1123_HOSTNAME = /^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
+
+/**
+ * RFC 5890 internationalized hostname.
+ *
+ * @see {@link https://www.iana.org/go/rfc5890 | RFC 5890}
+ */
 export const RFC5890_IDN_HOSTNAME = /^(?:[\p{L}0-9-]+\.)+[\p{L}]{2,}$/u;
 
-// IP Addresses
+/**
+ * RFC 2673 IPv4 address in dotted-decimal notation.
+ *
+ * @see {@link https://www.iana.org/go/rfc2673 | RFC 2673}
+ */
 export const RFC2673_IPv4 =
   /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+
+/**
+ * RFC 2373 IPv6 address, full or compressed (`::`) form, without a zone
+ * index.
+ *
+ * @see {@link https://www.iana.org/go/rfc2373 | RFC 2373}
+ */
 export const RFC2373_IPv6 =
   /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?$/;
 
-// UUID
+/**
+ * RFC 4122 UUID in the 8-4-4-4-12 hex layout, any version.
+ *
+ * @see {@link https://www.iana.org/go/rfc4122 | RFC 4122}
+ */
 export const RFC4122_UUID =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-// URIs and IRIs
+/**
+ * RFC 3986 absolute URI with a scheme and authority.
+ *
+ * @see {@link https://www.iana.org/go/rfc3986 | RFC 3986}
+ */
 export const RFC3986_URI =
   /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-]+(?::\d+)?(?:\/[^\s]*)?$/;
+
+/**
+ * RFC 3986 URI reference: an absolute URI or a relative path.
+ *
+ * @see {@link https://www.iana.org/go/rfc3986 | RFC 3986}
+ */
 export const RFC3986_URI_REFERENCE =
   /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-]+(?::\d+)?(?:\/[^\s]*)?|^\/[^\s]*$/;
+
+/**
+ * RFC 3987 internationalized URI (IRI), allowing non-ASCII characters.
+ *
+ * @see {@link https://www.iana.org/go/rfc3987 | RFC 3987}
+ */
 export const RFC3987_IRI =
   /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-%]+(?::\d+)?(?:\/[^\s]*)?$/u;
+
+/**
+ * RFC 3987 internationalized URI reference: an absolute IRI or a relative
+ * path.
+ *
+ * @see {@link https://www.iana.org/go/rfc3987 | RFC 3987}
+ */
 export const RFC3987_IRI_REFERENCE =
   /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-%]+(?::\d+)?(?:\/[^\s]*)?|^\/[^\s]*$/u;
+
+/**
+ * RFC 6570 URI template.
+ *
+ * @see {@link https://www.iana.org/go/rfc6570 | RFC 6570}
+ */
 export const RFC6570_URI_TEMPLATE =
   /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-%]+(?::\d+)?(?:\/[^\s]*)?|^\/[^\s]*$/u;
 
-// JSON Pointers
+/**
+ * RFC 6901 JSON pointer: a slash-separated path, e.g. `/foo/0/bar`.
+ *
+ * @see {@link https://www.iana.org/go/rfc6901 | RFC 6901}
+ */
 export const RFC6901_JSON_POINTER = /^(?:\/+)\S*$/;
+
+/**
+ * RFC 6901 relative JSON pointer: e.g. `0/foo` or `#`.
+ *
+ * @see {@link https://www.iana.org/go/rfc6901 | RFC 6901}
+ */
 export const RFC6901_RELATIVE_JSON_POINTER = /^(?:\/|#|\d+)\S*$/;
