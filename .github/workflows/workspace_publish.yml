@@ -18,19 +18,18 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v4
 
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: latest
+      # Installs deno and rust from mise.toml.
+      - name: Set up mise
+        uses: jdx/mise-action@v4
 
       - name: Format & Lint
-        run: deno task check
+        run: mise run check
 
       - name: Build
-        run: deno task build:wasm:check
+        run: mise run build:wasm:check
 
       - name: Test
-        run: deno task test
+        run: mise run test
 
       - name: Publish to JSR
         run: deno publish
