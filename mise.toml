@@ -1,6 +1,8 @@
 [tools]
 deno = "latest"
-rust = "latest"
+rust = { version = "latest", components = ["rustfmt"], targets = [
+  "wasm32-unknown-unknown",
+] }
 
 [tasks.check]
 description = "Format check, lint, and type-check"
