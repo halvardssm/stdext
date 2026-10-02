@@ -1,6 +1,6 @@
 # @stdext/database
 
-The database package contains interfaces and helpers for interracting with
+The database package contains interfaces and helpers for interacting with
 databases. It draws inspiration from
 [go std/database](https://pkg.go.dev/database).
 
@@ -21,5 +21,6 @@ Databases implementing these interfaces can be used as following (see
 await using client = new Client(connectionUrl, connectionOptions);
 await client.connect();
 await client.execute("SOME INSERT QUERY");
-const res = await client.query("SELECT * FROM table");
+const ctx = await client.query("SELECT * FROM table");
+const res = await ctx.toRecords();
 ```

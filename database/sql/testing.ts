@@ -1,505 +1,597 @@
+import { assert, assertEquals, assertFalse, assertRejects } from "@std/assert";
 import {
-  assert,
-  assertEquals,
-  assertFalse,
-  assertInstanceOf,
-  assertRejects,
-} from "@std/assert";
-import {
-  assertIsClient,
-  assertIsDriver,
-  assertIsDriverConnectable,
-  assertIsEventable,
+  assertConstructorSignature,
   assertIsPoolClient,
-  assertIsPreparable,
   assertIsPreparedStatement,
-  assertIsQueriable,
   assertIsTransaction,
-  assertIsTransactionable,
-  type Client,
-  type DriverConstructor,
-  type PoolClient,
-  type PreparedStatement,
-  type Queriable,
-  type Transaction,
-  type Transactionable,
-} from "./mod.ts";
-import { deepMerge } from "@std/collections";
-import type { AnyConstructor } from "@stdext/types";
-import { assertIsConnectionUrl, assertIsDriverOptions } from "./asserts.ts";
-
-export type ClientConstructorArguments<
-  IClient extends Client = Client,
-> = [
-  string,
-  IClient["options"],
-];
-export type ClientConstructor<
-  IClient extends Client = Client,
-> = AnyConstructor<IClient, ClientConstructorArguments<IClient>>;
+  isClient,
+  isDriver,
+} from "./asserts.ts";
+import type {
+  Client,
+  ClientConstructor,
+  Connectable,
+  Driver,
+  DriverConstructor,
+  Pingable,
+  Poolable,
+  Preparable,
+  Queryable,
+  Transactionable,
+} from "./core.ts";
+import type {
+  ClientEventTarget,
+  DriverEventTarget,
+  Eventable,
+} from "./events.ts";
 
 /**
- * Test the Driver class
- * @param value The Client
- * @param expects The values to test against
+ * A factory creating a fresh instance for each test step. Test steps mutate
+ * the instances they are given, so a fresh instance must be created per step.
+ *
+ * @template T the instance type
  */
-export function testDriver(
-  value: unknown,
-  expects: {
-    connectionUrl: string | URL;
-  },
-) {
-  assertIsDriver(value);
-  assertEquals(value.connectionUrl, expects.connectionUrl);
+export type Factory<T> = () => T | Promise<T>;
+
+/**
+ * TestSql
+ *
+ * The SQL statements used by the conformance test suite. The statements are
+ * dialect specific and must be provided by the driver author.
+ */
+export interface TestSql {
+  /**
+   * A SQL statement that can be executed without returning rows, for example
+   * a `CREATE TABLE` statement
+   */
+  execute: string;
+  /**
+   * A SQL query returning the rows described by
+   * {@linkcode TestSql.columns} and {@linkcode TestSql.count}
+   */
+  query: string;
+  /**
+   * The expected column names of {@linkcode TestSql.query}
+   */
+  columns: string[];
+  /**
+   * The expected number of rows of {@linkcode TestSql.query}
+   */
+  count: number;
 }
 
 /**
- * Test the Driver class
- * @param value The Client
- * @param expects The values to test against
+ * Test the {@linkcode Connectable} capability.
+ *
+ * @param t the test context
+ * @param create a factory creating a fresh instance
  */
-export function testDriverConstructor<
-  IDriverConstructor extends DriverConstructor = DriverConstructor,
->(
-  DriverC: IDriverConstructor,
-  args: ConstructorParameters<IDriverConstructor>,
-) {
-  assert(
-    args.length < 3,
-    "Number of arguments for the driver constructor has to be max 2.",
-  );
-  assertIsConnectionUrl(args[0]);
-  assertIsDriverOptions(args[1]);
-  // @ts-expect-error: ts inference
-  const d = new DriverC(...args);
-  testDriver(d, { connectionUrl: args[0] });
-}
-
-/**
- * Test the Driver class
- * @param value The Client
- * @param expects The values to test against
- */
-export async function testDriverConstructorIntegration<
-  IDriverConstructor extends DriverConstructor = DriverConstructor,
->(
+export async function testConnectable(
   t: Deno.TestContext,
-  D: IDriverConstructor,
-  args: ConstructorParameters<IDriverConstructor>,
-) {
-  testDriverConstructor(D, args);
+  create: Factory<Connectable>,
+): Promise<void> {
+  await t.step("connects and closes", async () => {
+    const connectable = await create();
+    assertFalse(connectable.connected);
+    await connectable.connect();
+    assert(connectable.connected);
+    await connectable.close();
+    assertFalse(connectable.connected);
+  });
 
-  await t.step("testConnectAndClose", async (t) => {
-    await t.step("should connect and close with using", async () => {
-      // @ts-expect-error: ts-inference
-      await using d = new D(...args);
+  await t.step("connect is idempotent", async () => {
+    const connectable = await create();
+    await connectable.connect();
+    await connectable.connect();
+    assert(connectable.connected);
+    await connectable.close();
+  });
 
-      await d.connect();
-    });
+  await t.step("close is idempotent", async () => {
+    const connectable = await create();
+    await connectable.connect();
+    await connectable.close();
+    await connectable.close();
+    assertFalse(connectable.connected);
+  });
 
-    await t.step("should connect and close", async () => {
-      // @ts-expect-error: ts-inference
-      const d = new D(...args);
+  await t.step("async dispose closes", async () => {
+    const connectable = await create();
+    await connectable.connect();
+    await connectable[Symbol.asyncDispose]();
+    assertFalse(connectable.connected);
+  });
+}
 
-      await d.connect();
-      await d.close();
-    });
+/**
+ * Test the {@linkcode Pingable} capability.
+ *
+ * @param t the test context
+ * @param create a factory creating a fresh, connectable instance
+ */
+export async function testPingable(
+  t: Deno.TestContext,
+  create: Factory<Pingable & Connectable>,
+): Promise<void> {
+  await t.step("ping while connected", async () => {
+    const pingable = await create();
+    await pingable.connect();
+    await pingable.ping();
+    await pingable.close();
+  });
 
-    await t.step("ping should work while connected", async () => {
-      // @ts-expect-error: ts-inference
-      await using d = new D(...args);
-
-      await d.connect();
-      assert(d.connected);
-
-      await d.ping();
-
-      await d.close();
-
-      assertFalse(d.connected);
-
-      await assertRejects(async () => {
-        await d.ping();
-      });
+  await t.step("ping throws when not connected", async () => {
+    const pingable = await create();
+    await pingable.connect();
+    await pingable.close();
+    await assertRejects(async () => {
+      await pingable.ping();
     });
   });
 }
 
 /**
- * Test the DriverConnectable class
- * @param value The DriverConnectable
- * @param expects The values to test against
+ * Test the {@linkcode Queryable} capability.
+ *
+ * @param t the test context
+ * @param create a factory creating a fresh, connectable instance
+ * @param sql the SQL statements to test with
  */
-export function testDriverConnectable(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: DriverConnectable["options"];
-  },
-) {
-  assertIsDriverConnectable(value);
-  assertEquals(value.options, expects.options);
-  testDriver(value.connection, expects);
+export async function testQueryable(
+  t: Deno.TestContext,
+  create: Factory<Connectable & Queryable>,
+  sql: TestSql,
+): Promise<void> {
+  await t.step("execute", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const affected = await queryable.execute(sql.execute);
+    assert(
+      affected === undefined || typeof affected === "number",
+      "execute must resolve to a number or undefined",
+    );
+    await queryable.close();
+  });
+
+  await t.step("query returns a result context", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const ctx = await queryable.query(sql.query);
+    assertEquals(ctx.metadata.columns, sql.columns);
+    assertEquals((await ctx.toValues()).length, sql.count);
+    await queryable.close();
+  });
+
+  await t.step("query can be iterated", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const ctx = await queryable.query(sql.query);
+    let count = 0;
+    for await (const _row of ctx) {
+      count++;
+    }
+    assertEquals(count, sql.count);
+    await queryable.close();
+  });
+
+  await t.step("query throws when not connected", async () => {
+    const queryable = await create();
+    await assertRejects(async () => {
+      await queryable.query(sql.query);
+    });
+  });
 }
 
 /**
- * Tests the connection of a Client
+ * Test the {@linkcode Preparable} capability.
+ *
+ * @param t the test context
+ * @param create a factory creating a fresh, connectable instance
+ * @param sql the SQL statements to test with
  */
-export function testClientConstructor<
-  IClient extends Client = Client,
+export async function testPreparable(
+  t: Deno.TestContext,
+  create: Factory<Connectable & Preparable>,
+  sql: TestSql,
+): Promise<void> {
+  await t.step("prepare, query, execute and deallocate", async () => {
+    const preparable = await create();
+    await preparable.connect();
+    const stmt = await preparable.prepare(sql.query);
+    assertIsPreparedStatement(stmt);
+    assertEquals(stmt.sql, sql.query);
+    assertFalse(stmt.deallocated);
+
+    const ctx = await stmt.query();
+    assertEquals((await ctx.toValues()).length, sql.count);
+
+    const affected = await stmt.execute();
+    assert(
+      affected === undefined || typeof affected === "number",
+      "execute must resolve to a number or undefined",
+    );
+
+    await stmt.deallocate();
+    assert(stmt.deallocated);
+    await assertRejects(async () => {
+      await stmt.query();
+    });
+    await preparable.close();
+  });
+
+  await t.step("async dispose deallocates", async () => {
+    const preparable = await create();
+    await preparable.connect();
+    const stmt = await preparable.prepare(sql.query);
+    await stmt[Symbol.asyncDispose]();
+    assert(stmt.deallocated);
+    await preparable.close();
+  });
+}
+
+/**
+ * Test the {@linkcode Transactionable} capability.
+ *
+ * @param t the test context
+ * @param create a factory creating a fresh, connectable instance
+ * @param sql the SQL statements to test with
+ */
+export async function testTransactionable(
+  t: Deno.TestContext,
+  create: Factory<Connectable & Transactionable>,
+  sql: TestSql,
+): Promise<void> {
+  await t.step("begin and commit", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const tx = await transactionable.beginTransaction();
+    assertIsTransaction(tx);
+    assert(tx.inTransaction);
+    await tx.execute(sql.execute);
+    const ctx = await tx.query(sql.query);
+    assertEquals((await ctx.toValues()).length, sql.count);
+    await tx.commitTransaction();
+    assertFalse(tx.inTransaction);
+    await assertRejects(async () => {
+      await tx.execute(sql.execute);
+    });
+    await transactionable.close();
+  });
+
+  await t.step("rollback", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const tx = await transactionable.beginTransaction();
+    await tx.execute(sql.execute);
+    await tx.rollbackTransaction();
+    assertFalse(tx.inTransaction);
+    await assertRejects(async () => {
+      await tx.query(sql.query);
+    });
+    await transactionable.close();
+  });
+
+  await t.step("savepoints", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const tx = await transactionable.beginTransaction();
+    await tx.createSavepoint("sp");
+    await tx.execute(sql.execute);
+    await tx.releaseSavepoint("sp");
+    await tx.commitTransaction();
+    await transactionable.close();
+  });
+
+  await t.step("nested transactions create savepoints", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const outer = await transactionable.beginTransaction();
+    await outer.execute(sql.execute);
+
+    const inner = await outer.beginTransaction();
+    assertIsTransaction(inner);
+    assert(inner.inTransaction);
+    await inner.execute(sql.execute);
+    await inner.rollbackTransaction();
+    assertFalse(inner.inTransaction);
+
+    assert(
+      outer.inTransaction,
+      "The outer transaction must still be active after a nested rollback",
+    );
+    const ctx = await outer.query(sql.query);
+    assertEquals((await ctx.toValues()).length, sql.count);
+    await outer.commitTransaction();
+    assertFalse(outer.inTransaction);
+    await transactionable.close();
+  });
+
+  await t.step("nested transaction wrapper commits the savepoint", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const outer = await transactionable.beginTransaction();
+    const result = await outer.transaction(async (inner) => {
+      assertIsTransaction(inner);
+      assert(inner.inTransaction);
+      await inner.execute(sql.execute);
+      return "nested";
+    });
+    assertEquals(result, "nested");
+    assert(
+      outer.inTransaction,
+      "The outer transaction must still be active after a nested commit",
+    );
+    await outer.commitTransaction();
+    await transactionable.close();
+  });
+
+  await t.step("transaction wrapper commits on success", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const result = await transactionable.transaction(async (tx) => {
+      assert(tx.inTransaction);
+      await tx.execute(sql.execute);
+      return "done";
+    });
+    assertEquals(result, "done");
+    await transactionable.close();
+  });
+
+  await t.step("transaction wrapper rolls back on error", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    await assertRejects(async () => {
+      await transactionable.transaction(async (tx) => {
+        await tx.execute(sql.execute);
+        throw new Error("expected error");
+      });
+    });
+    await transactionable.close();
+  });
+
+  await t.step("async dispose rolls back an active transaction", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const tx = await transactionable.beginTransaction();
+    await tx[Symbol.asyncDispose]();
+    assertFalse(tx.inTransaction);
+    await transactionable.close();
+  });
+}
+
+/**
+ * Test the events of an `Eventable` connectable object. The `connect` and
+ * `close` events must be dispatched with the dispatching object available as
+ * the `client` in the event detail.
+ *
+ * @param t the test context
+ * @param create a factory creating a fresh, connectable instance
+ */
+export async function testEventable(
+  t: Deno.TestContext,
+  create: Factory<
+    Connectable & Eventable<DriverEventTarget | ClientEventTarget>
+  >,
+): Promise<void> {
+  await t.step(
+    "dispatches connect and close events with the client",
+    async () => {
+      const source = await create();
+      const eventTarget: EventTarget = source.eventTarget;
+      let connectClient: unknown;
+      let closeClient: unknown;
+      eventTarget.addEventListener("connect", (event) => {
+        connectClient = (event as CustomEvent<{ client?: unknown }>).detail
+          ?.client;
+      });
+      eventTarget.addEventListener("close", (event) => {
+        closeClient = (event as CustomEvent<{ client?: unknown }>).detail
+          ?.client;
+      });
+      await source.connect();
+      await source.close();
+      assertEquals(connectClient, source);
+      assertEquals(closeClient, source);
+    },
+  );
+}
+
+/**
+ * Test the {@linkcode Poolable} capability.
+ *
+ * @param t the test context
+ * @param create a factory creating a fresh, connectable instance
+ */
+export async function testPoolable(
+  t: Deno.TestContext,
+  create: Factory<Connectable & Poolable>,
+): Promise<void> {
+  await t.step("acquire returns a connected pool client", async () => {
+    const poolable = await create();
+    await poolable.connect();
+    const poolClient = await poolable.acquire();
+    assertIsPoolClient(poolClient);
+    assert(poolClient.connected);
+    assertFalse(poolClient.disposed);
+    await poolClient.release();
+    assert(poolClient.disposed);
+    await poolable.close();
+  });
+
+  await t.step("acquire throws when not connected", async () => {
+    const poolable = await create();
+    await assertRejects(async () => {
+      await poolable.acquire();
+    });
+  });
+
+  await t.step("release is idempotent", async () => {
+    const poolable = await create();
+    await poolable.connect();
+    const poolClient = await poolable.acquire();
+    await poolClient.release();
+    await poolClient.release();
+    assert(poolClient.disposed);
+    await poolable.close();
+  });
+
+  await t.step("remove disposes and closes the connection", async () => {
+    const poolable = await create();
+    await poolable.connect();
+    const poolClient = await poolable.acquire();
+    await poolClient.remove();
+    assert(poolClient.disposed);
+    assertFalse(poolClient.connected);
+    await poolable.close();
+  });
+
+  await t.step("async dispose releases", async () => {
+    const poolable = await create();
+    await poolable.connect();
+    const poolClient = await poolable.acquire();
+    await poolClient[Symbol.asyncDispose]();
+    assert(poolClient.disposed);
+    await poolable.close();
+  });
+}
+
+/**
+ * Test that a value structurally satisfies the {@linkcode Driver} profile.
+ *
+ * @param value the value to test
+ */
+export function testDriverProfile(value: unknown): void {
+  assert(isDriver(value), "Value does not satisfy the Driver profile");
+}
+
+/**
+ * Test that a value structurally satisfies the {@linkcode Client} profile.
+ *
+ * @param value the value to test
+ */
+export function testClientProfile(value: unknown): void {
+  assert(isClient(value), "Value does not satisfy the Client profile");
+}
+
+/**
+ * Run the full conformance suite against a {@linkcode Driver}
+ * implementation.
+ *
+ * @param t the test context
+ * @param DriverC the driver constructor
+ * @param args the constructor arguments, `(connectionUrl, options?)`
+ * @param sql the SQL statements to test with
+ */
+export async function testDriverIntegration<
+  IDriver extends Driver,
 >(
+  t: Deno.TestContext,
+  DriverC: DriverConstructor<IDriver>,
+  args: ConstructorParameters<DriverConstructor<IDriver>>,
+  sql: TestSql,
+): Promise<void> {
+  assertConstructorSignature(args);
+  const driver = new DriverC(...args);
+  testDriverProfile(driver);
+  assertEquals(
+    driver.connectionUrl.toString(),
+    args[0].toString(),
+    "The connectionUrl property must match the constructor argument",
+  );
+
+  const create = () => new DriverC(...args);
+
+  await t.step("connectable", (t) => testConnectable(t, create));
+  await t.step("pingable", (t) => testPingable(t, create));
+  await t.step("queryable", (t) => testQueryable(t, create, sql));
+  await t.step("preparable", (t) => testPreparable(t, create, sql));
+  await t.step("transactionable", (t) => testTransactionable(t, create, sql));
+  await t.step("eventable", (t) => testEventable(t, create));
+}
+
+/**
+ * Run the full conformance suite against a {@linkcode Client}
+ * implementation.
+ *
+ * @param t the test context
+ * @param ClientC the client constructor
+ * @param args the constructor arguments, `(connectionUrl, options?)`
+ * @param sql the SQL statements to test with
+ */
+export async function testClientIntegration<
+  IClient extends Client,
+>(
+  t: Deno.TestContext,
   ClientC: ClientConstructor<IClient>,
-  args: ClientConstructorArguments<IClient>,
-): void {
-  assert(
-    args.length < 3,
-    "Number of arguments for the client constructor has to be max 2.",
+  args: ConstructorParameters<ClientConstructor<IClient>>,
+  sql: TestSql,
+): Promise<void> {
+  assertConstructorSignature(args);
+  const client = new ClientC(...args);
+  testClientProfile(client);
+  assertEquals(
+    client.connectionUrl.toString(),
+    args[0].toString(),
+    "The connectionUrl property must match the constructor argument",
   );
-  assertIsConnectionUrl(args[0]);
-  assertEquals(typeof args[1], "object");
-  const d = new ClientC(...args);
-  testClient(d, { connectionUrl: args[0], options: args[1] });
-}
-/**
- * Tests the connection of a Client
- */
-export async function testClientConstructorIntegration<
-  IClient extends Client = Client,
->(
-  t: Deno.TestContext,
-  Client: ClientConstructor<IClient>,
-  args: ClientConstructorArguments<IClient>,
-): Promise<void> {
-  testClientConstructor(Client, args);
 
-  await t.step("testConnectAndClose", async (t) => {
-    await t.step("should connect and close with using", async () => {
-      await using db = new Client(...args);
+  const create = () => new ClientC(...args);
 
-      await db.connect();
-    });
+  await t.step("connectable", (t) => testConnectable(t, create));
+  await t.step("pingable", (t) => testPingable(t, create));
+  await t.step("queryable", (t) => testQueryable(t, create, sql));
+  await t.step("preparable", (t) => testPreparable(t, create, sql));
+  await t.step("transactionable", (t) => testTransactionable(t, create, sql));
+  await t.step("poolable", (t) => testPoolable(t, create));
+  await t.step("eventable", (t) => testEventable(t, create));
 
-    await t.step("should connect and close", async () => {
-      const db = new Client(...args);
-
-      await db.connect();
-
-      await db.close();
-    });
-
-    await t.step("should connect and close with events", async () => {
-      const db = new Client(...args);
-
-      let connectListenerCalled = false;
-      let closeListenerCalled = false;
-      let error: Error | undefined = undefined;
-
-      try {
-        db.eventTarget.addEventListener("connect", () => {
-          connectListenerCalled = true;
+  await t.step("pool events", async (t) => {
+    await t.step(
+      "dispatches acquire and release events with the client",
+      async () => {
+        const poolable = await create();
+        await poolable.connect();
+        const eventTarget: EventTarget = poolable.eventTarget;
+        let acquireClient: unknown;
+        let releaseClient: unknown;
+        eventTarget.addEventListener("acquire", (event) => {
+          acquireClient = (event as CustomEvent<{ client?: unknown }>).detail
+            ?.client;
         });
-
-        db.eventTarget.addEventListener("close", () => {
-          closeListenerCalled = true;
+        eventTarget.addEventListener("release", (event) => {
+          releaseClient = (event as CustomEvent<{ client?: unknown }>).detail
+            ?.client;
         });
-
-        await db.connect();
-        await db.close();
-      } catch (e) {
-        error = e as Error;
-      }
-
-      assert(
-        connectListenerCalled,
-        "Connect listener not called: " + error?.message,
-      );
-      assert(
-        closeListenerCalled,
-        "Close listener not called: " + error?.message,
-      );
-    });
-  });
-}
-
-/**
- * Test the PreparedStatement class
- * @param value The PreparedStatement
- * @param expects The values to test against
- */
-export function testPreparedStatement(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: PreparedStatement["options"];
-    sql: string;
-  },
-) {
-  assertIsPreparedStatement(value);
-  testDriverConnectable(value, expects);
-  assertEquals(value.sql, expects.sql);
-}
-
-/**
- * Test the Queriable class
- * @param value The Queriable
- * @param expects The values to test against
- */
-export function testQueriable(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: Queriable["options"];
-  },
-) {
-  assertIsQueriable(value);
-  testDriverConnectable(value, expects);
-}
-
-/**
- * Test the Preparable class
- * @param value The Preparable
- * @param expects The values to test against
- */
-export function testPreparable(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: Queriable["options"];
-  },
-) {
-  assertIsPreparable(value);
-  testQueriable(value, expects);
-}
-
-/**
- * Test the Transaction class
- * @param value The Transaction
- * @param expects The values to test against
- */
-export function testTransaction(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: Transaction["options"];
-  },
-) {
-  assertIsTransaction(value);
-  testPreparable(value, expects);
-}
-
-/**
- * Test the Transactionable class
- * @param value The Transactionable
- * @param expects The values to test against
- */
-export function testTransactionable(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: Transactionable["options"];
-  },
-) {
-  assertIsTransactionable(value);
-  testPreparable(value, expects);
-}
-
-/**
- * Test the EventTarget class
- * @param value The EventTarget
- */
-export function testEventTarget(
-  value: unknown,
-) {
-  assertInstanceOf(value, EventTarget);
-}
-
-/**
- * Test the Eventable class
- * @param value The Eventable
- */
-export function testEventable(
-  value: unknown,
-) {
-  assertIsEventable(value);
-  testEventTarget(value.eventTarget);
-}
-
-/**
- * Test the Client class
- * @param value The Client
- * @param expects The values to test against
- */
-export function testClient(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: Client["options"];
-  },
-) {
-  assertIsClient(value);
-  testTransactionable(value, expects);
-  testEventable(value);
-}
-
-/**
- * Test the PoolClient class
- * @param value The PoolClient
- * @param expects The values to test against
- */
-export function testPoolClient(
-  value: unknown,
-  expects: {
-    connectionUrl: string;
-    options: PoolClient["options"];
-  },
-) {
-  assertIsPoolClient(value);
-  testTransactionable(value, expects);
-}
-
-/**
- * Tests the connection of a Client
- */
-export async function testClientConnection<
-  IClient extends Client = Client,
->(
-  t: Deno.TestContext,
-  Client: ClientConstructor<IClient>,
-  clientArguments: ClientConstructorArguments<IClient>,
-): Promise<void> {
-  await t.step("testConnectAndClose", async (t) => {
-    await t.step("should connect and close with using", async () => {
-      const opts = deepMerge<IClient["options"]>(
-        clientArguments[1],
-        // @ts-expect-error: ts-inference
-        {
-          poolOptions: {
-            lazyInitialization: true,
-          },
-        },
-      );
-      await using db = new Client(
-        clientArguments[0],
-        opts,
-      );
-      let connectListenerCalled = false;
-
-      db.eventTarget.addEventListener("connect", () => {
-        connectListenerCalled = true;
-      });
-
-      await db.connect();
-
-      assertFalse(
-        connectListenerCalled,
-        "Connect listener called, but should not have been due to lazyInitialization",
-      );
-    });
-
-    await t.step("should connect and close", async () => {
-      const db = new Client(...clientArguments);
-
-      assertEquals(db.connected, false);
-
-      await db.connect();
-
-      await db.close();
-    });
-
-    await t.step("should connect and close with events", async () => {
-      const db = new Client(clientArguments[0], {
-        ...clientArguments[1],
-        lazyInitialization: false,
-      });
-
-      let connectListenerCalled = false;
-      let closeListenerCalled = false;
-      let error: Error | undefined = undefined;
-
-      try {
-        db.eventTarget.addEventListener("connect", () => {
-          connectListenerCalled = true;
-        });
-
-        db.eventTarget.addEventListener("close", () => {
-          closeListenerCalled = true;
-        });
-
-        await db.connect();
-        await db.close();
-      } catch (e) {
-        error = e as Error;
-      }
-
-      assertEquals(
-        connectListenerCalled,
-        true,
-        "Connect listener not called: " + error?.message,
-      );
-      assertEquals(
-        closeListenerCalled,
-        true,
-        "Close listener not called: " + error?.message,
-      );
-    });
-  });
-}
-
-export async function testClientSanity<
-  IClient extends Client = Client,
->(
-  t: Deno.TestContext,
-  Client: ClientConstructor<IClient>,
-  clientArguments: ClientConstructorArguments<IClient>,
-): Promise<void> {
-  await testClientConnection(t, Client, clientArguments);
-
-  const client = new Client(...clientArguments);
-
-  await client.connect();
-
-  // Testing prepared statements
-
-  const stmt1 = await client.prepare("select 1 as one;");
-
-  assertIsPreparedStatement(stmt1);
-  assertFalse(stmt1.deallocated);
-
-  await using stmt2 = await client.prepare("select 1 as one;");
-
-  assertIsPreparedStatement(stmt2);
-  assertFalse(stmt2.deallocated);
-
-  await stmt1.execute();
-  await stmt1.deallocate();
-
-  assert(stmt1.deallocated);
-
-  await assertRejects(async () => {
-    await stmt1.execute();
+        const poolClient = await poolable.acquire();
+        await poolClient.release();
+        assertEquals(acquireClient, poolable);
+        assertEquals(releaseClient, poolable);
+        await poolable.close();
+      },
+    );
   });
 
-  await stmt2.execute();
+  await t.step("query methods release the pooled connection", async (t) => {
+    await t.step("query", async () => {
+      const poolable = await create();
+      await poolable.connect();
+      const ctx = await poolable.query(sql.query);
+      await ctx.toValues();
+      // The connection is idle again, so it can be acquired manually.
+      const poolClient = await poolable.acquire();
+      assert(poolClient.connected);
+      await poolClient.release();
+      await poolable.close();
+    });
 
-  // Testing transactions
-
-  const transaction1 = await client.beginTransaction();
-
-  assert(transaction1.inTransaction, "Transaction is not in transaction");
-
-  await transaction1.execute("select 1 as one;");
-
-  await transaction1.commitTransaction();
-
-  await assertRejects(async () => {
-    await transaction2.execute("select 1 as one;");
+    await t.step("execute", async () => {
+      const poolable = await create();
+      await poolable.connect();
+      await poolable.execute(sql.execute);
+      const poolClient = await poolable.acquire();
+      assert(poolClient.connected);
+      await poolClient.release();
+      await poolable.close();
+    });
   });
-
-  assertFalse(transaction1.inTransaction);
-
-  await using transaction2 = await client.beginTransaction();
-
-  assert(transaction2.inTransaction, "Transaction is not in transaction");
-
-  await transaction2.execute("select 1 as one;");
 }

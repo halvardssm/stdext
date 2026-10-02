@@ -51,7 +51,7 @@ console.log(dump(buffer));
 - [crypto](https://jsr.io/@stdext/crypto): The crypto package contains utility
   for crypto and hashing
 - [database](https://jsr.io/@stdext/database): The database package contains
-  interfaces and helpers for interracting with databases
+  interfaces and helpers for interacting with databases
 - [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
   utility for text encoding.
 - [http](https://jsr.io/@stdext/http): The http package contains utility for

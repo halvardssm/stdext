@@ -1,4 +1,4 @@
-# RFC: @std/sql - Standardized SQL Database Interface Specification
+# RFC: @stdext/database/sql - Standardized SQL Database Interface Specification
 
 This RFC proposes a standardized interface for SQL-like database drivers.
 
@@ -16,11 +16,11 @@ Similar effort has been made in the
 [Go ecosystem](https://pkg.go.dev/database/sql), and can therefore be used for
 guidance.
 
-Although the spec is shown using TypeScript, there is no requirement to import
-any types, or classes as long as the specs are followed. With the release, or
-shortly after, a repo will be specified/available on GitHub which will contain
-types, helper utilities, and a test suite. This will be published on
-[JSR](https://jsr.io/), and potentially also on [NPM](https://www.npmjs.com/).
+The specification is shown using TypeScript. The interfaces, helper utilities
+and a conformance test suite are implemented in the
+[`@stdext/database`](https://jsr.io/@stdext/database) package, published on
+[JSR](https://jsr.io/). Drivers do not need to import the types to be compliant,
+as long as they follow the specification, but are encouraged to.
 
 ## Purpose
 
@@ -182,10 +182,10 @@ for interacting with SQL-based databases through a standardized interface. It
 includes, but is not limited to:
 
 - Connection management
+- Connection pooling
 - Query execution
 - Transaction handling
 - Error handling and reporting
-- Data type mappings
 - Prepared statements and parameterized queries
 
 > Other functionalities such as subscriptions would be out of scope for the
@@ -214,138 +214,53 @@ maintenance of applications that interact with SQL-based databases. It provides
 a framework for creating compatible and standardized database drivers,
 facilitating smoother development and integration processes.
 
+## Design Principles
+
+1. **Async only.** All methods resolve to a `Promise`. Synchronous databases may
+   implement the interface by wrapping their operations in resolved promises.
+   This keeps the call sites uniform and allows the same code to be written for
+   all databases.
+2. **Small, independent capability interfaces.** Each capability ("able") is its
+   own interface: `Connectable`, `Pingable`, `Queryable`, `Preparable`,
+   `Transactionable`, `Poolable`, `Driverable` and `Eventable`. Drivers
+   implement the capabilities their database supports. The
+   [profiles](#profiles-and-compliance-matrix) define which capabilities are
+   mandatory for a compliant implementation.
+3. **Implicit pooling.** There is no separate pool class. A `Client` always
+   manages a connection pool, tuned through its constructor options. It defaults
+   to a single connection (`maxSize` of `1`) and becomes a connection pool when
+   `maxSize` is raised. This mirrors `database/sql` in Go, where `*sql.DB` is
+   always a pool.
+4. **Minimal query surface.** The standard query surface is two methods:
+   `execute` for statements and `query` for queries returning rows. All other
+   result shapes (`queryOne`, array results, tagged template helpers, ...) are
+   derivable and left to extensions. Every method added to the standard is a
+   permanent compatibility requirement for every compliant driver, so the
+   surface is kept as small as possible.
+5. **Explicit Resource Management.** Every object holding a resource
+   (connection, pool client, transaction, prepared statement, result context) is
+   asynchronously disposable and works with `await using`. Disposing performs
+   the safe cleanup action: close, release, rollback, deallocate or stop
+   fetching respectively.
+
 ## Specification
 
-The following section contains the main interfaces introduced in this RFC.
+The specification defines three layers:
 
-This spec defines two main APIs, the low level API provides the bare minimum of
-connecting and querying the database, while the high level API provides high
-level methods for querying, prepared statements and transactions.
+- [Core types](#core-types): parameters, rows and the result context
+- [Capability interfaces](#capability-interfaces): the independent "ables"
+- [Profiles](#profiles-and-compliance-matrix): the classes users and library
+  authors interact with, composed from the capabilities
 
-- The low level interface will be named as `Driver`.
-- The high level interface will be named `Client`.
+### Core Types
 
-The separation between `Driver` and `Client` is so that they can be implemented
-in separation and also be exchangeable. A `Driver` can have many `Clients`
-supporting it, and a `Client` can have many supported `Drivers`.
+#### Parameters
 
-A `Client` will use the `Driver` for querying the database, and provide higher
-level and more specified methods.
-
-The `Client` interface also includes pooling functionality, allowing for
-connection pooling when needed.
-
-> All methods per spec can be either async or sync. The respective
-> implementations decide which to implement. The following examples shows async.
-
-### Driver API
-
-The `Driver` provides the low level connection to a database.
-
-The constructor have the following signature:
+The parameters to bind to a SQL statement are passed as an ordered array or as a
+record of named parameters, depending on the placeholder style supported by the
+database. The recommended parameter types are:
 
 ```ts
-interface DriverConstructor {
-  new (
-    // Can be either/or a string/URL depending on the implementation
-    connectionUrl: string | URL,
-    // Can be required depending on the implementation
-    options?: DriverOptions,
-  ): Driver;
-}
-```
-
-- The `connectionUrl` can be either/or a string/URL. This is left up to the
-  database implementations. It can not be a Record, and if aditional connection
-  options have to be passed, it can be done passing it as URL Parameters or
-  using `options.connectionOptions`.
-- The `options` is an object that can be extended by the database
-  implementations. This is where all aditional configuration options are placed.
-  See below for signature.
-
-```ts
-type DriverOptions = {
-  connectionOptions?: {};
-  queryOptions?: {};
-};
-```
-
-- The `connectionOptions` is by spec an empty placeholder that can be extended
-  by the respective implementations. It contains additional configuration for
-  connecting to the database.
-- The `queryOptions` is by spec an empty placeholder that can be extended by the
-  respective implementations. It contains base configurations that will be
-  passed to the queries, and merged with the method level query options. It is
-  up to the database implementations how this should be done. An example of
-  possible configuration is query hooks to transform the query before execution
-  or transform a result such as mapping of types depending on a column.
-- The `DriverOptions` can also be extended to fit the needs of the database
-  implementation.
-
-#### Initialization & Explicit Resource Management
-
-The `Driver` can be initialized normally and also by using explicit resource
-management.
-
-```ts
-const driver = new Driver(connectionUrl, connectionOptions);
-await driver.connect();
-// When a connection is no longer needed, it must be closed by the `close` method.
-await driver.close();
-```
-
-The driver interface also utilizes the proposed
-[Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management)
-to automatically dispose of the connection.
-
-```ts
-await using driver = new Driver(connectionUrl, connectionOptions);
-await driver.connect();
-// no need to close the connection at the end
-```
-
-#### Properties
-
-The `Driver` implements the following properties:
-
-```ts
-interface Driver {
-  readonly connectionUrl: string | URL;
-  readonly options: DriverOptions;
-  readonly connected: boolean;
-  connect(): Promise<void> | void;
-  close(): Promise<void> | void;
-  ping(): Promise<void> | void;
-  query(
-    sql: string,
-    params?: ParameterType[] | Record<string, ParameterType>,
-    options?: QueryOptions,
-  ): AsyncGenerator<DriverQueryNext> | Generator<DriverQueryNext>;
-}
-```
-
-- `connected`: Indicates if the connection has been started with the database.
-- `connect`: Initializes the connection to the database.
-- `close`: Close the connection to the database
-- `ping`: Pings the database connection to check that it's alive, otherwise
-  throws (See [errors](#errors) for more information).
-- `query`: Queries the database. It takes three arguments and returns a
-  Generator
-  - `sql` is the sql string
-  - `params` is the parameters to pass if using variables in the sql string.
-    Depending on the implementation, it can take an array or a record.
-  - `options` is the query options, it will be combined with the query options
-    given to the driver options (if given).
-
-The `ParameterType` depends on the implementation and must at least include
-`string`, but it is recommended that it should cover all primitives as well as
-common objects such as Date.
-
-```ts
-// At minimum
-type ParameterType = string;
-
-// Example of well implemented
 type ParameterType =
   | string
   | number
@@ -355,401 +270,336 @@ type ParameterType =
   | undefined
   | Date
   | Uint8Array;
+
+type QueryParameters = ParameterType[] | Record<string, ParameterType>;
 ```
 
-Going forward, we will use the following type as a shorthand for the parameter
-argument and the return type.
+Drivers must at minimum support `string`, and should support the full
+recommended set. The parameter type may be extended with database specific
+types.
+
+#### Result Context
+
+Queries return a result context. It is both an async iterable of rows and
+provides convenience methods for collecting the rows as values or records:
 
 ```ts
-type Parameters = ParameterType[] | Record<string, ParameterType>;
-type ReturnValue = unknown;
+interface ContextMetadata<C extends string[] = string[]> {
+  columns: C;
+}
+
+interface ResultObject<V = unknown[], R = Record<string, unknown>> {
+  values: V;
+  toRecord: () => R;
+}
+
+interface ResultIterableContext<
+  V extends unknown[] = unknown[],
+  M extends ContextMetadata = ContextMetadata,
+  R = Record<M["columns"][number], V[number]>,
+> extends AsyncIterable<ResultObject<V, R>> {
+  metadata: M;
+  toValues: () => Promise<V[]>;
+  toRecords: () => Promise<R[]>;
+  toRecord: (values: V) => R;
+}
 ```
 
-The `DriverQueryNext` is the result object from the database, it represents a
-returned row.
+- `metadata` contains the column names, available as soon as the first row
+  arrives.
+- Iterating the context streams the rows lazily, which is good for iterating
+  over a massive amount of rows.
+- `toValues` collects the rows as an array of value arrays, and `toRecords`
+  collects them as an array of records.
+- Rows are buffered as they are lazily fetched, so the context can be iterated
+  and collected in any combination: rows already fetched are replayed from the
+  buffer, and the collect methods drain any remaining rows. Note that the
+  buffered rows are kept in memory, so for a massive amount of rows, iterate the
+  context once instead of collecting it.
+- The context is asynchronously disposable: disposing stops fetching and
+  releases the underlying connection. Rows already fetched remain buffered and
+  can still be replayed.
+
+The `@stdext/database` package provides `createResultIterableContext` as a
+helper for constructing a result context from a stream of low-level rows:
 
 ```ts
-export type DriverQueryNext = {
+interface Row {
   columns: string[];
-  values: ReturnValue[];
-  meta: {};
-};
-```
-
-- `columns` is the column headers in the same order as the values.
-- `values` is the values in the same order as the columns, the type should be
-  defined by the database.
-- `meta` contains additional information regarding the query, such as execution
-  time etc. The content depends on the implementation and the database.
-
-### Client API
-
-The `Client` provides the high level connection to a database.
-
-It follows the same constructor signature as defined for the
-[Driver](#driver-api). However, it is not required to have the same signature
-for the `Driver` and the `Client`, this is left up to the implementations.
-
-The `Client` also shares its use of
-[Explicit Resource Management](#initialization--explicit-resource-management)
-with the `Driver`, and also implements all of the properties from the `Driver`,
-except for `query`.
-
-The `query` property is the only exception as this is a low level method and can
-be accessed using the `driver` property.
-
-#### Properties
-
-```ts
-interface Client extends Queriable, Preparable, Transactionable {
-  ... // other properties defined by the Driver
-  readonly driver: Driver;
-  ... // other properties defined further down
-  // Pooling functionality
-  poolOptions?: PoolOptions;
+  values: unknown[];
+  meta?: Record<string, unknown>;
 }
 ```
 
-- The `driver` property, contains an instance of the low level driver. The
-  average developer would not need to access this, but it can be useful for
-  advanced usecases.
+#### Options
 
-The driver also contains aditional properties for different usecases
-
-##### Pooling
-
-The `Client` interface includes pooling functionality:
+Options are grouped and passed as the second constructor argument:
 
 ```ts
-interface PoolOptions {
-  lazyInitialization?: boolean;
-  maxSize?: number;
+interface Options {
+  connectionOptions?: ConnectionOptions;
+  queryOptions?: QueryOptions;
+  transactionOptions?: TransactionOptions;
 }
 ```
 
-- `lazyInitialization` will enable lazily initialization of connections. This
-  means that connections will only be created if there are no idle connections
-  available when acquiring a connection, and max pool size has not been reached.
-- `maxSize` sets the maximum amount of pool clients. Implementors sets the
-  default value, but a value of 1 only creates one connection.
-
-By default, a using `Client.query()` (or other query methods) will acquire a
-`PoolClient` and release it after retrieving the results.
-
-Acquiring and holding a pool client is also possible, by using the `acquire`
-method.
-
-Manual acquire and release:
+- `connectionOptions` and `transactionOptions` are empty placeholders in the
+  spec, extended by the driver implementations with database specific options.
+- `queryOptions` are merged into every query, and contain the standard query
+  options:
 
 ```ts
-const poolClient = await client.acquire();
-// Use the poolClient
-await poolClient.release();
+interface QueryOptions {
+  signal?: AbortSignal;
+  transformInput?: (value: unknown) => unknown;
+  transformOutput?: (value: unknown) => unknown;
+}
 ```
 
-Or using Explicit Resource Management:
+- Method level options are merged with the constructor level options, with the
+  method level options taking precedence.
+- When the `signal` is aborted, the implementation must stop the current query,
+  release the connection, and reject with the abort error.
+
+### Capability Interfaces
+
+Each capability is an independent interface. All methods resolve to a promise.
+
+| Interface         | Methods                                              | Description                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Connectable`     | `connectionUrl`, `connected`, `connect()`, `close()` | Connection lifecycle. Also `AsyncDisposable`. `connect` and `close` are idempotent. A failed `connect` rejects with a `ConnectionError`, leaves `connected` as `false`, and may be retried. |
+| `Pingable`        | `ping()`                                             | Checks that the connection is alive. Throws a `ConnectionError` if not.                                                                                                                     |
+| `Queryable`       | `execute()`, `query()`                               | Executes statements and queries. See below.                                                                                                                                                 |
+| `Preparable`      | `prepare()`                                          | Creates a prepared statement.                                                                                                                                                               |
+| `Transactionable` | `beginTransaction()`, `transaction()`                | Creates transactions.                                                                                                                                                                       |
+| `Poolable`        | `acquire()`                                          | Acquires a pool client from a pool.                                                                                                                                                         |
+| `Driverable`      | `driver`                                             | Wraps and exposes a `Driver`.                                                                                                                                                               |
+| `Eventable`       | `eventTarget`                                        | Dispatches events.                                                                                                                                                                          |
+
+#### Queryable
+
+The minimal query surface:
 
 ```ts
-await using poolClient = await client.acquire();
-// Use the poolClient
-```
-
-##### Queriable
-
-The client provides the following methods for querying.
-
-```ts
-interface Queriable {
+interface Queryable {
   execute(
     sql: string,
-    params?: Parameters,
-    options?: IQueryOptions,
-  ): Promise<number | undefined> | number | undefined;
+    params?: QueryParameters,
+    options?: QueryOptions,
+  ): Promise<number | undefined>;
   query(
     sql: string,
-    params?: Parameters,
-    options?: IQueryOptions,
-  ): Promise<ReturnValue[]> | ReturnValue[];
-  queryOne(
-    sql: string,
-    params?: Parameters,
-    options?: IQueryOptions,
-  ): Promise<ReturnValue | undefined> | ReturnValue | undefined;
-  queryMany(
-    sql: string,
-    params?: Parameters,
-    options?: IQueryOptions,
-  ): AsyncGenerator<ReturnValue> | Generator<ReturnValue>;
-  queryArray(
-    sql: string,
-    params?: Parameters,
-    options?: IQueryOptions,
-  ): Promise<ReturnValue[]> | ReturnValue[];
-  queryOneArray(
-    sql: string,
-    params?: Parameters,
-    options?: IQueryOptions,
-  ): Promise<ReturnValue | undefined> | ReturnValue | undefined;
-  queryManyArray(
-    sql: string,
-    params?: Parameters,
-    options?: IQueryOptions,
-  ): AsyncGenerator<ReturnValue> | Generator<ReturnValue>;
-  sql(
-    strings: TemplateStringsArray,
-    ...parameters: ParameterType[] | Record<string, ParameterType>
-  ): Promise<ReturnValue[]> | ReturnValue[];
-  sqlArray(
-    strings: TemplateStringsArray,
-    ...parameters: ParameterType[] | Record<string, ParameterType>
-  ): Promise<ReturnValue[]> | ReturnValue[];
-}
-```
-
-See [Driver Properties](#properties) for the argument descriptions.
-
-- `execute`: Executes a SQL statement
-- `query`: Queries the database and returns an array of object
-- `queryOne`: Queries the database and returns at most one entry as an object
-- `queryMany`: Queries the database with an async generator and yields each
-  entry as an object. This is good for when you want to iterate over a massive
-  amount of rows.
-- `queryArray`: Queries the database and returns an array of arrays
-- `queryOneArray`: Queries the database and returns at most one entry as an
-  array
-- `queryManyArray`: Queries the database with an async generator and yields each
-  entry as an array. This is good for when you want to iterate over a massive
-  amount of rows.
-- `sql`: Allows you to create a query using template literals, and returns the
-  entries as an array of objects. This is a wrapper around `query`
-- `sqlArray`: Allows you to create a query using template literals, and returns
-  the entries as an array of arrays. This is a wrapper around `queryArray`
-
-See the [examples](#examples) section for sample usage.
-
-##### Prepared statement
-
-Transactions implement
-[Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management).
-A prepared statement can be created with the provided method.
-
-```ts
-interface Preparable extends Queriable {
-  prepare(
-    sql: string,
+    params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<PreparedStatement> | PreparedStatement;
+  ): Promise<ResultIterableContext>;
 }
 ```
 
-- `prepare`: Returns a `PreparedStatement` class
+- `execute` executes a statement and resolves to the number of affected rows, or
+  `undefined` if the database does not report it.
+- `query` executes a query and resolves to a [result context](#result-context).
+- Both must reject with a `ConnectionError` when the object is not connected.
 
-The `PreparedStatement` class provides a subset of the client methods for
-querying.
+#### Preparable
 
 ```ts
-interface PreparedStatement {
+interface Preparable {
+  prepare(sql: string, options?: QueryOptions): Promise<PreparedStatement>;
+}
+```
+
+The `PreparedStatement` provides `execute` and `query` without the `sql`
+argument, plus its own lifecycle:
+
+```ts
+interface PreparedStatement extends AsyncDisposable {
   readonly sql: string;
   readonly deallocated: boolean;
   deallocate(): Promise<void>;
-  execute(
-    params?: Parameters,
-    options?: QueryOptions,
-  ): Promise<number | undefined> | number | undefined;
-  query(
-    params?: Parameters,
-    options?: QueryOptions,
-  ): Promise<ReturnValue[]> | ReturnValue[];
-  queryOne(
-    params?: Parameters,
-    options?: QueryOptions,
-  ): Promise<ReturnValue | undefined> | ReturnValue | undefined;
-  queryMany(
-    params?: Parameters,
-    options?: QueryOptions,
-  ): AsyncGenerator<ReturnValue> | Generator<ReturnValue>;
-  queryArray(
-    params?: Parameters,
-    options?: QueryOptions,
-  ): Promise<ReturnValue[]> | ReturnValue[];
-  queryOneArray(
-    params?: Parameters,
-    options?: QueryOptions,
-  ): Promise<ReturnValue | undefined> | ReturnValue | undefined;
-  queryManyArray(
-    params?: Parameters,
-    options?: QueryOptions,
-  ): AsyncGenerator<ReturnValue> | Generator<ReturnValue>;
+  execute(params?, options?): Promise<number | undefined>;
+  query(params?, options?): Promise<ResultIterableContext>;
 }
 ```
 
-See [Queriable](#queriable) for the query descriptions.
+- `deallocate` is idempotent. Using a deallocated statement must reject with a
+  `QueryError`.
+- Disposing a prepared statement deallocates it.
+- Databases without native prepared statements should fall back to preparing the
+  statement on each execution, so that they remain compliant.
 
-- `sql` is the sql string for the prepared statement
-- `deallocated` signifies if the prepared statement was dealocated
-- `dealocate` dealocates a prepared statement, once a prepared statement is
-  dealocated, it can no longer be used, and be removed from scope to be GCd.
-
-See the [examples](#examples) section for sample usage.
-
-##### Transaction
-
-Transactions implement
-[Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management).
-A transaction can be created with the provided methods.
+#### Transactionable
 
 ```ts
 interface Transactionable {
-  beginTransaction(
-    options?: TransactionOption,
-  ): Promise<Transaction> | Transaction;
-  transaction(
-    fn: (t: Transaction) => Promise<ReturnValue> | ReturnValue,
-    options?: TransactionOption,
-  ): Promise<ReturnValue> | ReturnValue;
+  beginTransaction(options?: TransactionOptions): Promise<Transaction>;
+  transaction<T>(
+    fn: (tx: Transaction) => Promise<T>,
+    options?: TransactionOptions,
+  ): Promise<T>;
 }
 ```
 
-- `beginTransaction` Returns a `Transaction` class
-- `transaction` A wrapper function for transactions, handles the logic of
-  beginning, committing and rollback a transaction.
+- `transaction` begins a transaction, runs the callback, and commits on success.
+  If the callback throws, the transaction is rolled back and the error is
+  rethrown.
 
-The `TransactionOptions` is defined here as an empty placeholder, and
-implementation depends on the database.
-
-The `Transaction` class provides the client methods for `querying`, and also
-provides the `prepare` method.
+The `Transaction` provides the query and prepare methods, plus transaction
+specific methods:
 
 ```ts
-interface Transaction extends Queriable, Preparable {
-  ... // other Queriable and Preparable properties
+interface Transaction
+  extends AsyncDisposable, Queryable, Preparable, Transactionable {
   readonly inTransaction: boolean;
-  commitTransaction(options?: TransactionOptions): Promise<void> | void;
-  rollbackTransaction(options?: TransactionOptions): Promise<void> | void;
-  createSavepoint(name?: string, options?: TransactionOptions): Promise<void> | void;
-  releaseSavepoint(name?: string, options?: TransactionOptions): Promise<void> | void;
+  commitTransaction(options?): Promise<void>;
+  rollbackTransaction(options?): Promise<void>;
+  createSavepoint(name?: string, options?): Promise<void>;
+  releaseSavepoint(name?: string, options?): Promise<void>;
 }
 ```
 
-See the [examples](#examples) section for sample usage.
+- `inTransaction` indicates whether the transaction is active.
+- Using a committed, rolled back or otherwise inactive transaction must reject
+  with a `TransactionError`.
+- Disposing an active transaction rolls it back.
 
-#### Pool Client
+#### Nested Transactions
 
-The `PoolClient` represents an individual connection from the pool.
+Calling `beginTransaction()` or `transaction()` on an object that is already in
+an active transaction creates a savepoint instead of a new transaction:
 
-The `PoolClient`s can either be eagerly or lazily connected when calling the
-`connect` method. The `PoolClient`s can then be acquired when needed.
+- The nested transaction's `commitTransaction()` releases the savepoint, and its
+  `rollbackTransaction()` rolls back to it. The enclosing transaction stays
+  active and can still commit.
+- Savepoint based nesting is the only portable mechanism across SQL databases:
+  SQLite, Postgres, MySQL/MariaDB and MSSQL all support savepoints with these
+  semantics, and none support true nested transactions.
+- Implementations must always `BEGIN` before creating a savepoint, as engines
+  differ on savepoints outside transactions (Postgres rejects them, SQLite
+  treats the outermost savepoint as a transaction).
+- Generated savepoint names must be plain unquoted identifiers (for example
+  `sp_1`): identifier quoting differs per dialect, and Postgres truncates
+  identifiers to 63 bytes.
+- Rolling back to an outer savepoint invalidates nested transactions created
+  after it; implementations must mark them as inactive so that they reject with
+  a `TransactionError`.
+- Nesting only applies on the same connection. Calling `Client.transaction()`
+  inside a transaction acquires a separate pooled connection and starts an
+  independent transaction; nest with `Transaction.transaction()` instead.
+
+### Profiles and Compliance Matrix
+
+The profiles are the classes users interact with. Each profile is a composition
+of the mandatory capabilities:
+
+| Class               | Extends                                                                                                        | Additional members                                                                                 |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `Driver`            | `Optionable`, `Connectable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`, `Eventable`             |                                                                                                    |
+| `Transaction`       | `AsyncDisposable`, `Queryable`, `Preparable`, `Transactionable`                                                | `inTransaction`, `commitTransaction`, `rollbackTransaction`, `createSavepoint`, `releaseSavepoint` |
+| `PreparedStatement` | `AsyncDisposable`                                                                                              | `sql`, `deallocated`, `deallocate`, `execute`, `query`                                             |
+| `PoolClient`        | `AsyncDisposable`, `Driverable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`                      | `connected`, `disposed`, `release`, `remove`                                                       |
+| `Client`            | `Optionable`, `Connectable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`, `Poolable`, `Eventable` |                                                                                                    |
+
+- The `Driver` represents a single connection and is implemented by driver
+  authors. Applications should use a `Client`.
+- The `Client` manages a pool of drivers. Its query methods automatically
+  acquire a pool client for the duration of the operation and release it after.
+  See [Pooling](#pooling).
+- The `PoolClient` wraps a single driver acquired from a pool.
+- The interfaces are intentionally free of inheritance between capabilities. The
+  semantic dependencies are encoded in the profiles instead: a `Transaction` and
+  a `PreparedStatement` must always be queryable and disposable.
+
+#### Constructor Signature
+
+All profiles follow the same constructor signature:
 
 ```ts
-const client = new Client(connectionUrl, { poolOptions: { maxSize: 10 } });
-await client.connect();
-const poolClient = await client.acquire(); // returns a PoolClient
+new Driver(connectionUrl: string | URL, options?: Options);
+new Client(connectionUrl: string | URL, options?: ClientOptions);
 ```
 
-After a `PoolClient` is no longer needed, it must be released back to the pool
-using the `release` method.
+- The `connectionUrl` can be either a string or a URL, interpreted by the
+  implementation.
+- The options object is the only `Record` argument, and can be extended by the
+  implementations. Additional connection options must be passed through the
+  options, not through the URL.
+- The `ClientOptions` extends `Options` with the pool options (see
+  [Pooling](#pooling)).
+
+### Pooling
+
+Pooling is implicit and always enabled. A `Client` manages a pool of
+connections:
 
 ```ts
-await poolClient.release();
-```
-
-> A `PoolClient` can also be destroyed (disconnected and removed) by using the
-> `remove` method.
-
-When the pool is no longer needed, it must be closed by the `close` method. The
-`close` method will close all the connections in the pool.
-
-```ts
-await client.close();
-```
-
-Using
-[Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management),
-no manual release or close is needed.
-
-```ts
-await using client = new Client(connectionUrl, {
-  poolOptions: { maxSize: 10 },
-});
-await client.connect();
-await using poolClient = await client.acquire();
-// no need to release the poolClient at the end
-// no need to close the client at the end
-```
-
-##### PoolClient Interface
-
-```ts
-interface PoolClient extends Queriable, Preparable, Transactionable {
-  ... // other Queriable, Preparable and Transactionable properties
-  readonly disposed: boolean;
-  release(): Promise<void> | void;
-  remove(): Promise<void> | void
+interface PoolOptions {
+  lazyInitialization?: boolean; // default: false
+  maxSize?: number; // default: 1
 }
 ```
 
-- `disposed` indicates if the pool client is released or removed
-- `release` releases the connection back to the pool
-- `remove` closes the connection and removes the client from the pool
+- `lazyInitialization`: when enabled, connections are only created when a
+  connection is acquired and no idle connection is available while the pool is
+  below `maxSize`. Otherwise, `connect()` creates and connects the connections
+  up front.
+- `maxSize`: the maximum amount of connections in the pool. It defaults to `1`,
+  which makes the client behave like a single connection. The client becomes a
+  connection pool when `maxSize` is raised.
 
-## Implementation
+Lifecycle and rules:
 
-> This section is for implementing the interface for database drivers. For
-> general usage, read the [specification](#specification) section or look at the
-> [examples](#examples).
+- `Client.connect()` must be called before the client is used. `acquire()` on a
+  client that is not connected must reject with a `ConnectionError`.
+- `acquire()` resolves to a connected `PoolClient`. If the pool is at `maxSize`
+  with no idle connections, `acquire()` waits until a connection is released or
+  removed.
+- A pool client must be released back to the pool with `release()`, or destroyed
+  with `remove()` when the connection is in a broken state so it is not reused.
+  Both are idempotent, and both mark the pool client as disposed. Disposing a
+  pool client releases it.
+- The query methods (`execute`, `query`) automatically acquire a pool client and
+  release it when the operation completes. Because the `query` result context is
+  lazy, the connection is held until the buffered result is complete or the
+  context is disposed; after that, the context can still be replayed from the
+  buffer.
+- `beginTransaction` and `prepare` acquire a pool client that is held until the
+  transaction is finished or the prepared statement is deallocated.
+- `Client.close()` closes all connections in the pool and is idempotent.
+  Disposing a client closes it.
 
-To be fully compliant with the specs, you will need to implement the following
-classes for your database driver:
+### Errors
 
-- `Connection`: This represents the connection to the database. This should
-  preferably only contain the functionality of containing a connection, and
-  provide a minimum set of query methods to be used to query the database
-- `PreparedStatement`: This represents a prepared statement.
-- `Transaction`: This represents a transaction.
-- `Client`: This represents a database client (with optional pooling
-  functionality)
-- `PoolClient`: This represents a client to be provided by a pool
+All errors thrown by a compliant driver extend `DatabaseError`:
 
-It is also however advisable to create additional helper classes for easier
-inheritance (see the [inheritance graph](#inheritance-graph)).
+| Error              | Thrown when                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `DatabaseError`    | Base class for all database errors                                                       |
+| `ConnectionError`  | The connection could not be established, was closed, or is not alive                     |
+| `QueryError`       | A query or statement could not be executed, or a deallocated prepared statement was used |
+| `TransactionError` | A transaction operation failed, or an inactive transaction was used                      |
 
-### Inheritance graph
+### Events
 
-Here is an overview of the inheritance and flow of the different interfaces. In
-most cases, these are the classes and the inheritance graph that should be
-implemented.
+`Driver` and `Client` are `Eventable` and dispatch events on their
+`eventTarget`:
 
-```mermaid
-flowchart LR
-    A[Client]
-    B[PoolClient]
-    C[Eventable]
-    D[Transactionable]
-    E[Transaction]
-    F[Preparable]
-    G[PreparedStatement]
-    H[Queriable]
-    I[Connectable]
-    J[Connection]
+| Event     | Dispatched when                                                             |
+| --------- | --------------------------------------------------------------------------- |
+| `connect` | A connection is established (for a pool: when a pooled connection connects) |
+| `close`   | A connection is about to be closed                                          |
+| `error`   | An error is triggered                                                       |
+| `acquire` | A connection is acquired from the pool (client only)                        |
+| `release` | A connection is released back to the pool (client only)                     |
 
-    A -. acquire .-> B
-    A --> C
-    B --> D
-    D -. beginTransaction()/transaction() .-> E
-    E --> F
-    D --> F
-    F -. prepare() .-> G
-    G --> I
-    F --> H
-    H --> I
-    I --> J
-```
+All events carry a detail with a `client` property containing the object that
+dispatched the event: a `Driver` for driver events and a `Client` for client
+events. `error` events additionally carry the `error`.
 
-### Extending the interfaces
+### Extending the Interfaces
 
-As these interfaces are meant as a base, it is intended to be extended upon with
-methods respective to each database. As these methods are not defined in the
-specs, the specs provide the following guidance in method signature.
+The interfaces are meant to be extended with database specific methods. As these
+methods are not defined in the specs, the specs provide the following guidance
+for the method signatures.
 
 In general we follow
 [Deno's Style Guide for methods](https://docs.deno.com/runtime/contributing/style_guide/#exported-functions%3A-max-2-args%2C-put-the-rest-into-an-options-object)
@@ -762,135 +612,104 @@ In general we follow
 > 3. The 'options' argument is the only argument that is a `Record` type
 >    `Object`.
 
+Extension examples: tagged template query helpers (`sql`...``), `queryOne` /
+`queryMany` convenience wrappers, batch operations, subscriptions, and database
+specific features such as SQLite blob I/O or Postgres `LISTEN`/`NOTIFY`.
+
+## Implementation
+
+> This section is for implementing the interface for database drivers. For
+> general usage, read the [specification](#specification) section or look at the
+> [examples](#examples).
+
+To be fully compliant with the specs, you will need to implement the following
+classes for your database driver:
+
+- `Driver`: a single connection to the database.
+- `PreparedStatement`: see [Preparable](#preparable).
+- `Transaction`: see [Transactionable](#transactionable).
+- `Client`: the pooled client, see [Pooling](#pooling).
+- `PoolClient`: the pool client, see
+  [Profiles and Compliance Matrix](#profiles-and-compliance-matrix).
+
+The `@stdext/database/sql` package contains the TypeScript interfaces and helper
+utilities to implement against, and `@stdext/database/sql/testing` contains a
+conformance test suite:
+
+```ts
+import { testClientIntegration } from "@stdext/database/sql/testing";
+
+Deno.test("MyClient conformance", async (t) => {
+  await testClientIntegration(t, MyClient, [connectionUrl, options], {
+    execute: "CREATE TABLE users (id INTEGER, name TEXT)",
+    query: "SELECT id, name FROM users",
+    columns: ["id", "name"],
+    count: 3,
+  });
+});
+```
+
+A driver that passes the conformance suite is compliant with this specification.
+
 ## Examples
 
-> All methods per spec can be either async or sync. The respective
-> implementations decide which to implement. The following examples shows async.
-
-Async dispose
+Connect and query:
 
 ```ts
-await using client = new Client(connectionUrl, connectionOptions);
+await using client = new Client(connectionUrl);
 await client.connect();
-await client.execute("SOME INSERT QUERY");
-const res = await client.query("SELECT * FROM table");
+
+await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+
+const ctx = await client.query("SELECT id, name FROM users");
+console.log(ctx.metadata.columns);
+// ["id", "name"]
+console.log(await ctx.toRecords());
+// [{ id: 1, name: "Alice" }]
 ```
 
-Using const (requires manual close at the end)
+Streaming a large result:
 
 ```ts
-const client = new Client(connectionUrl, connectionOptions);
-await client.connect();
-await client.execute("SOME INSERT QUERY");
-const res = await client.query("SELECT * FROM table");
-await client.close();
-```
-
-Query objects
-
-```ts
-const res = await client.query("SELECT * FROM table");
-console.log(res);
-// [{ col1: "some value" }]
-```
-
-Query one object
-
-```ts
-const res = await client.queryOne("SELECT * FROM table");
-console.log(res);
-// { col1: "some value" }
-```
-
-Query many objects with an iterator
-
-```ts
-const res = Array.fromAsync(client.queryMany("SELECT * FROM table"));
-console.log(res);
-// [{ col1: "some value" }]
-
-// OR
-
-for await (const iterator of client.queryMany("SELECT * FROM table")) {
-  console.log(res);
-  // { col1: "some value" }
+const ctx = await client.query("SELECT * FROM events");
+for await (const row of ctx) {
+  console.log(row.toRecord());
 }
 ```
 
-Query as an array
+Prepared statement:
 
 ```ts
-const res = await client.queryArray("SELECT * FROM table");
-console.log(res);
-// [[ "some value" ]]
+await using stmt = await client.prepare("SELECT * FROM users WHERE id = ?");
+const ctx = await stmt.query([1]);
+console.log(await ctx.toRecords());
+// disposed (deallocated) at the end of the scope
 ```
 
-Query one as an array
+Transaction:
 
 ```ts
-const res = await client.queryOneArray("SELECT * FROM table");
-console.log(res);
-// [[ "some value" ]]
+await using tx = await client.beginTransaction();
+await tx.execute("INSERT INTO users (name) VALUES ('Alice')");
+await tx.commitTransaction();
+// if the scope ends without a commit, the transaction is rolled back
 ```
 
-Query many as array with an iterator
+Transaction wrapper:
 
 ```ts
-const res = Array.fromAsync(client.queryManyArray("SELECT * FROM table"));
-console.log(res);
-// [[ "some value" ]]
-
-// OR
-
-for await (const iterator of client.queryManyArray("SELECT * FROM table")) {
-  console.log(res);
-  // [ "some value" ]
-}
-```
-
-Query with template literals as an object
-
-```ts
-const res = await client.sql`SELECT * FROM table where id = ${id}`;
-console.log(res);
-// [{ col1: "some value" }]
-```
-
-Query with template literals as an array
-
-```ts
-const res = await client.sqlArray`SELECT * FROM table where id = ${id}`;
-console.log(res);
-// [[ "some value" ]]
-```
-
-Transaction
-
-```ts
-const transaction = await client.beginTransaction();
-await transaction.execute("SOME INSERT QUERY");
-await transaction.commitTransaction();
-// `transaction` can no longer be used, and a new transaction needs to be created
-```
-
-Transaction wrapper
-
-```ts
-const res = await client.transaction(async (t) => {
-  await t.execute("SOME INSERT QUERY");
-  return t.query("SOME SELECT QUERY");
+const users = await client.transaction(async (tx) => {
+  await tx.execute("INSERT INTO users (name) VALUES ('Alice')");
+  return (await tx.query("SELECT * FROM users")).toRecords();
 });
-console.log(res);
-// [{ col1: "some value" }]
 ```
 
-Prepared statement
+Manual pool usage:
 
 ```ts
-const prepared = db.prepare("SOME PREPARED STATEMENT");
-await prepared.query([...params]);
-console.log(res);
-// [{ col1: "some value" }]
+await using poolClient = await client.acquire();
+await poolClient.execute("INSERT INTO users (name) VALUES ('Bob')");
+// released back to the pool at the end of the scope
 ```
 
 ## Acknowledgment

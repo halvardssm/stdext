@@ -1,11 +1,7 @@
-import type { Driver } from "./core.ts";
-import {
-  CustomEvent,
-  CustomEventListener,
-  CustomEventListenerOrEventListenerObject,
-  CustomEventTarget,
-} from "@stdext/event";
-import { DatabaseError } from "./errors.ts";
+import type { Client, Driver } from "./core.ts";
+import { CustomEvent, CustomEventTarget } from "@stdext/event";
+import type { CustomEventListenerOrEventListenerObject } from "@stdext/event";
+import type { DatabaseError } from "./errors.ts";
 /**
  * Driver event types
  */
@@ -22,17 +18,41 @@ export type ClientEventType =
   | "acquire"
   | "release";
 
-export interface EventDetail {
-  driver: Driver;
+/**
+ * EventDetail
+ *
+ * The detail of an event. The `client` is the object that dispatched the
+ * event: a {@linkcode Driver} for driver events and a {@linkcode Client} for
+ * client events.
+ *
+ * @template IClient the dispatching object
+ */
+export interface EventDetail<IClient = Client> {
+  /**
+   * The object that dispatched the event
+   */
+  client: IClient;
 }
-export interface ErrorEventDetail {
-  driver: Driver;
+
+/**
+ * ErrorEventDetail
+ *
+ * The detail of an `error` event.
+ *
+ * @template IClient the dispatching object
+ */
+export interface ErrorEventDetail<IClient = Client>
+  extends EventDetail<IClient> {
+  /**
+   * The error that triggered the event
+   */
   error: DatabaseError;
 }
 
 export class DriverEvent<
   T extends DriverEventType = DriverEventType,
-  D extends EventDetail = T extends "error" ? ErrorEventDetail : EventDetail,
+  D extends EventDetail<Driver> = T extends "error" ? ErrorEventDetail<Driver>
+    : EventDetail<Driver>,
 > extends CustomEvent<T, D> {}
 
 export class ClientEvent<

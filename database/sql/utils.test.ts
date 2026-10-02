@@ -1,82 +1,153 @@
 import { assertEquals } from "@std/assert";
 import {
+  createResultIterableContext,
   getObjectFromRow,
-  mapArrayIterable,
-  mapObjectIterable,
+  type Row,
 } from "./utils.ts";
-import type { DriverQueryNext } from "./driver.ts";
+
+function rows(...rows: Row[]): AsyncGenerator<Row> {
+  return (async function* () {
+    for (const row of rows) {
+      yield row;
+    }
+  })();
+}
 
 Deno.test("getObjectFromRow", async (t) => {
   await t.step("empty row", () => {
-    assertEquals(getObjectFromRow({ columns: [], values: [], meta: {} }), {});
+    assertEquals(getObjectFromRow({ columns: [], values: [] }), {});
   });
 
   await t.step("filled row", () => {
     assertEquals(
-      getObjectFromRow({ columns: ["a", "b"], values: ["c", 1], meta: {} }),
+      getObjectFromRow({ columns: ["a", "b"], values: ["c", 1] }),
       { a: "c", b: 1 },
     );
   });
 
-  await t.step("more columns row", () => {
+  await t.step("more columns than values", () => {
     assertEquals(
-      getObjectFromRow({ columns: ["a", "b"], values: ["c"], meta: {} }),
+      getObjectFromRow({ columns: ["a", "b"], values: ["c"] }),
       { a: "c", b: undefined },
     );
   });
 
-  await t.step("more values row", () => {
+  await t.step("more values than columns", () => {
     assertEquals(
-      getObjectFromRow({ columns: ["a"], values: ["c", 1], meta: {} }),
+      getObjectFromRow({ columns: ["a"], values: ["c", 1] }),
       { a: "c" },
     );
   });
 });
 
-Deno.test("mapArrayIterable", async (t) => {
-  await t.step("empty row", async () => {
-    const itt = async function* () {
-      yield { columns: [], values: [], meta: {} } as DriverQueryNext;
-    };
+Deno.test("createResultIterableContext", async (t) => {
+  await t.step("empty", async () => {
+    const ctx = await createResultIterableContext(rows());
 
-    const actual = await Array.fromAsync(mapArrayIterable(itt()));
-    assertEquals(actual, [[]]);
+    assertEquals(ctx.metadata.columns, []);
+    assertEquals(await ctx.toValues(), []);
   });
 
-  await t.step("filled row", async () => {
-    const itt = async function* () {
-      yield {
-        columns: ["a", "b"],
-        values: ["c", 1],
-        meta: {},
-      } as DriverQueryNext;
-    };
+  await t.step("metadata and toValues", async () => {
+    const ctx = await createResultIterableContext(rows(
+      { columns: ["id", "name"], values: [1, "Alice"] },
+      { columns: ["id", "name"], values: [2, "Bob"] },
+    ));
 
-    const actual = await Array.fromAsync(mapArrayIterable(itt()));
-    assertEquals(actual, [["c", 1]]);
-  });
-});
-
-Deno.test("mapObjectIterable", async (t) => {
-  await t.step("empty row", async () => {
-    const itt = async function* () {
-      yield { columns: [], values: [], meta: {} } as DriverQueryNext;
-    };
-
-    const actual = await Array.fromAsync(mapObjectIterable(itt()));
-    assertEquals(actual, [{}]);
+    assertEquals(ctx.metadata.columns, ["id", "name"]);
+    assertEquals(await ctx.toValues(), [[1, "Alice"], [2, "Bob"]]);
   });
 
-  await t.step("filled row", async () => {
-    const itt = async function* () {
-      yield {
-        columns: ["a", "b"],
-        values: ["c", 1],
-        meta: {},
-      } as DriverQueryNext;
-    };
+  await t.step("toRecords", async () => {
+    const ctx = await createResultIterableContext(rows(
+      { columns: ["id", "name"], values: [1, "Alice"] },
+      { columns: ["id", "name"], values: [2, "Bob"] },
+    ));
 
-    const actual = await Array.fromAsync(mapObjectIterable(itt()));
-    assertEquals(actual, [{ a: "c", b: 1 }]);
+    assertEquals(
+      await ctx.toRecords(),
+      [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }],
+    );
+  });
+
+  await t.step("iteration", async () => {
+    const ctx = await createResultIterableContext(rows(
+      { columns: ["a"], values: ["b"] },
+    ));
+
+    const collected = [];
+    for await (const row of ctx) {
+      collected.push(row.toRecord());
+    }
+
+    assertEquals(collected, [{ a: "b" }]);
+  });
+
+  await t.step("toRecord", async () => {
+    const ctx = await createResultIterableContext(rows(
+      { columns: ["a"], values: ["b"] },
+    ));
+
+    assertEquals(ctx.toRecord(["c"]), { a: "c" });
+  });
+
+  await t.step("re-iteration replays buffered rows", async () => {
+    const ctx = await createResultIterableContext(rows(
+      { columns: ["a"], values: ["b"] },
+      { columns: ["a"], values: ["c"] },
+    ));
+
+    const first = [];
+    for await (const row of ctx) {
+      first.push(row.toRecord());
+    }
+
+    const second = [];
+    for await (const row of ctx) {
+      second.push(row.toRecord());
+    }
+
+    assertEquals(first, [{ a: "b" }, { a: "c" }]);
+    assertEquals(second, [{ a: "b" }, { a: "c" }]);
+  });
+
+  await t.step("collect after partial iteration drains the rest", async () => {
+    const ctx = await createResultIterableContext(rows(
+      { columns: ["a"], values: ["b"] },
+      { columns: ["a"], values: ["c"] },
+    ));
+
+    for await (const row of ctx) {
+      assertEquals(row.toRecord(), { a: "b" });
+      break;
+    }
+
+    assertEquals(await ctx.toValues(), [["b"], ["c"]]);
+  });
+
+  await t.step("collect twice returns the same rows", async () => {
+    const ctx = await createResultIterableContext(rows(
+      { columns: ["a"], values: ["b"] },
+    ));
+
+    assertEquals(await ctx.toValues(), [["b"]]);
+    assertEquals(await ctx.toValues(), [["b"]]);
+  });
+
+  await t.step("async dispose stops fetching", async () => {
+    const ctx = await createResultIterableContext(rows(
+      { columns: ["a"], values: ["b"] },
+      { columns: ["a"], values: ["c"] },
+    ));
+
+    for await (const row of ctx) {
+      assertEquals(row.toRecord(), { a: "b" });
+      break;
+    }
+
+    await ctx[Symbol.asyncDispose]();
+
+    // Fetching has stopped, but the buffered row can still be replayed.
+    assertEquals(await ctx.toValues(), [["b"]]);
   });
 });

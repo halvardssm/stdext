@@ -1,344 +1,203 @@
 # @stdext/database/sql
 
-The SQL package contains a standard interface for SQL based databases
+The SQL package contains a standard interface for SQL based databases.
 
 Inspired by [rust sqlx](https://docs.rs/sqlx/latest/sqlx/index.html) and
-[go sql](https://pkg.go.dev/database/sql).
+[go sql](https://pkg.go.dev/database/sql). The full specification is available
+in [RFC_SQL.md](../RFC_SQL.md).
 
 The goal for this package is to have a standard interface for SQL-like database
-clients that can be used in Deno, Node and other JS runtimes.
+clients that can be used in Deno, Node and other JS runtimes. The entrypoint is
+not intended to be directly used in applications, but is meant to be implemented
+by database drivers.
+
+## Design
+
+The package defines three layers, see
+[the specification](../RFC_SQL.md#specification) for the details:
+
+- **Core types**: `QueryParameters`, `Row` and the `ResultIterableContext`
+  result model
+- **Capability interfaces**: small, independent interfaces such as
+  `Connectable`, `Queryable`, `Preparable`, `Transactionable` and `Poolable`
+  (see [core.ts](./core.ts))
+- **Profiles**: the classes users interact with, composed from the capabilities:
+  `Driver` (a single connection), `Client` (a pooled client), `PoolClient`,
+  `Transaction` and `PreparedStatement`
+
+Key properties of the design:
+
+- All methods are async
+- Pooling is implicit: a `Client` always manages a connection pool, tuned with
+  the `poolOptions` in its constructor options. It defaults to a single
+  connection (`maxSize` of `1`) and becomes a connection pool when `maxSize` is
+  raised
+- The query surface is minimal: `execute` for statements and `query` for queries
+  returning a `ResultIterableContext`
+- Everything holding a resource (`Client`, `PoolClient`, `Transaction`,
+  `PreparedStatement`, and the query result context) is `AsyncDisposable` and
+  works with `await using`
 
 ## Usage
 
-Minimal usage example:
-
 ```ts
-await using client = new Client(connectionUrl, connectionOptions);
+await using client = new Client(connectionUrl);
 await client.connect();
 await client.execute("SOME INSERT QUERY");
-const res = await client.query("SELECT * FROM table");
-```
 
-Both the `Client` and `ClientPool` need to be connected using `connect()` before
-the database can be queried. At the end of the script, this connection also
-needs to be cleaned up by calling `close()`. If using the new
-[AsyncDispose](https://github.com/tc39/proposal-explicit-resource-management),
-there is no need to call `close()` manually as shown in the example above.
-
-See the [examples](#examples) section for more usage.
-
-### Client
-
-The Client provides a database client with the following methods (see
-[Client](./client.ts)):
-
-- `connect` (See [Driver](./driver.ts)): Creates a connection to the database
-- `close` (See [Driver](./driver.ts)): Closes the connection to the database
-- `execute` (See [Queriable](./core.ts)): Executes a SQL statement
-- `query` (See [Queriable](./core.ts)): Queries the database and returns an
-  array of object
-- `queryOne` (See [Queriable](./core.ts)): Queries the database and returns at
-  most one entry as an object
-- `queryMany` (See [Queriable](./core.ts)): Queries the database with an async
-  generator and yields each entry as an object. This is good for when you want
-  to iterate over a massive amount of rows.
-- `queryArray` (See [Queriable](./core.ts)): Queries the database and returns an
-  array of arrays
-- `queryOneArray` (See [Queriable](./core.ts)): Queries the database and returns
-  at most one entry as an array
-- `queryManyArray` (See [Queriable](./core.ts)): Queries the database with an
-  async generator and yields each entry as an array. This is good for when you
-  want to iterate over a massive amount of rows.
-- `sql` (See [Queriable](./core.ts)): Allows you to create a query using
-  template literals, and returns the entries as an array of objects. This is a
-  wrapper around `query`
-- `sqlArray` (See [Queriable](./core.ts)): Allows you to create a query using
-  template literals, and returns the entries as an array of arrays. This is a
-  wrapper around `queryArray`
-- `prepare` (See [Preparable](./core.ts)): Returns a prepared statement class
-  that contains a subset of the Queriable functions (see
-  [PreparedQueriable](./core.ts))
-- `beginTransaction` (See [Transactionable](./core.ts)): Returns a transaction
-  class that contains implements the queriable functions, as well as transaction
-  related functions (see [TransactionQueriable](./core.ts))
-- `transaction` (See [Transactionable](./core.ts)): A wrapper function for
-  transactions, handles the logic of beginning, committing and rollback a
-  transaction.
-
-#### Events
-
-The following events can be subscribed to according to the specs (see
-[events.ts](./events.ts)):
-
-- `connect`: Gets dispatched when a connection is established
-- `close`: Gets dispatched when a connection is about to be closed
-- `error`: Gets dispatched when an error is triggered
-
-### ClientPool
-
-The ClientPool provides a database client pool (a pool of clients) with the
-following methods (see [ClientPool](./pool.ts)):
-
-- `connect` (See [Driver](./driver.ts)): Creates the connection classes and adds
-  them to a connection pool, and optionally connects them to the database
-- `close` (See [Driver](./driver.ts)): Closes all connections in the pool
-- `acquire` (See [Poolable](./core.ts)): Retrieves a [PoolClient](./pool.ts) (a
-  subset of [Client](#client)), and connects if not already connected
-
-#### Events
-
-The following events can be subscribed to according to the specs (see
-[events.ts](./events.ts)):
-
-- `connect`: Gets dispatched when a connection is established for a pool client
-  (with lazy initialization, it will only get triggered once a connection is
-  popped and activated)
-- `close`: Gets dispatched when a connection is about to be closed
-- `error`: Gets dispatched when an error is triggered
-- `acquire`: Gets dispatched when a connection is acquired from the pool
-- `release`: Gets dispatched when a connection is released back to the pool
-
-### Examples
-
-Async dispose
-
-```ts
-await using client = new Client(connectionUrl, connectionOptions);
-await client.connect();
-await client.execute("SOME INSERT QUERY");
-const res = await client.query("SELECT * FROM table");
-```
-
-Using const (requires manual close at the end)
-
-```ts
-const client = new Client(connectionUrl, connectionOptions);
-await client.connect();
-await client.execute("SOME INSERT QUERY");
-const res = await client.query("SELECT * FROM table");
-await client.close();
-```
-
-Query objects
-
-```ts
-const res = await client.query("SELECT * FROM table");
-console.log(res);
+const ctx = await client.query("SELECT * FROM table");
+console.log(await ctx.toRecords());
 // [{ col1: "some value" }]
 ```
 
-Query one object
+Both the `Client` and the `Driver` need to be connected using `connect()` before
+the database can be queried. The connection is cleaned up by calling `close()`,
+or automatically at the end of the scope when using
+[AsyncDispose](https://github.com/tc39/proposal-explicit-resource-management).
+
+### Queries
+
+The query methods are defined in [core.ts](./core.ts) (`Queryable`):
+
+- `execute(sql, params?, options?)`: Executes a SQL statement, returns the
+  number of affected rows if known
+- `query(sql, params?, options?)`: Queries the database and returns a
+  `ResultIterableContext`, which is both an async iterable of rows and provides
+  `toValues()` and `toRecords()` for collecting the rows
 
 ```ts
-const res = await client.queryOne("SELECT * FROM table");
-console.log(res);
-// { col1: "some value" }
-```
+const ctx = await client.query("SELECT * FROM table");
 
-Query many objects with an iterator
-
-```ts
-const res = Array.fromAsync(client.queryMany("SELECT * FROM table"));
-console.log(res);
-// [{ col1: "some value" }]
-
-// OR
-
-for await (const iterator of client.queryMany("SELECT * FROM table")) {
-  console.log(res);
-  // { col1: "some value" }
+// Iterate lazily
+for await (const row of ctx) {
+  console.log(row.toRecord());
 }
+
+// Or collect
+console.log(await ctx.toValues());
+console.log(await ctx.toRecords());
 ```
 
-Query as an array
+The context buffers rows as they are lazily fetched, so it can be iterated and
+collected in any combination. Note that the buffered rows are kept in memory, so
+for a massive amount of rows, iterate the context once instead of collecting it.
+The context is `AsyncDisposable`: disposing stops fetching and releases the
+underlying connection, while rows already fetched remain replayable.
+
+### Prepared statements
+
+Prepared statements are created with `prepare` (`Preparable`):
 
 ```ts
-const res = await client.queryArray("SELECT * FROM table");
-console.log(res);
-// [[ "some value" ]]
+await using stmt = await client.prepare("SELECT * FROM table WHERE id = ?");
+const ctx = await stmt.query([id]);
+console.log(await ctx.toRecords());
+// disposed (deallocated) at the end of the scope
 ```
 
-Query one as an array
+### Transactions
+
+Transactions are created with `beginTransaction` or the `transaction` wrapper
+(`Transactionable`):
 
 ```ts
-const res = await client.queryOneArray("SELECT * FROM table");
-console.log(res);
-// [[ "some value" ]]
+await using tx = await client.beginTransaction();
+await tx.execute("SOME INSERT QUERY");
+await tx.commitTransaction();
+// if the scope ends without a commit, the transaction is rolled back
 ```
 
-Query many as array with an iterator
-
 ```ts
-const res = Array.fromAsync(client.queryManyArray("SELECT * FROM table"));
-console.log(res);
-// [[ "some value" ]]
-
-// OR
-
-for await (const iterator of client.queryManyArray("SELECT * FROM table")) {
-  console.log(res);
-  // [ "some value" ]
-}
-```
-
-Query with template literals as an object
-
-```ts
-const res = await client.sql`SELECT * FROM table where id = ${id}`;
-console.log(res);
-// [{ col1: "some value" }]
-```
-
-Query with template literals as an array
-
-```ts
-const res = await client.sqlArray`SELECT * FROM table where id = ${id}`;
-console.log(res);
-// [[ "some value" ]]
-```
-
-Transaction
-
-```ts
-const transaction = await client.beginTransaction();
-await transaction.execute("SOME INSERT QUERY");
-await transaction.commitTransaction();
-// `transaction` can no longer be used, and a new transaction needs to be created
-
-// OR
-
-await using transaction = await client.beginTransaction();
-await transaction.execute("SOME INSERT QUERY");
-// If commit is not called and the resource is cleaned up, rollback will be called automatically
-```
-
-Transaction wrapper
-
-```ts
-const res = await client.transaction(async (t) => {
-  await t.execute("SOME INSERT QUERY");
-  return t.query("SOME SELECT QUERY");
+const result = await client.transaction(async (tx) => {
+  await tx.execute("SOME INSERT QUERY");
+  return (await tx.query("SOME SELECT QUERY")).toRecords();
 });
-console.log(res);
-// [{ col1: "some value" }]
 ```
 
-Prepared statement
+Transactions can be nested: calling `beginTransaction` or `transaction` on an
+active transaction creates a savepoint. Committing a nested transaction releases
+the savepoint, and rolling it back rolls back to the savepoint, leaving the
+enclosing transaction active. Nesting only applies on the same connection —
+`client.transaction()` inside a transaction acquires a separate connection and
+starts an independent transaction.
+
+### Pooling
+
+A `Client` always manages a pool of connections, tuned with `poolOptions`:
+
+- `lazyInitialization` (default `false`): connections are only created when
+  acquired and no idle connection is available
+- `maxSize` (default `1`): the maximum amount of connections. With the default,
+  the client behaves like a single connection; it becomes a connection pool when
+  raised
+
+Query methods automatically acquire a pool client and release it when the
+operation completes. Because the `query` result context is lazy, its pooled
+connection is held until the buffered result is complete or the context is
+disposed. `beginTransaction` and `prepare` hold a pooled connection until the
+transaction is finished or the prepared statement is deallocated. A pool client
+can also be held manually:
 
 ```ts
-const prepared = await db.prepare("SOME PREPARED STATEMENT");
-await prepared.query([...params]);
-console.log(res);
-// [{ col1: "some value" }]
-await prepared.dealocate();
-// `prepared` can no longer be used, and a new prepared statement needs to be created
-
-// OR
-
-await using prepared = await db.prepare("SOME PREPARED STATEMENT");
-await prepared.query([...params]);
-console.log(res);
-// [{ col1: "some value" }]
-// If dealocate is not called and the resource is cleaned up, dealocate will be called automatically
+await using poolClient = await client.acquire();
+await poolClient.execute("SOME INSERT QUERY");
+// released back to the pool at the end of the scope
 ```
+
+### Events
+
+The following events can be subscribed to (see [events.ts](./events.ts)):
+
+- `connect`: dispatched when a connection is established
+- `close`: dispatched when a connection is about to be closed
+- `error`: dispatched when an error is triggered
+- `acquire` / `release` (client only): dispatched when a connection is acquired
+  from or released back to the pool
+
+All events carry a `client` detail with the object that dispatched the event;
+`error` events additionally carry the `error`.
 
 ## Implementation
 
-> This section is for implementing the interface for database drivers. For
-> general usage, read the [usage](#usage) section.
+> This section is for implementing the interface for database drivers.
 
 To be fully compliant with the specs, you will need to implement the following
-classes for your database driver:
+classes for your database driver, see the
+[compliance matrix](../RFC_SQL.md#profiles-and-compliance-matrix):
 
-- `Driver` ([Driver](./driver.ts)): This represents the connection to the
-  database. This should preferably only contain the functionality of containing
-  a connection, and provide a minimum set of methods to be used to call the
-  database
-- `PreparedStatement` ([PreparedStatement](./core.ts)): This represents a
-  prepared statement. All queriable methods must be implemented
-- `Transaction` ([Transaction](./core.ts)): This represents a transaction. All
-  queriable methods must be implemented
-- `Client` ([Client](./client.ts)): This represents a database client
-- `ClientPool` ([ClientPool](./pool.ts)): This represents a pool of clients
-- `PoolClient` ([PoolClient](./pool.ts)): This represents a client to be
-  provided by a pool
+- `Driver` ([core.ts](./core.ts)): a single connection to the database
+- `PreparedStatement` ([core.ts](./core.ts))
+- `Transaction` ([core.ts](./core.ts))
+- `Client` ([core.ts](./core.ts)): the pooled client
+- `PoolClient` ([core.ts](./core.ts))
 
-It is also however advisable to create additional helper classes for easier
-inheritance.
+The constructors follow the standard signature
+`(connectionUrl: string | URL, options?: Options)`.
 
-There are also some utility functions available in [utils.ts](./utils.ts) to
-work with the iterables.
+Helper utilities for driver authors are available in [utils.ts](./utils.ts):
+
+- `Row`: the low-level row protocol
+- `getObjectFromRow(row)`: maps a row to a record
+- `createResultIterableContext(rows)`: builds a `ResultIterableContext` from a
+  stream of rows
 
 ### Testing
 
-See the bottom of [test.ts](./test.ts) for a minimum but functional example of
-how to implement these interfaces into intermediate classes.
-
-### Inheritance graph
-
-Here is an overview of the inheritance and flow of the different interfaces. In
-most cases, these are the classes and the inheritance graph that should be
-implemented.
-
-![inheritance flow](./_assets/inheritance_flowchart.jpg)
-
-### Constructor Signature
-
-The constructor also must follow a strict signature.
-
-The constructor for both the Client and the ClientPool follows the same
-signature:
-
-1. `connectionUrl`: string | URL
-2. `options`?: ConnectionOptions & QueryOptions
-
-As `ConnectionOptions` and `QueryOptions` can be extended, the options can be
-used to customize the settings, thus having a standard 2 argument signature of
-the constructor.
-
-> The current way to specify a constructor using interfaces in TS, is to use a
-> combination of `implements` and `satisfies`. This will be updated if anything
-> changes.
-
-#### Client
-
-The Client must have a constructor signature as follows.
+The `@stdext/database/sql/testing` entrypoint contains a conformance test suite.
+A driver that passes the suite is compliant with the specification:
 
 ```ts
-class DbClient extends Transactionable implements Client<...> { // Transactionable is a class implementing `Transactionable`
-  ...
-  // The constructor now has to satisfy the following signature
-  constructor(
-    connectionUrl: string | URL,
-    options: Client["options"],
-  ) {
-    ...
-  }
-  ...
-} satisfies ClientConstructor<...>;
+import { testClientIntegration } from "@stdext/database/sql/testing";
 
-// We need to also export the instance type of the client
-export type Client = InstanceType<typeof Client>;
+Deno.test("MyClient conformance", async (t) => {
+  await testClientIntegration(t, MyClient, [connectionUrl, options], {
+    execute: "CREATE TABLE users (id INTEGER, name TEXT)",
+    query: "SELECT id, name FROM users",
+    columns: ["id", "name"],
+    count: 3,
+  });
+});
 ```
 
-#### ClientPool
-
-The ClientPool must have a constructor following the signature specified by
-`ClientPoolConstructor`.
-
-```ts
-const ClientPool = class extends Transactionable implements ClientPool<...> { // Transactionable is a class implementing `Transactionable`
-  ...
-  // The constructor now has to satisfy `ClientPoolConstructor`
-  constructor(
-    connectionUrl: string | URL,
-    options: ConnectionOptions & QueryOptions = {},
-  ) {
-    ...
-  }
-  ...
-} satisfies ClientPoolConstructor<...>;
-
-// We need to also export the instance type of the client pool
-export type ClientPool = InstanceType<typeof ClientPool>;
-```
+See [conformance.test.ts](./conformance.test.ts) for a complete example
+implementation of all the interfaces.
