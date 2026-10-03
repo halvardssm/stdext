@@ -18,14 +18,10 @@ import type {
   DriverTransaction,
   ExecuteResult,
   QueryParameters,
-} from "../../sql/core.ts";
-import {
-  ConnectionError,
-  QueryError,
-  TransactionError,
-} from "../../sql/errors.ts";
-import { sql } from "../../sql/template.ts";
-import type { TestSql } from "../../sql/testing.ts";
+} from "./core.ts";
+import { ConnectionError, QueryError, TransactionError } from "./errors.ts";
+import { sql } from "./template.ts";
+import type { TestSql } from "./testing.ts";
 
 export const memorySql: TestSql = {
   execute: "CREATE TABLE IF NOT EXISTS users (id INTEGER, name TEXT)",

@@ -1,4 +1,4 @@
-import { MemoryDriver, memorySql } from "../drivers/_internal_memory/mod.ts";
+import { MemoryDriver, memorySql } from "./_test_utils.ts";
 import { SqlClient } from "./client.ts";
 import { testClient, testDriver } from "./testing.ts";
 

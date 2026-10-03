@@ -6,7 +6,7 @@ import {
   MemoryDriver,
   type MemoryDriverOptions,
   memorySql,
-} from "../drivers/_internal_memory/mod.ts";
+} from "./_test_utils.ts";
 import { SqlClient } from "./client.ts";
 import type { ClientOptions } from "./core.ts";
 import { ConnectionError, QueryError, TransactionError } from "./errors.ts";
