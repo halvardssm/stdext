@@ -8,7 +8,7 @@
     "@std/collections": "jsr:@std/collections@^1",
     "@std/crypto": "jsr:@std/crypto@^1",
     "@std/encoding": "jsr:@std/encoding@^1",
-    "@std/fs": "jsr:@std/fs@^1.0.24",
+    "@std/fs": "jsr:@std/fs@^1",
     "@std/json": "jsr:@std/json@^1",
     "@std/path": "jsr:@std/path@^1",
     "@std/toml": "jsr:@std/toml@^1",
