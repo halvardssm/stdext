@@ -31,10 +31,24 @@ export type CacheFileOptions = {
 /**
  * Downloads a file from a URL and caches it locally
  *
+ * With the default cache control, the file is only downloaded when it does
+ * not exist locally yet.
+ *
  * @param url the URL to download the file from
  * @param path the local path to cache the file
  * @param options {@link CacheFileOptions} cache file options
  * @returns the absolute path to the cached file
+ *
+ * @example
+ * ```ts ignore
+ * import { cacheFile } from "@stdext/fs/cache";
+ *
+ * // Downloads the file on the first call, and reuses it afterwards.
+ * const readme = await cacheFile(
+ *   "https://example.com/README.md",
+ *   "./cache/README.md",
+ * );
+ * ```
  */
 export async function cacheFile(
   url: string | URL,
@@ -80,6 +94,14 @@ export async function cacheFile(
 /**
  * Gets the Deno cache directory path
  *
+ * The directory is resolved in this order:
+ *
+ * - the `DENO_DIR` environment variable, when set
+ * - `$HOME/Library/Caches/deno` on macOS
+ * - `$USERPROFILE/deno` on Windows
+ * - `$HOME/.cache/deno` on other systems, or `$XDG_CACHE_HOME/deno` when
+ *   `HOME` is not set
+ *
  * @param options {@link DenoCacheDirOptions} deno cache directory options
  * @returns the path to the deno cache directory
  */
@@ -121,6 +143,11 @@ export async function denoCacheDir(
 
 /**
  * Gets the user's home directory path
+ *
+ * The home directory is the `USERPROFILE` environment variable on Windows,
+ * and otherwise the `HOME` environment variable, falling back to
+ * `XDG_CACHE_HOME` when `HOME` is not set, so that the cache directory can
+ * still be resolved.
  *
  * @returns the path to the user's home directory
  * @throws {TypeError} when home directory cannot be determined

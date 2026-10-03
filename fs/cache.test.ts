@@ -3,8 +3,9 @@ import {
   assertEquals,
   assertNotEquals,
   assertRejects,
+  assertThrows,
 } from "@std/assert";
-import { cacheFile, denoCacheDir } from "./cache.ts";
+import { cacheFile, denoCacheDir, homeDir } from "./cache.ts";
 import { exists } from "@std/fs";
 import { join } from "@std/path";
 
@@ -17,142 +18,175 @@ const denoWithWritableBuild = Deno as unknown as {
   build: typeof Deno.build;
 };
 
+const ENV_VARS = ["DENO_DIR", "HOME", "XDG_CACHE_HOME", "USERPROFILE"];
+
+/**
+ * Run a function with a mocked os and environment, restoring both afterwards.
+ * All of the environment variables used for cache dir detection are cleared
+ * first, and only the given ones are set.
+ */
+async function withMockedEnvironment(
+  os: typeof Deno.build.os,
+  env: Record<string, string>,
+  fn: () => Promise<void> | void,
+): Promise<void> {
+  const originalBuild = Deno.build;
+  const originalEnv = new Map(
+    ENV_VARS.map((name) => [name, Deno.env.get(name)]),
+  );
+  try {
+    for (const name of ENV_VARS) Deno.env.delete(name);
+    denoWithWritableBuild.build = { ...originalBuild, os };
+    for (const [name, value] of Object.entries(env)) Deno.env.set(name, value);
+    await fn();
+  } finally {
+    denoWithWritableBuild.build = originalBuild;
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+}
+
 Deno.test("denoCacheDir", async (t) => {
   await t.step(
     "returns DENO_DIR env var when set",
-    async () => {
-      const originalDenoDir = Deno.env.get("DENO_DIR");
-
-      try {
-        // Set DENO_DIR
-        Deno.env.set("DENO_DIR", "/custom/deno/cache");
-
-        const result = await denoCacheDir();
-        assertEquals(result, "/custom/deno/cache");
-      } finally {
-        // Restore original DENO_DIR
-        if (originalDenoDir) {
-          Deno.env.set("DENO_DIR", originalDenoDir);
-        } else {
-          Deno.env.delete("DENO_DIR");
-        }
-      }
-    },
+    async () =>
+      await withMockedEnvironment(
+        "linux",
+        { DENO_DIR: "/custom/deno/cache" },
+        async () => {
+          assertEquals(await denoCacheDir(), "/custom/deno/cache");
+        },
+      ),
   );
 
   await t.step(
-    "returns default cache dir",
-    async () => {
-      const originalDenoDir = Deno.env.get("DENO_DIR");
-      const originalHome = Deno.env.get("HOME");
-      const originalXdgCache = Deno.env.get("XDG_CACHE_HOME");
-      const originalBuild = Deno.build;
+    "returns the default cache dir",
+    async () =>
+      await withMockedEnvironment("linux", { HOME: "/home/test" }, async () => {
+        assertEquals(await denoCacheDir(), "/home/test/.cache/deno");
+      }),
+  );
 
-      try {
-        // Mock Linux environment
-        Deno.env.delete("DENO_DIR");
-        Deno.env.set("HOME", "/home/test");
-        Deno.env.delete("XDG_CACHE_HOME");
+  await t.step(
+    "uses the deno dir directly on windows",
+    async () =>
+      await withMockedEnvironment(
+        "windows",
+        { USERPROFILE: "/users/test" },
+        async () => {
+          assertEquals(await denoCacheDir(), join("/users/test", "deno"));
+        },
+      ),
+  );
 
-        // Override os detection
-        denoWithWritableBuild.build = { ...originalBuild, os: "linux" };
+  await t.step(
+    "uses the application support dir on darwin",
+    async () =>
+      await withMockedEnvironment(
+        "darwin",
+        { HOME: "/home/test" },
+        async () => {
+          assertEquals(await denoCacheDir(), "/home/test/Library/Caches/deno");
+        },
+      ),
+  );
 
-        const result = await denoCacheDir();
-        assertEquals(result, "/home/test/.cache/deno");
-      } finally {
-        // Restore environment
-        if (originalDenoDir) {
-          Deno.env.set("DENO_DIR", originalDenoDir);
-        }
-        if (originalHome) {
-          Deno.env.set("HOME", originalHome);
-        }
-        if (originalXdgCache) {
-          Deno.env.set("XDG_CACHE_HOME", originalXdgCache);
-        }
-        denoWithWritableBuild.build = originalBuild;
-      }
-    },
+  await t.step(
+    "falls back to XDG_CACHE_HOME without HOME",
+    async () =>
+      await withMockedEnvironment(
+        "linux",
+        { XDG_CACHE_HOME: "/xdg/cache" },
+        async () => {
+          assertEquals(await denoCacheDir(), join("/xdg/cache", "deno"));
+        },
+      ),
   );
 
   await t.step(
     "creates directory when ensure option is true",
     async () => {
-      const originalDenoDir = Deno.env.get("DENO_DIR");
-      const originalHome = Deno.env.get("HOME");
-      const originalBuild = Deno.build;
-
-      const testCacheDir = "./test_deno_cache";
-      const absoluteTestCacheDir =
-        new URL(testCacheDir, import.meta.url).pathname;
-
+      const tempDir = await Deno.makeTempDir();
       try {
-        // Mock environment to use test directory
-        Deno.env.delete("DENO_DIR");
-        Deno.env.set("HOME", absoluteTestCacheDir);
+        await withMockedEnvironment("linux", { HOME: tempDir }, async () => {
+          const expectedPath = join(tempDir, ".cache/deno");
+          assertEquals(await denoCacheDir({ ensure: true }), expectedPath);
 
-        // Override os detection to use default path
-        denoWithWritableBuild.build = { ...originalBuild, os: "linux" };
-
-        const result = await denoCacheDir({ ensure: true });
-        const expectedPath = `${absoluteTestCacheDir}/.cache/deno`;
-        assertEquals(result, expectedPath);
-
-        // Verify directory was created
-        const dirExists = await exists(expectedPath);
-        assert(
-          dirExists,
-          "Directory should be created when ensure option is true",
-        );
-
-        // Clean up
-        await Deno.remove(expectedPath, { recursive: true });
+          assert(
+            await exists(expectedPath),
+            "Directory should be created when ensure option is true",
+          );
+        });
       } finally {
-        // Restore environment
-        if (originalDenoDir) {
-          Deno.env.set("DENO_DIR", originalDenoDir);
-        }
-        if (originalHome) {
-          Deno.env.set("HOME", originalHome);
-        }
-        denoWithWritableBuild.build = originalBuild;
+        await Deno.remove(tempDir, { recursive: true });
       }
     },
   );
 
   await t.step(
     "throws error when throws option is true and directory doesn't exist",
-    async () => {
-      const originalDenoDir = Deno.env.get("DENO_DIR");
-      const originalHome = Deno.env.get("HOME");
-      const originalBuild = Deno.build;
+    async () =>
+      await withMockedEnvironment(
+        "linux",
+        { HOME: "/nonexistent" },
+        async () => {
+          await assertRejects(
+            async () => {
+              await denoCacheDir({ throws: true });
+            },
+            TypeError,
+            "Cache dir not found",
+          );
+        },
+      ),
+  );
+});
 
-      try {
-        // Mock environment
-        Deno.env.delete("DENO_DIR");
-        Deno.env.set("HOME", "/nonexistent");
+Deno.test("homeDir", async (t) => {
+  await t.step(
+    "returns HOME on posix",
+    async () =>
+      await withMockedEnvironment("linux", { HOME: "/home/test" }, () => {
+        assertEquals(homeDir(), "/home/test");
+      }),
+  );
 
-        // Override os detection
-        denoWithWritableBuild.build = { ...originalBuild, os: "linux" };
+  await t.step(
+    "falls back to XDG_CACHE_HOME when HOME is not set",
+    async () =>
+      await withMockedEnvironment(
+        "linux",
+        { XDG_CACHE_HOME: "/xdg/cache" },
+        () => {
+          assertEquals(homeDir(), "/xdg/cache");
+        },
+      ),
+  );
 
-        await assertRejects(
-          async () => {
-            await denoCacheDir({ throws: true });
-          },
+  await t.step(
+    "returns USERPROFILE on windows",
+    async () =>
+      await withMockedEnvironment(
+        "windows",
+        { USERPROFILE: "/users/test" },
+        () => {
+          assertEquals(homeDir(), "/users/test");
+        },
+      ),
+  );
+
+  await t.step(
+    "throws when no home dir can be determined",
+    async () =>
+      await withMockedEnvironment("linux", {}, () => {
+        assertThrows(
+          () => homeDir(),
           TypeError,
-          "Cache dir not found",
+          "Home dir can not be determined",
         );
-      } finally {
-        // Restore environment
-        if (originalDenoDir) {
-          Deno.env.set("DENO_DIR", originalDenoDir);
-        }
-        if (originalHome) {
-          Deno.env.set("HOME", originalHome);
-        }
-        denoWithWritableBuild.build = originalBuild;
-      }
-    },
+      }),
   );
 });
 
