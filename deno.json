@@ -6,6 +6,7 @@
     "@std/assert": "jsr:@std/assert@^1",
     "@std/cli": "jsr:@std/cli@^1",
     "@std/collections": "jsr:@std/collections@^1",
+    "@std/crypto": "jsr:@std/crypto@^1",
     "@std/encoding": "jsr:@std/encoding@^1",
     "@std/fs": "jsr:@std/fs@^1.0.24",
     "@std/json": "jsr:@std/json@^1",

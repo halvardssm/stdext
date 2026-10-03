@@ -1,4 +1,4 @@
-import { encodeBase32 } from "@std/encoding";
+import { encodeBase32 } from "@std/encoding/base32";
 
 /**
  * Generates a cryptographically random secret key.
@@ -31,10 +31,10 @@ export function generateSecretBytes(length: number = 20): Uint8Array {
  * At least `max(6, length)` random bytes are generated, base32-encoded
  * (padding stripped), and the last `length` characters are returned.
  *
- * Note: `@std/encoding`'s `decodeBase32` only accepts strings whose
- * length is a multiple of 8. The default length of `20` does not satisfy
- * that — use a multiple of 8, e.g. `32`, if the secret must round-trip
- * through base32 decoding (as the HOTP/TOTP generators do).
+ * The secret can be used as a key for `generateHotp` and `generateTotp`,
+ * which accept base32 without padding. Note that
+ * base32 strings with a length of 1, 3 or 6 modulo 8 can not be decoded, so
+ * prefer the default, or a multiple of 8.
  *
  * @param length How many characters the secret key should be. Defaults
  * to `20`.
@@ -46,9 +46,8 @@ export function generateSecretBytes(length: number = 20): Uint8Array {
  * import { generateTotp } from "@stdext/crypto/totp";
  * import { assert } from "@std/assert";
  *
- * // A length that is a multiple of 8 round-trips through base32.
- * const secret = generateSecret(32);
- * assert(secret.length === 32);
+ * const secret = generateSecret();
+ * assert(secret.length === 20);
  *
  * // Use it as a TOTP key:
  * const otp = await generateTotp(secret);

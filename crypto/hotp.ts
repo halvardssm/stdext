@@ -1,4 +1,53 @@
-import { decodeBase32 } from "@std/encoding";
+/**
+ * HMAC-based one-time passwords (HOTP), as defined in RFC 4226.
+ *
+ * @example
+ * ```ts
+ * import { generateHotp, verifyHotp } from "@stdext/crypto/hotp";
+ * import { assert } from "@std/assert";
+ *
+ * const key = "OCOMBLGUREYUXFQJIL75FQFCKYFCKLQP";
+ * const otp = await generateHotp(key, 42);
+ * assert(await verifyHotp(otp, key, 42));
+ * ```
+ *
+ * @see {@link https://datatracker.ietf.org/doc/html/rfc4226 | RFC 4226: HOTP Algorithm}
+ *
+ * @module
+ */
+import { timingSafeEqual } from "@std/crypto/timing-safe-equal";
+import { decodeBase32 } from "@std/encoding/base32";
+import { hmac, type HmacHash } from "./hmac.ts";
+
+/**
+ * A one-time password key: either a base32 string, as shown by authenticator
+ * apps, or the raw key bytes.
+ *
+ * Base32 strings are case insensitive, may contain whitespace and may omit
+ * the `=` padding.
+ */
+export type OtpKey = string | BufferSource;
+
+/**
+ * Options for {@linkcode generateHotp} and {@linkcode verifyHotp}.
+ */
+export interface HotpOptions {
+  /**
+   * The number of digits of the password, between 1 and 10.
+   *
+   * @default {6}
+   */
+  digits?: number;
+  /**
+   * The hash function of the HMAC. RFC 4226 uses SHA-1; RFC 6238 also
+   * allows SHA-256 and SHA-512 for TOTP.
+   *
+   * @default {"SHA-1"}
+   */
+  hash?: HmacHash;
+}
+
+const encoder = new TextEncoder();
 
 /**
  * Converts a counter value to a big-endian byte buffer.
@@ -15,37 +64,27 @@ export function counterToBuffer(counter: number): Uint8Array {
 /**
  * Generates an HMAC-SHA1 hash of the key and data.
  *
+ * @deprecated Use {@linkcode hmac} from `@stdext/crypto/hmac` instead:
+ * `hmac("SHA-1", key, data)`.
+ *
  * @ignore
  */
-export async function generateHmacSha1(
+export function generateHmacSha1(
   key: BufferSource,
   data: BufferSource,
 ): Promise<Uint8Array> {
-  const importedKey = await crypto.subtle.importKey(
-    "raw",
-    key,
-    { name: "HMAC", hash: "SHA-1" },
-    false,
-    ["sign"],
-  );
-
-  const signedData = await crypto.subtle.sign(
-    "HMAC",
-    importedKey,
-    data,
-  );
-
-  return new Uint8Array(signedData);
+  return hmac("SHA-1", key, data);
 }
 
 /**
- * Truncates an HMAC-SHA1 value to a numeric one-time password of the given
- * length, zero-padded, using the dynamic truncation of RFC 4226.
+ * Truncates an HMAC value to a numeric one-time password of the given
+ * length, zero-padded, using the dynamic truncation of RFC 4226. The offset
+ * is read from the last byte, so it works for every hash length.
  *
  * @ignore
  */
 export function truncate(value: Uint8Array, length: number): string {
-  const offset = value[19] & 0xf;
+  const offset = value[value.length - 1] & 0xf;
   const code = (value[offset] & 0x7f) << 24 |
     (value[offset + 1] & 0xff) << 16 |
     (value[offset + 2] & 0xff) << 8 |
@@ -55,14 +94,49 @@ export function truncate(value: Uint8Array, length: number): string {
 }
 
 /**
- * Generates a HMAC-based one-time password (HOTP) using the specified key
- * and counter, as defined in RFC 4226.
+ * Decode a key to bytes.
  *
- * @param key A secret key used to generate the HOTP. Can be a string in
- * base32 encoding or a `Uint8Array`.
- * @param counter A counter value used to generate the HOTP. Both sides
- * must agree on it; it should increment with each use.
- * @returns A 6-digit HOTP value.
+ * @ignore
+ */
+export function decodeKey(key: OtpKey): BufferSource {
+  if (typeof key !== "string") return key;
+  const normalized = key.replaceAll(/\s/g, "").toUpperCase();
+  return decodeBase32(
+    normalized.padEnd(Math.ceil(normalized.length / 8) * 8, "="),
+  );
+}
+
+function getDigits(options: HotpOptions | undefined): number {
+  const digits = options?.digits ?? 6;
+  if (!Number.isInteger(digits) || digits < 1 || digits > 10) {
+    throw new RangeError(
+      `Cannot generate one-time password as 'digits' must be an integer between 1 and 10: received ${digits}`,
+    );
+  }
+  return digits;
+}
+
+/**
+ * Compare two one-time passwords in constant time.
+ *
+ * @ignore
+ */
+export function equalOtp(a: string, b: string): boolean {
+  const left = encoder.encode(a);
+  const right = encoder.encode(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+/**
+ * Generates an HMAC-based one-time password (HOTP) from a key and a counter,
+ * as defined in RFC 4226.
+ *
+ * @param key The secret key, as a base32 string or bytes.
+ * @param counter The counter. Both sides must agree on it, and it should
+ * increment with each use.
+ * @param options The number of digits and the hash function.
+ * @returns The one-time password, zero-padded to the number of digits.
+ * @throws {RangeError} If the number of digits is invalid.
  *
  * @example
  * ```ts
@@ -71,40 +145,40 @@ export function truncate(value: Uint8Array, length: number): string {
  *
  * // Same key and counter always produce the same value.
  * assertEquals(await generateHotp("OCOMBLGUREYUXFQJIL75FQFCKYFCKLQP", 0), "187492");
+ * assertEquals(
+ *   await generateHotp("OCOMBLGUREYUXFQJIL75FQFCKYFCKLQP", 0, { digits: 8 }),
+ *   "63187492",
+ * );
  * ```
  *
  * @see {@link https://datatracker.ietf.org/doc/html/rfc4226 | RFC 4226: HOTP Algorithm}
  */
 export async function generateHotp(
-  key: string | Uint8Array,
+  key: OtpKey,
   counter: number,
+  options?: HotpOptions,
 ): Promise<string> {
-  const parsedKey = typeof key === "string" ? decodeBase32(key) : key;
-  const buffer = counterToBuffer(counter);
-
-  const hmac = await generateHmacSha1(
-    new Uint8Array(
-      parsedKey.buffer as ArrayBuffer,
-      parsedKey.byteOffset,
-      parsedKey.byteLength,
-    ) as BufferSource,
-    buffer as BufferSource,
+  const digits = getDigits(options);
+  const mac = await hmac(
+    options?.hash ?? "SHA-1",
+    decodeKey(key),
+    counterToBuffer(counter) as Uint8Array<ArrayBuffer>,
   );
-  return truncate(hmac, 6);
+  return truncate(mac, digits);
 }
 
 /**
- * Verifies a HMAC-based one-time password (HOTP) using the specified key
- * and counter.
+ * Verifies an HMAC-based one-time password (HOTP) against a key and a
+ * counter. The passwords are compared in constant time.
  *
- * The comparison is string-based and rejects mismatches (including
- * different lengths). For rate-limiting against brute force, callers
- * should throttle repeated failures.
+ * For rate-limiting against brute force, callers should throttle repeated
+ * failures.
  *
  * @param otp The one-time password to verify.
- * @param key A secret key used to generate the HOTP. Can be a string in
- * base32 encoding or a `Uint8Array`.
- * @param counter The counter value the password was generated with.
+ * @param key The secret key, as a base32 string or bytes.
+ * @param counter The counter the password was generated with.
+ * @param options The number of digits and the hash function, which must
+ * match the ones the password was generated with.
  * @returns `true` if the password matches, `false` otherwise.
  *
  * @example
@@ -120,8 +194,9 @@ export async function generateHotp(
  */
 export async function verifyHotp(
   otp: string,
-  key: string | Uint8Array,
+  key: OtpKey,
   counter: number,
+  options?: HotpOptions,
 ): Promise<boolean> {
-  return otp === await generateHotp(key, counter);
+  return equalOtp(otp, await generateHotp(key, counter, options));
 }

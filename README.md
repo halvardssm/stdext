@@ -49,7 +49,7 @@ console.log(dump(buffer));
 - [collections](https://jsr.io/@stdext/collections): The collections package
   contains commonly used utilities and structures
 - [crypto](https://jsr.io/@stdext/crypto): The crypto package contains utility
-  for crypto and hashing
+  for crypto, hashing, HMAC and SCRAM authentication
 - [database](https://jsr.io/@stdext/database): The database package contains
   interfaces and helpers for interacting with databases
 - [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
