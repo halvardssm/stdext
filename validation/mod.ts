@@ -1,45 +1,42 @@
 /**
- * The `@stdext/validation` package.
- *
- * Schema building and validation on top of the
+ * The `@stdext/validation` package: schemas that implement both
  * {@link https://standardschema.dev | Standard Schema} and
- * {@link https://standardschema.dev/#json-schema | Standard JSON Schema}
- * specifications:
+ * {@link https://standardschema.dev/#json-schema | Standard JSON Schema}.
  *
- * - `./json_schema.ts` — builders (`string`, `number`, `object`, ...) that
- *   produce Standard Schema entities carrying their own JSON Schema
- *   representation
- * - `./validator.ts` — `validate`, `parse` and their async variants for
- *   any Standard Schema entity
- * - `./utils.ts` — type guards and helpers for working with Standard
- *   Schema values
+ * - {@linkcode createSchema} builds a schema from a `validate` function and
+ *   its JSON Schema. The input type, output type and kind are inferred.
+ * - A schema works with any consumer of either standard (validators, form
+ *   libraries, OpenAPI generators) and can be nested in other schemas.
+ * - `validate` may be async: a schema whose `validate` returns a promise is
+ *   async.
+ * - `@stdext/validation/core` exports the same, for libraries that build their
+ *   own schemas on top.
  *
  * @example
  * ```ts
- * import { object, parse, string, validate } from "@stdext/validation";
- * import { assert, assertThrows } from "@std/assert";
+ * import { createSchema } from "@stdext/validation";
+ * import { assertEquals } from "@std/assert";
  *
- * const person = object({
- *   properties: { name: string() },
- *   required: ["name"],
+ * const string = createSchema("string", {
+ *   validate: (value) =>
+ *     typeof value === "string"
+ *       ? { value }
+ *       : { issues: [{ message: "Expected a string" }] },
+ *   jsonSchema: {
+ *     input: () => ({ type: "string" }),
+ *     output: () => ({ type: "string" }),
+ *   },
  * });
+ * // Schema<string, string, "string">
  *
- * const result = validate(person, { name: "Alice" });
- * assert(!("issues" in result));
- *
- * assertThrows(() => parse(person, {}));
+ * assertEquals(string["~standard"].validate("a"), { value: "a" });
+ * assertEquals(string["~standard"].validate(1), {
+ *   issues: [{ message: "Expected a string" }],
+ * });
  * ```
  *
  * @module
  */
 
-export * from "./validator.ts";
-export * from "./json_schema.ts";
-export {
-  getStandardJSONSchemaV1Input,
-  getStandardJSONSchemaV1Output,
-  isEmptyObject,
-  isEmptyPlainObject,
-  isObject,
-  isStandardSchemaV1,
-} from "./utils.ts";
+export * from "./core.ts";
+export * from "./utils.ts";

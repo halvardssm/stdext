@@ -3,10 +3,6 @@
   "name": "@stdext/validation",
   "exports": {
     ".": "./mod.ts",
-    "./validator": "./validator.ts",
-    "./json-schema": "./json_schema.ts",
-    "./keywords": "./keywords.ts",
-    "./utils": "./utils.ts",
-    "./fluent": "./fluent/mod.ts"
+    "./core": "./core.ts"
   }
 }

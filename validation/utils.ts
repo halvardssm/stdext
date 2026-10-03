@@ -1,25 +1,326 @@
-import type { JSONSchema } from "@stdext/json/json-schema/2020-12";
+/**
+ * Helpers for working with any
+ * {@link https://standardschema.dev | Standard Schema}, not only the schemas
+ * made with `createSchema`:
+ *
+ * - {@linkcode validate}, {@linkcode validateAsync}, {@linkcode parse} and
+ *   {@linkcode parseAsync} run a schema and return the result or throw,
+ * - {@linkcode toJSONSchema} gets the JSON Schema of a Standard JSON Schema,
+ * - {@linkcode isStandardSchemaV1} and {@linkcode isStandardJSONSchemaV1} are
+ *   type guards for the two standards,
+ * - {@linkcode stringify} formats values for messages.
+ *
+ * @example
+ * ```ts
+ * import { z } from "@zod/zod";
+ * import { parse, validate } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const User = z.object({ name: z.string() });
+ *
+ * assertEquals(validate(User, { name: "Alice" }), {
+ *   value: { name: "Alice" },
+ * });
+ * assertEquals(parse(User, { name: "Alice" }), { name: "Alice" });
+ * ```
+ *
+ * @module
+ */
+
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "@standard-schema/spec";
-import type { Writeable } from "@stdext/types";
+import { SchemaError } from "@standard-schema/utils";
 
 /**
- * Converts a value to a string representation.
- * Handles primitive types directly and uses JSON.stringify for objects.
+ * Validates input against a StandardSchema
+ *
+ * Support both sync and async validate methods according to spec
+ *
+ * @template S - The schema type extending StandardSchemaV1
+ * @param schema - The schema to validate against
+ * @param input - The input data to validate
+ * @param options - Optional validation options specific to the schema
+ * @returns A validation result or a Promise of a validation result
+ *
+ * @example
+ * ```ts
+ * import { z } from "@zod/zod";
+ * import { validateAsync } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const mySchema = z.object({ name: z.string() });
+ *
+ * const result = await validateAsync(mySchema, { name: "Alice" });
+ * assertEquals(result, { value: { name: "Alice" } });
+ * ```
+ */
+export function validateAsync<S extends StandardSchemaV1>(
+  schema: S | boolean,
+  input: StandardSchemaV1.InferInput<S> | unknown,
+  options?: Parameters<S["~standard"]["validate"]>[1],
+):
+  | StandardSchemaV1.Result<StandardSchemaV1.InferOutput<S>>
+  | Promise<StandardSchemaV1.Result<StandardSchemaV1.InferOutput<S>>> {
+  if (schema === true) return { value: input };
+  if (schema === false) {
+    return {
+      issues: [{
+        message:
+          `Schema defines the property as false, this will always fail: ${
+            stringify(input)
+          }`,
+      }],
+    };
+  }
+
+  if (!isStandardSchemaV1(schema)) {
+    return { issues: [{ message: "The input is not a valid StandardSchema" }] };
+  }
+  return schema["~standard"].validate(input, options);
+}
+
+/**
+ * Validates input against a StandardSchema synchronously.
+ *
+ * @template S - The schema type extending StandardSchemaV1
+ * @param schema - The schema to validate against
+ * @param input - The input data to validate
+ * @param options - Optional validation options specific to the schema
+ * @returns A validation result
+ * @throws TypeError if the schema validation is asynchronous
+ *
+ * @example
+ * ```ts
+ * import { z } from "@zod/zod";
+ * import { validate } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const mySchema = z.object({ name: z.string() });
+ *
+ * const result = validate(mySchema, { name: "Alice" });
+ * assertEquals(result, { value: { name: "Alice" } });
+ *
+ * assertEquals(validate(mySchema, { name: 1 }).issues?.[0].path, ["name"]);
+ * ```
+ */
+export function validate<S extends StandardSchemaV1>(
+  schema: S | boolean,
+  input: StandardSchemaV1.InferInput<S> | unknown,
+  options?: Parameters<S["~standard"]["validate"]>[1],
+): StandardSchemaV1.Result<StandardSchemaV1.InferOutput<S>> {
+  const result = validateAsync(schema, input, options);
+  if (result instanceof Promise) {
+    throw new TypeError("Schema validation must be synchronous");
+  }
+  return result;
+}
+
+/**
+ * Validates and parses input against a StandardSchema asynchronously.
+ *
+ * @template S - The schema type extending StandardSchemaV1
+ * @param schema - The schema to validate against
+ * @param input - The input data to validate and parse
+ * @param options - Optional validation options specific to the schema
+ * @returns A Promise resolving to the parsed output value
+ * @throws SchemaError if validation fails
+ *
+ * @example
+ * ```ts
+ * import { z } from "@zod/zod";
+ * import { parseAsync } from "./utils.ts";
+ * import { SchemaError } from "@standard-schema/utils";
+ * import { assertEquals, assertRejects } from "@std/assert";
+ *
+ * const mySchema = z.object({ name: z.string() });
+ *
+ * assertEquals(await parseAsync(mySchema, { name: "Alice" }), {
+ *   name: "Alice",
+ * });
+ * await assertRejects(
+ *   () => parseAsync(mySchema, { name: 1 }),
+ *   SchemaError,
+ * );
+ * ```
+ */
+export async function parseAsync<S extends StandardSchemaV1>(
+  schema: S | boolean,
+  input: StandardSchemaV1.InferInput<S> | unknown,
+  options?: Parameters<S["~standard"]["validate"]>[1],
+): Promise<StandardSchemaV1.InferOutput<S>> {
+  let result = validateAsync(schema, input, options);
+  if (result instanceof Promise) result = await result;
+
+  if (result.issues) {
+    throw new SchemaError(result.issues);
+  }
+
+  return result.value;
+}
+
+/**
+ * Validates and parses input against a StandardSchema synchronously.
+ *
+ * @template S - The schema type extending StandardSchemaV1
+ * @param schema - The schema to validate against
+ * @param input - The input data to validate and parse
+ * @param options - Optional validation options specific to the schema
+ * @returns The parsed output value
+ * @throws SchemaError if validation fails
+ * @throws TypeError if the schema validation is asynchronous
+ *
+ * @example
+ * ```ts
+ * import { z } from "@zod/zod";
+ * import { parse } from "./utils.ts";
+ * import { SchemaError } from "@standard-schema/utils";
+ * import { assertEquals, assertThrows } from "@std/assert";
+ *
+ * const mySchema = z.object({ name: z.string() });
+ *
+ * assertEquals(parse(mySchema, { name: "Alice" }), { name: "Alice" });
+ * assertThrows(() => parse(mySchema, { name: 1 }), SchemaError);
+ * ```
+ */
+export function parse<S extends StandardSchemaV1>(
+  schema: S | boolean,
+  input: StandardSchemaV1.InferInput<S> | unknown,
+  options?: Parameters<S["~standard"]["validate"]>[1],
+): StandardSchemaV1.InferOutput<S> {
+  const result = validate(schema, input, options);
+
+  if (result.issues) {
+    throw new SchemaError(result.issues);
+  }
+
+  return result.value;
+}
+
+/**
+ * Options for {@linkcode toJSONSchema}.
+ */
+export interface ToJSONSchemaOptions
+  extends Partial<StandardJSONSchemaV1.Options> {
+  /**
+   * Which JSON Schema to get: `"input"` describes what the schema accepts,
+   * `"output"` what it produces. They only differ for schemas that transform
+   * their input. Defaults to `"output"`.
+   */
+  io?: "input" | "output";
+  /**
+   * Return `undefined` instead of throwing when the schema does not implement
+   * Standard JSON Schema. Errors thrown by the schema's own converter (for
+   * instance for an unsupported `target`) are never silenced. Defaults to
+   * `false`.
+   */
+  silent?: boolean;
+}
+
+/**
+ * Gets the JSON Schema of any schema that implements
+ * {@link https://standardschema.dev/#json-schema | Standard JSON Schema}.
+ *
+ * Without options this is the draft 2020-12 JSON Schema of the schema's
+ * output. Use `io: "input"` for what the schema accepts.
+ *
+ * @example
+ * ```ts
+ * import { createSchema } from "@stdext/validation/core";
+ * import { toJSONSchema } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * // accepts a string, produces its length
+ * const length = createSchema("length", {
+ *   validate: (value) =>
+ *     typeof value === "string"
+ *       ? { value: value.length }
+ *       : { issues: [{ message: "Expected a string" }] },
+ *   jsonSchema: {
+ *     input: () => ({ type: "string" }),
+ *     output: () => ({ type: "integer" }),
+ *   },
+ * });
+ *
+ * assertEquals(toJSONSchema(length), { type: "integer" });
+ * assertEquals(toJSONSchema(length, { io: "input" }), { type: "string" });
+ * ```
+ *
+ * @param schema - The schema to convert
+ * @param options - Which JSON Schema to get, and for which version
+ * @returns The JSON Schema
+ * @throws TypeError if the schema does not implement Standard JSON Schema
+ * (use `silent: true` to get `undefined` instead)
+ */
+export function toJSONSchema(
+  schema: StandardJSONSchemaV1,
+  options?: ToJSONSchemaOptions & { silent?: false },
+): ReturnType<StandardJSONSchemaV1.Converter["output"]>;
+/**
+ * Like the other overload, but with `silent: true` any value is accepted and
+ * `undefined` is returned for schemas without Standard JSON Schema support.
+ *
+ * @example
+ * ```ts
+ * import { toJSONSchema } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const plain = {
+ *   "~standard": { version: 1, vendor: "test", validate: () => ({ value: 1 }) },
+ * };
+ * assertEquals(toJSONSchema(plain, { silent: true }), undefined);
+ * ```
+ *
+ * @param schema - The schema to convert, which may lack JSON Schema support
+ * @param options - Which JSON Schema to get, and for which version
+ * @returns The JSON Schema, or `undefined` if the schema has no JSON Schema
+ */
+export function toJSONSchema(
+  schema: unknown,
+  options: ToJSONSchemaOptions & { silent: true },
+): ReturnType<StandardJSONSchemaV1.Converter["output"]> | undefined;
+export function toJSONSchema(
+  schema: unknown,
+  options: ToJSONSchemaOptions = {},
+): ReturnType<StandardJSONSchemaV1.Converter["output"]> | undefined {
+  if (!isStandardJSONSchemaV1(schema)) {
+    if (options.silent) return undefined;
+    throw new TypeError("Schema does not implement Standard JSON Schema");
+  }
+
+  const { io = "output", target = "draft-2020-12", libraryOptions } = options;
+  return schema["~standard"].jsonSchema[io]({ target, libraryOptions });
+}
+
+/**
+ * Converts a value to a string representation, for use in messages.
+ * Primitives are converted directly, objects with `JSON.stringify`. It never
+ * throws: values that cannot be serialized (circular structures, `BigInt`
+ * members) fall back to their `Object.prototype.toString` tag.
  *
  * @param value - The value to stringify
  * @returns A string representation of the value
  *
  * @example
  * ```typescript
- * stringify("hello"); // "hello"
- * stringify(42); // "42"
- * stringify(true); // "true"
- * stringify({ key: "value" }); // '{"key":"value"}'
- * stringify(() => {}); // "[Function ]"
+ * import { stringify } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * assertEquals(stringify("hello"), "hello");
+ * assertEquals(stringify(42), "42");
+ * assertEquals(stringify(true), "true");
+ * assertEquals(stringify(undefined), "undefined");
+ * assertEquals(stringify(null), "null");
+ * assertEquals(stringify({ key: "value" }), '{"key":"value"}');
+ * assertEquals(stringify(() => {}), "[Function ]");
+ *
+ * const circular: Record<string, unknown> = {};
+ * circular.self = circular;
+ * assertEquals(stringify(circular), "[object Object]");
  * ```
+ *
+ * @ignore
  */
 export function stringify(value: unknown): string {
   switch (typeof value) {
@@ -29,454 +330,80 @@ export function stringify(value: unknown): string {
     case "bigint":
     case "boolean":
     case "symbol":
-      return value.toString();
+    case "undefined":
+      return String(value);
     case "function":
       // deno-lint-ignore ban-types
       return `[Function ${(value as Function).name}]`;
-    case "undefined":
-    case "object":
     default:
-      return JSON.stringify(value);
+      try {
+        // `undefined` for values without a JSON form, e.g. `toJSON()` results
+        return JSON.stringify(value) ?? String(value);
+      } catch {
+        return Object.prototype.toString.call(value);
+      }
   }
 }
 
 /**
- * Checks if a value is a plain object (not null, not an array).
- *
- * @param value - The value to check
- * @returns `true` if the value is an object and not an array or null, `false` otherwise
- *
- * @example
- * ```typescript
- * isObject({}); // true
- * isObject({ key: "value" }); // true
- * isObject(null); // false
- * isObject([]); // false
- * isObject("string"); // false
- * ```
- */
-export function isObject(value: unknown): value is object {
-  return typeof value === "object" && !Array.isArray(value) && value !== null;
-}
-
-/**
- * Checks if a value is an empty object (no enumerable properties).
- * Returns false for non-objects, arrays, and null.
- *
- * @param value - The value to check
- * @returns `true` if the value is an object with no enumerable properties, `false` otherwise
- *
- * @example
- * ```typescript
- * isEmptyObject({}); // true
- * isEmptyObject({ key: "value" }); // false
- * isEmptyObject([]); // false
- * isEmptyObject(null); // false
- * ```
- */
-export function isEmptyObject(
-  value: unknown,
-): value is Record<PropertyKey, never> {
-  if (!isObject(value)) return false;
-
-  for (const _i in value) {
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * Checks if a value is an empty plain object (no own properties).
- * Uses Reflect.ownKeys to check for any own properties including non-enumerable ones.
- * Returns false for non-objects, arrays, and null.
- *
- * @param value - The value to check
- * @returns `true` if the value is an object with no own properties, `false` otherwise
- *
- * @example
- * ```typescript
- * isEmptyPlainObject({}); // true
- * isEmptyPlainObject({ key: "value" }); // false
- * isEmptyPlainObject(Object.create(null)); // true
- * isEmptyPlainObject([]); // false
- * isEmptyPlainObject(null); // false
- * ```
- */
-export function isEmptyPlainObject(
-  value: unknown,
-): value is Record<PropertyKey, never> {
-  if (!isObject(value) || Reflect.ownKeys(value).length) return false;
-
-  return true;
-}
-
-/**
- * Checks if a value is a valid Standard Schema v1.
- * Validates that the value has a `~standard` property with a validate function and version 1.
+ * Checks if a value is a Standard Schema v1: it has a `~standard` property
+ * with `version` 1 and a `validate` function.
  *
  * @param value - The value to check
  * @returns `true` if the value is a Standard Schema v1, `false` otherwise
  *
  * @example
- * ```typescript
- * const schema = { "~standard": { version: 1, validate: () => ({ value: "test" }) } };
- * isStandardSchemaV1(schema); // true
- * isStandardSchemaV1({}); // false
- * isStandardSchemaV1({ "~standard": { version: 2 } }); // false
+ * ```ts
+ * import { isStandardSchemaV1 } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const schema = {
+ *   "~standard": { version: 1, vendor: "test", validate: () => ({ value: 1 }) },
+ * };
+ * assertEquals(isStandardSchemaV1(schema), true);
+ * assertEquals(isStandardSchemaV1({}), false);
+ * assertEquals(isStandardSchemaV1({ "~standard": { version: 2 } }), false);
  * ```
  */
-export function isStandardSchemaV1(value: unknown): value is StandardSchemaV1 {
-  if (
-    typeof (value as StandardSchemaV1)?.["~standard"]?.validate ===
-      "function" && (value as StandardSchemaV1)?.["~standard"]?.version === 1
-  ) {
-    return true;
-  }
-
-  return false;
+export function isStandardSchemaV1(
+  value: unknown,
+): value is StandardSchemaV1 {
+  const standard = (value as StandardSchemaV1 | undefined)?.["~standard"];
+  return standard?.version === 1 && typeof standard.validate === "function";
 }
+
 /**
- * Checks if a value is a valid Standard JSON Schema v1.
- * Validates that the value has a `~standard` property with both input and output
- * JSON Schema converters.
+ * Checks if a value is a Standard JSON Schema v1: it has a `~standard`
+ * property with `version` 1 and both `jsonSchema.input` and
+ * `jsonSchema.output` converters.
  *
  * @param value - The value to check
  * @returns `true` if the value is a Standard JSON Schema v1, `false` otherwise
  *
  * @example
- * ```typescript
+ * ```ts
+ * import { isStandardJSONSchemaV1 } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
  * const schema = {
  *   "~standard": {
  *     version: 1,
+ *     vendor: "test",
  *     jsonSchema: {
  *       input: () => ({ type: "string" }),
- *       output: () => ({ type: "string" })
- *     }
- *   }
+ *       output: () => ({ type: "string" }),
+ *     },
+ *   },
  * };
- * isStandardJSONSchemaV1(schema); // true
- * isStandardJSONSchemaV1({}); // false
+ * assertEquals(isStandardJSONSchemaV1(schema), true);
+ * assertEquals(isStandardJSONSchemaV1({}), false);
  * ```
  */
 export function isStandardJSONSchemaV1(
   value: unknown,
 ): value is StandardJSONSchemaV1 {
-  if (
-    typeof (value as StandardJSONSchemaV1)?.["~standard"]?.jsonSchema
-        ?.input === "function" &&
-    typeof (value as StandardJSONSchemaV1)?.["~standard"]?.jsonSchema
-        ?.output === "function"
-  ) {
-    return true;
-  }
-
-  return false;
+  const standard = (value as StandardJSONSchemaV1 | undefined)?.["~standard"];
+  return standard?.version === 1 &&
+    typeof standard.jsonSchema?.input === "function" &&
+    typeof standard.jsonSchema?.output === "function";
 }
-
-/**
- * Gets the JSON Schema URI for a given target version.
- *
- * @param target - The JSON Schema target version (currently only `draft-2020-12` is supported)
- * @returns The corresponding JSON Schema URI
- * @throws TypeError if the target is not supported
- *
- * @example
- * ```typescript
- * getSchemaVersion("draft-2020-12"); // "https://json-schema.org/draft/2020-12/schema"
- * ```
- */
-export function getSchemaVersion(
-  target: StandardJSONSchemaV1.Target,
-): NonNullable<JSONSchema["$schema"]> {
-  if (target === "draft-2020-12") {
-    return "https://json-schema.org/draft/2020-12/schema";
-  }
-  throw new TypeError(`Unsupported target: ${target}`);
-}
-
-/**
- * Creates a failure result for schema validation.
- *
- * @param message - The error message for the validation issue
- * @param path - Optional path to the invalid value in the input
- * @param extra - Optional structured metadata (`kind`, `expected`, `actual`)
- * added to the issue
- * @returns A failure result object with the issue
- *
- * @example
- * ```typescript
- * const result = failureResult("Expected a string", ["name"]);
- * // { issues: [{ message: "Expected a string", path: ["name"] }] }
- * ```
- */
-export function failureResult(
-  message: StandardSchemaV1.Issue["message"],
-  path?: StandardSchemaV1.Issue["path"],
-  extra?: { kind?: string; expected?: unknown; actual?: unknown },
-): StandardSchemaV1.FailureResult {
-  return { issues: [{ message: message, path, ...extra }] };
-}
-
-/**
- * Concatenates a path prefix to all issues in an array.
- * Used to build nested error paths during schema validation.
- *
- * @param path - The path prefix to prepend to each issue's path
- * @param issues - The array of issues to process
- * @returns A new array of issues with concatenated paths
- *
- * @example
- * ```typescript
- * const issues = [{ message: "Invalid", path: ["email"] }];
- * const prefixed = concatPathToIssues(["user"], issues);
- * // [{ message: "Invalid", path: ["user", "email"] }]
- * ```
- */
-export function concatPathToIssues<
-  T extends StandardSchemaV1.Issue = StandardSchemaV1.Issue,
->(
-  path: Writeable<NonNullable<StandardSchemaV1.Issue["path"]>>,
-  issues: ReadonlyArray<T>,
-): Array<T & { path: StandardSchemaV1.Issue["path"] & object }> {
-  return issues.map((iss) => ({
-    ...iss,
-    path: [...path, ...(iss.path || [])],
-  }));
-}
-
-/**
- * Gets a descriptive string representation of a JSON Schema value.
- * If the value has type, pattern, or format properties, returns a JSON string
- * with those properties. Otherwise, returns the JSON stringified value.
- *
- * @param value - The value to get a matched name for
- * @returns A string representation of the value's schema characteristics
- *
- * @example
- * ```typescript
- * getMatchedName({ type: "string", format: "email" }); // '{"type":"string","format":"email"}'
- * getMatchedName({ pattern: "^\\d+$" }); // '{"pattern":"^\\d+$"}'
- * getMatchedName("test"); // '"test"'
- * ```
- */
-export function getMatchedName(value: unknown): string {
-  if (
-    (value as JSONSchema).type || (value as JSONSchema).pattern ||
-    (value as JSONSchema).format
-  ) {
-    return JSON.stringify({
-      type: (value as JSONSchema).type,
-      pattern: (value as JSONSchema).pattern,
-      format: (value as JSONSchema).format,
-    });
-  }
-
-  return JSON.stringify(value);
-}
-
-/**
- * Gets the JSON Schema input representation from a Standard JSON Schema v1.
- * Calls the schema's jsonSchema.input converter with the provided options.
- *
- * @param schema - The schema to get input from
- * @param options - Options to pass to the input converter
- * @returns The JSON Schema input representation
- * @throws TypeError if the schema is not a valid StandardJSONSchemaV1
- *
- * @example
- * ```ts
- * import { getStandardJSONSchemaV1Input, string } from "@stdext/validation";
- *
- * const schema = string({ format: "email" });
- * const inputSchema = getStandardJSONSchemaV1Input(schema, { target: "draft-2020-12" });
- * // Returns: { $schema: "https://json-schema.org/draft/2020-12/schema", type: "string", format: "email" }
- * ```
- */
-export function getStandardJSONSchemaV1Input(
-  schema: unknown,
-  options: StandardJSONSchemaV1.Options,
-): ReturnType<StandardJSONSchemaV1.Converter["input"]> {
-  if (!isStandardJSONSchemaV1(schema)) {
-    throw new TypeError(`Schema is not a valid StandardJSONSchemaV1`);
-  }
-
-  return schema["~standard"].jsonSchema.input(options);
-}
-
-/**
- * Gets the JSON Schema output representation from a Standard JSON Schema v1.
- * Calls the schema's jsonSchema.output converter with the provided options.
- *
- * @param schema - The schema to get output from
- * @param options - Options to pass to the output converter
- * @returns The JSON Schema output representation
- * @throws TypeError if the schema is not a valid StandardJSONSchemaV1
- *
- * @example
- * ```ts
- * import { getStandardJSONSchemaV1Output, string } from "@stdext/validation";
- *
- * const schema = string({ format: "email" });
- * const outputSchema = getStandardJSONSchemaV1Output(schema, { target: "draft-2020-12" });
- * // Returns: { $schema: "https://json-schema.org/draft/2020-12/schema", type: "string", format: "email" }
- * ```
- */
-export function getStandardJSONSchemaV1Output(
-  schema: unknown,
-  options: StandardJSONSchemaV1.Options,
-): ReturnType<StandardJSONSchemaV1.Converter["output"]> {
-  if (!isStandardJSONSchemaV1(schema)) {
-    throw new TypeError(`Schema is not a valid StandardJSONSchemaV1`);
-  }
-
-  return schema["~standard"].jsonSchema.output(options);
-}
-
-// ---------------------------------------------------------------------------
-// Format validation regexes, used by the `format` keyword of the JSON Schema
-// builders in `./json_schema.ts`. Named after the RFC or ISO section they
-// implement.
-// ---------------------------------------------------------------------------
-
-/**
- * ISO 8601 date-time: `YYYY-MM-DDTHH:mm:ss(.sss)?(Z|±HH:mm)?`.
- *
- * @see {@link https://www.iso.org/iso-8601-date-and-time-format.html | ISO 8601}
- */
-export const ISO8601_DATETIME =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
-
-/**
- * ISO 8601 time: `HH:mm:ss(.sss)?(Z|±HH:mm)?`.
- *
- * @see {@link https://www.iso.org/iso-8601-date-and-time-format.html | ISO 8601}
- */
-export const ISO8601_TIME =
-  /^\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
-
-/**
- * ISO 8601 date: `YYYY-MM-DD`.
- *
- * @see {@link https://www.iso.org/iso-8601-date-and-time-format.html | ISO 8601}
- */
-export const ISO8601_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * ISO 8601 duration: e.g. `P1Y2M3DT4H5M6S` (each component optional, but
- * not all of them).
- *
- * @see {@link https://www.iso.org/iso-8601-date-and-time-format.html | ISO 8601}
- */
-export const ISO8601_DURATION =
-  /^P(?!$)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?$/;
-
-/**
- * RFC 5321 email address (ASCII).
- *
- * @see {@link https://www.iana.org/go/rfc5321 | RFC 5321}
- */
-export const RFC5321_EMAIL = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-
-/**
- * RFC 6531 email address with an internationalized domain and non-ASCII
- * local part.
- *
- * @see {@link https://www.iana.org/go/rfc6531 | RFC 6531}
- */
-export const RFC6531_IDN_EMAIL =
-  /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$|^[\p{L}0-9._%+-]+@[\p{L}0-9.-]+\.[\p{L}]{2,}$/u;
-
-/**
- * RFC 1123 hostname (ASCII, dotted labels, ending in a TLD of 2+ letters).
- *
- * @see {@link https://www.iana.org/go/rfc1123 | RFC 1123}
- */
-export const RFC1123_HOSTNAME = /^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
-
-/**
- * RFC 5890 internationalized hostname.
- *
- * @see {@link https://www.iana.org/go/rfc5890 | RFC 5890}
- */
-export const RFC5890_IDN_HOSTNAME = /^(?:[\p{L}0-9-]+\.)+[\p{L}]{2,}$/u;
-
-/**
- * RFC 2673 IPv4 address in dotted-decimal notation.
- *
- * @see {@link https://www.iana.org/go/rfc2673 | RFC 2673}
- */
-export const RFC2673_IPv4 =
-  /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-
-/**
- * RFC 2373 IPv6 address, full or compressed (`::`) form, without a zone
- * index.
- *
- * @see {@link https://www.iana.org/go/rfc2373 | RFC 2373}
- */
-export const RFC2373_IPv6 =
-  /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?$/;
-
-/**
- * RFC 4122 UUID in the 8-4-4-4-12 hex layout, any version.
- *
- * @see {@link https://www.iana.org/go/rfc4122 | RFC 4122}
- */
-export const RFC4122_UUID =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-
-/**
- * RFC 3986 absolute URI with a scheme and authority.
- *
- * @see {@link https://www.iana.org/go/rfc3986 | RFC 3986}
- */
-export const RFC3986_URI =
-  /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-]+(?::\d+)?(?:\/[^\s]*)?$/;
-
-/**
- * RFC 3986 URI reference: an absolute URI or a relative path.
- *
- * @see {@link https://www.iana.org/go/rfc3986 | RFC 3986}
- */
-export const RFC3986_URI_REFERENCE =
-  /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-]+(?::\d+)?(?:\/[^\s]*)?|^\/[^\s]*$/;
-
-/**
- * RFC 3987 internationalized URI (IRI), allowing non-ASCII characters.
- *
- * @see {@link https://www.iana.org/go/rfc3987 | RFC 3987}
- */
-export const RFC3987_IRI =
-  /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-%]+(?::\d+)?(?:\/[^\s]*)?$/u;
-
-/**
- * RFC 3987 internationalized URI reference: an absolute IRI or a relative
- * path.
- *
- * @see {@link https://www.iana.org/go/rfc3987 | RFC 3987}
- */
-export const RFC3987_IRI_REFERENCE =
-  /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-%]+(?::\d+)?(?:\/[^\s]*)?|^\/[^\s]*$/u;
-
-/**
- * RFC 6570 URI template.
- *
- * @see {@link https://www.iana.org/go/rfc6570 | RFC 6570}
- */
-export const RFC6570_URI_TEMPLATE =
-  /^(?:[a-zA-Z][a-zA-Z0-9.+\-]*):\/\/[a-zA-Z0-9.\-%]+(?::\d+)?(?:\/[^\s]*)?|^\/[^\s]*$/u;
-
-/**
- * RFC 6901 JSON pointer: a slash-separated path, e.g. `/foo/0/bar`.
- *
- * @see {@link https://www.iana.org/go/rfc6901 | RFC 6901}
- */
-export const RFC6901_JSON_POINTER = /^(?:\/+)\S*$/;
-
-/**
- * RFC 6901 relative JSON pointer: e.g. `0/foo` or `#`.
- *
- * @see {@link https://www.iana.org/go/rfc6901 | RFC 6901}
- */
-export const RFC6901_RELATIVE_JSON_POINTER = /^(?:\/|#|\d+)\S*$/;

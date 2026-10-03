@@ -70,8 +70,8 @@ console.log(dump(buffer));
 - [types](https://jsr.io/@stdext/types): The types package, contains general
   purpose type helpers
 - [validation](https://jsr.io/@stdext/validation): The validation package,
-  contains a Standard Schema compatible validator, JSON Schema builders and
-  fluent pipe schemas
+  builds schemas that implement both Standard Schema and Standard JSON Schema,
+  with fully inferred types
 - [xml](https://jsr.io/@stdext/xml): The xml package provides XML parsing,
   serialization, and XSD validation, backed by a WebAssembly implementation
 
@@ -102,6 +102,10 @@ implemented.
 
 For modules that use Rust to compile to WASM, we allow the usage of third-party
 crates if necessary, but this will be considered on a case-by-case basis.
+
+Allowed test dependencies:
+
+- zod: `jsr:@zod/zod@^4`
 
 ## WASM
 
