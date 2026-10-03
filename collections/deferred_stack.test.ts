@@ -1,4 +1,10 @@
-import { assert, assertEquals, assertFalse, assertThrows } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertFalse,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { DeferredStack } from "./deferred_stack.ts";
 
 Deno.test("collections/deferred_stack/DeferredStack", async (t) => {
@@ -216,5 +222,160 @@ Deno.test("collections/deferred_stack/DeferredStack", async (t) => {
     assertEquals((await e5).active, false);
     assertEquals(e6.active, false);
     assertEquals(e7.active, false);
+  });
+});
+
+Deno.test("collections/deferred_stack/DeferredStack callbacks", async (t) => {
+  await t.step("release and remove call their own callback", async () => {
+    const released: number[] = [];
+    const removed: number[] = [];
+    const deferred = new DeferredStack<number>({
+      releaseFn: (value) => {
+        released.push(value);
+      },
+      removeFn: (value) => {
+        removed.push(value);
+      },
+    });
+    deferred.add(1);
+    deferred.add(2);
+
+    const e1 = await deferred.pop();
+    await e1.release();
+    assertEquals(released, [2]);
+    assertEquals(removed, []);
+
+    const e2 = await deferred.pop();
+    await e2.remove();
+    assertEquals(released, [2]);
+    assertEquals(removed, [2]);
+  });
+
+  await t.step("release and remove are idempotent", async () => {
+    let calls = 0;
+    const deferred = new DeferredStack<number>({
+      releaseFn: () => {
+        calls++;
+      },
+      removeFn: () => {
+        calls++;
+      },
+    });
+    deferred.add(1);
+    const e1 = await deferred.pop();
+    await e1.release();
+    await e1.release();
+    await e1.remove();
+    assertEquals(calls, 1);
+    assertEquals(deferred.totalCount, 1);
+    assertEquals(deferred.availableCount, 1);
+  });
+});
+
+Deno.test("collections/deferred_stack/DeferredStack values", async () => {
+  const deferred = new DeferredStack<number>();
+  deferred.add(1);
+  deferred.add(2);
+  const e1 = await deferred.pop();
+  assertEquals(deferred.values, [1, 2]);
+  await e1.remove();
+  assertEquals(deferred.values, [1]);
+});
+
+Deno.test("collections/deferred_stack/DeferredStack pop signal", async (t) => {
+  await t.step("rejects when already aborted", async () => {
+    const deferred = new DeferredStack<number>();
+    deferred.add(1);
+    const reason = new Error("aborted");
+    await assertRejects(
+      () => deferred.pop({ signal: AbortSignal.abort(reason) }),
+      Error,
+      "aborted",
+    );
+    assertEquals(deferred.availableCount, 1);
+  });
+
+  await t.step("removes an aborted pop from the queue", async () => {
+    const deferred = new DeferredStack<number>({ maxSize: 1 });
+    deferred.add(1);
+    const e1 = await deferred.pop();
+    const controller = new AbortController();
+    const pending = deferred.pop({ signal: controller.signal });
+    assertEquals(deferred.queuedCount, 1);
+    controller.abort(new Error("aborted"));
+    await assertRejects(() => pending, Error, "aborted");
+    assertEquals(deferred.queuedCount, 0);
+
+    // The released element is not handed to the aborted pop.
+    await e1.release();
+    assertEquals(deferred.availableCount, 1);
+  });
+
+  await t.step("resolves before the signal aborts", async () => {
+    const deferred = new DeferredStack<number>({ maxSize: 1 });
+    deferred.add(1);
+    const e1 = await deferred.pop();
+    const controller = new AbortController();
+    const pending = deferred.pop({ signal: controller.signal });
+    await e1.release();
+    const e2 = await pending;
+    controller.abort();
+    assertEquals(e2.value, 1);
+  });
+});
+
+Deno.test("collections/deferred_stack/DeferredStack clear", async (t) => {
+  await t.step("removes all elements and rejects the queue", async () => {
+    const removed: number[] = [];
+    const deferred = new DeferredStack<number>({
+      maxSize: 2,
+      removeFn: (value) => {
+        removed.push(value);
+      },
+    });
+    deferred.add(1);
+    deferred.add(2);
+    const e1 = await deferred.pop();
+    const e2 = await deferred.pop();
+    const pending = deferred.pop();
+
+    await deferred.clear(new Error("closed"));
+    await assertRejects(() => pending, Error, "closed");
+    assertEquals(removed.sort(), [1, 2]);
+    assertEquals(deferred.totalCount, 0);
+    assertEquals(deferred.queuedCount, 0);
+    assert(e1.disposed);
+    assertFalse(e1.active);
+
+    // Elements disposed by clear are not added back.
+    await e1.release();
+    await e2.remove();
+    assertEquals(deferred.totalCount, 0);
+    assertEquals(removed.length, 2);
+
+    // The stack can be used again.
+    deferred.add(3);
+    assertEquals((await deferred.pop()).value, 3);
+  });
+
+  await t.step("rejects with a default reason", async () => {
+    const deferred = new DeferredStack<number>({ maxSize: 1 });
+    deferred.add(1);
+    await deferred.pop();
+    const pending = deferred.pop();
+    await deferred.clear();
+    await assertRejects(() => pending, Error, "cleared");
+  });
+
+  await t.step("aggregates errors of the remove function", async () => {
+    const deferred = new DeferredStack<number>({
+      removeFn: (value) => {
+        if (value === 1) throw new Error("failed");
+      },
+    });
+    deferred.add(1);
+    deferred.add(2);
+    await assertRejects(() => deferred.clear(), AggregateError);
+    assertEquals(deferred.totalCount, 0);
   });
 });

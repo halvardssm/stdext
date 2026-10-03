@@ -6,12 +6,27 @@ The collections package contains commonly used utilities and structures.
 
 ### Deferred Stack
 
-Contains the DeferredStack utility class.
+Contains the DeferredStack utility class, a stack where popping an element waits
+until one is available. It is useful for resource pools, such as connection
+pools.
 
 ```ts
-const deferred = new DeferredStack<number>({ maxSize: 1 });
+import { DeferredStack } from "@stdext/collections";
+
+const deferred = new DeferredStack<number>({
+  maxSize: 1,
+  // Called with the value when an element is removed, e.g. to close it
+  removeFn: (value) => console.log("removed", value),
+});
 deferred.add(1);
 const e1 = await deferred.pop();
-setTimeout(() => e1.release(), 5000);
+setTimeout(() => e1.release(), 100);
 const e2 = await deferred.pop(); // will be queued until e1 is released
+
+// Waiting can be aborted with a signal
+const pending = deferred.pop({ signal: AbortSignal.timeout(100) });
+await pending.catch(() => console.log("timed out"));
+
+// Remove all elements and reject queued pops
+await deferred.clear();
 ```

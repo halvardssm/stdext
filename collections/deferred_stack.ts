@@ -9,13 +9,27 @@ export type DeferredStackOptions<T> = {
    */
   maxSize?: number;
   /**
-   * The release function to be called when the element is released
+   * Called with the value of an element after it is released back to the
+   * stack
    */
-  releaseFn?: (element: DeferredStackElement<T>) => Promise<void> | void;
+  releaseFn?: (value: T) => Promise<void> | void;
   /**
-   * The remove function to be called when the element is removed
+   * Called with the value of an element after it is removed from the stack,
+   * for example to close a connection
    */
-  removeFn?: (element: DeferredStackElement<T>) => Promise<void> | void;
+  removeFn?: (value: T) => Promise<void> | void;
+};
+
+/**
+ * DeferredStackPopOptions
+ *
+ * Options for {@linkcode DeferredStack.pop}
+ */
+export type DeferredStackPopOptions = {
+  /**
+   * Aborts waiting for an element. The pop rejects with the abort reason.
+   */
+  signal?: AbortSignal;
 };
 
 /**
@@ -23,12 +37,16 @@ export type DeferredStackOptions<T> = {
  *
  * When you have a stack that you want to defer the acquire of an element until it is available.
  *
+ * @example
  * ```ts
+ * import { DeferredStack } from "@stdext/collections";
+ *
  * const deferred = new DeferredStack<number>({ maxSize: 1 });
  * deferred.add(1);
  * const e1 = await deferred.pop();
- * setTimeout(() => e1.release(), 5000);
+ * setTimeout(() => e1.release(), 100);
  * const e2 = await deferred.pop(); // will be queued until e1 is released
+ * await e2.release();
  * ```
  */
 export class DeferredStack<T> {
@@ -70,6 +88,13 @@ export class DeferredStack<T> {
    */
   get stack(): Array<DeferredStackElement<T>> {
     return this.#stack;
+  }
+
+  /**
+   * The values of all elements, both available and in use
+   */
+  get values(): Array<T> {
+    return this.#elements.map((element) => element._value);
   }
 
   /**
@@ -118,22 +143,17 @@ export class DeferredStack<T> {
     if (this.#elements.length >= this.maxSize) {
       throw new Error("Max size reached");
     }
+    this.#add(element);
+  }
 
-    const newElement = new DeferredStackElement<T>({
-      value: element,
-      releaseFn: async (element) => {
-        await this.#release(element);
-        await this.#releaseFn?.(element);
-      },
-      removeFn: async (element) => {
-        this.#remove(element);
-        await this.#removeFn?.(element);
-      },
+  #add(value: T): void {
+    const element = new DeferredStackElement<T>({
+      value,
+      releaseFn: (element) => this.#release(element),
+      removeFn: (element) => this.#remove(element),
     });
-
-    this.#elements.push(newElement);
-
-    this.#push(newElement);
+    this.#elements.push(element);
+    this.#push(element);
   }
 
   /**
@@ -141,7 +161,10 @@ export class DeferredStack<T> {
    *
    * If there are no elements in the stack, the acquire will be queued and resolved when an element is pushed.
    */
-  pop(): Promise<DeferredStackElement<T>> {
+  pop(options?: DeferredStackPopOptions): Promise<DeferredStackElement<T>> {
+    const signal = options?.signal;
+    if (signal?.aborted) return Promise.reject(signal.reason);
+
     const element = this.#stack.pop();
 
     if (element) {
@@ -153,7 +176,49 @@ export class DeferredStack<T> {
 
     this.queue.push(p);
 
+    if (signal) {
+      const onAbort = () => {
+        const index = this.queue.indexOf(p);
+        if (index !== -1) this.queue.splice(index, 1);
+        p.reject(signal.reason);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      p.promise.then(
+        () => signal.removeEventListener("abort", onAbort),
+        () => signal.removeEventListener("abort", onAbort),
+      );
+    }
+
     return p.promise;
+  }
+
+  /**
+   * Remove all elements and reject all queued acquires
+   *
+   * The `removeFn` is called for every element. Elements that are in use
+   * are disposed, so releasing or removing them afterwards is a no-op.
+   *
+   * @param reason the reason to reject the queued acquires with
+   * @throws AggregateError if any `removeFn` call fails, after all elements
+   * are removed
+   */
+  async clear(
+    reason: unknown = new Error("Deferred stack is cleared"),
+  ): Promise<void> {
+    for (const p of this.queue.splice(0)) p.reject(reason);
+    const elements = this.#elements;
+    this.#elements = [];
+    this.#stack = [];
+    for (const element of elements) element._dispose();
+    const results = await Promise.allSettled(
+      elements.map(async (element) => await this.#removeFn?.(element._value)),
+    );
+    const errors = results
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason);
+    if (errors.length) {
+      throw new AggregateError(errors, "Failed to remove elements");
+    }
   }
 
   /**
@@ -173,20 +238,27 @@ export class DeferredStack<T> {
    * Release element back to the deferred stack
    *
    * To avoid that previous users of the element can still access it,
-   * the element is removed from the stack, and added again.
+   * the element is replaced by a new element with the same value.
    */
   async #release(element: DeferredStackElement<T>): Promise<void> {
-    const value = element.value;
-    await element.remove();
-    this.add(value);
+    if (!this.#delete(element)) return;
+    this.#add(element._value);
+    await this.#releaseFn?.(element._value);
   }
 
   /**
    * Removes element from the deferred stack
    */
-  #remove(element: DeferredStackElement<T>): void {
+  async #remove(element: DeferredStackElement<T>): Promise<void> {
+    if (!this.#delete(element)) return;
+    await this.#removeFn?.(element._value);
+  }
+
+  #delete(element: DeferredStackElement<T>): boolean {
+    const count = this.#elements.length;
     this.#elements = this.#elements.filter((el) => el._id !== element._id);
     this.#stack = this.#stack.filter((el) => el._id !== element._id);
+    return this.#elements.length !== count;
   }
 }
 
@@ -290,18 +362,32 @@ export class DeferredStackElement<T> {
   }
 
   /**
-   * Releases the element back to the DeferredStack
+   * Disposes the element
+   *
+   * Only the DeferredStack should call this method.
    */
-  release(): ReturnType<DeferredStackElementOptions<T>["releaseFn"]> {
-    return this.#releaseFn(this);
+  _dispose(): void {
+    this.#active = false;
+    this.#disposed = true;
   }
 
   /**
-   * Removes the element from the DeferredStack
+   * Releases the element back to the DeferredStack. Releasing a disposed
+   * element is a no-op.
    */
-  remove(): ReturnType<DeferredStackElementOptions<T>["removeFn"]> {
-    this.#active = false;
-    this.#disposed = true;
-    return this.#removeFn(this);
+  async release(): Promise<void> {
+    if (this.#disposed) return;
+    this._dispose();
+    await this.#releaseFn(this);
+  }
+
+  /**
+   * Removes the element from the DeferredStack. Removing a disposed element
+   * is a no-op.
+   */
+  async remove(): Promise<void> {
+    if (this.#disposed) return;
+    this._dispose();
+    await this.#removeFn(this);
   }
 }
