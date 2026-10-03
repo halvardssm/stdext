@@ -40,30 +40,33 @@ import type {
 } from "@standard-schema/spec";
 import type { JSONSchema, SchemaType } from "@stdext/json/json-schema/2020-12";
 import {
+  checkExclusiveMaximum,
+  checkExclusiveMinimum,
+  checkFormat,
+  checkMaxContains,
+  checkMaximum,
+  checkMaxItems,
+  checkMaxLength,
+  checkMaxProperties,
+  checkMinContains,
+  checkMinimum,
+  checkMinItems,
+  checkMinLength,
+  checkMinProperties,
+  checkMultipleOf,
+  checkPattern,
+  findDuplicateIndexes,
+  isSupportedFormat,
+  missingPropertyIssue,
+  msg,
+  uniqueItemsIssue,
+} from "./keywords.ts";
+import {
   concatPathToIssues,
   failureResult,
-  getMatchedName as getMatchedOutputString,
   getSchemaVersion,
   isEmptyObject,
-  ISO8601_DATE,
-  ISO8601_DATETIME,
-  ISO8601_DURATION,
-  ISO8601_TIME,
   isObject,
-  RFC1123_HOSTNAME,
-  RFC2373_IPv6,
-  RFC2673_IPv4,
-  RFC3986_URI,
-  RFC3986_URI_REFERENCE,
-  RFC3987_IRI,
-  RFC4122_UUID,
-  RFC5321_EMAIL,
-  RFC5890_IDN_HOSTNAME,
-  RFC6531_IDN_EMAIL,
-  RFC6570_URI_TEMPLATE,
-  RFC6901_JSON_POINTER,
-  RFC6901_RELATIVE_JSON_POINTER,
-  stringify,
 } from "./utils.ts";
 import { validate as _validate } from "./validator.ts";
 
@@ -149,84 +152,6 @@ export type StandardSchemaWithJSONSchemaInternal<
 > =
   | StandardSchemaWithJSONSchema<Input, Output>
   | boolean;
-
-const msg = {
-  /**
-   * @param prefixExpected
-   * @param expected
-   * @param actual
-   * @param actualPrefix
-   * @returns The string
-   * ```
-   * Expected input to be ${prefixExpected}
-   * ${JSON.stringify(expected)}, was ${actualPrefix}:
-   * ${JSON.stringify(actual)}
-   * ```
-   */
-  expected: (
-    prefixExpected: string,
-    expected: unknown,
-    actual: unknown,
-    actualPrefix?: string,
-  ) =>
-    `Expected input to be ${prefixExpected.length ? `${prefixExpected} ` : ""}${
-      stringify(expected)
-    }, was ${actualPrefix?.length ? `${actualPrefix}: ` : ""}${
-      stringify(actual)
-    }`,
-  invalidValue: function (expected: unknown, actual: unknown) {
-    return this.expected("", stringify(expected), stringify(actual));
-  },
-  invalidType: function (expected: unknown, actual: unknown) {
-    return this.expected(
-      "of type",
-      stringify(expected),
-      stringify(actual),
-      typeof actual,
-    );
-  },
-  /**
-   * @param expected
-   * @returns The string
-   * ```
-   * Expected input to contain ${expected}
-   * ```
-   */
-  expectedContains: function (
-    expected: unknown,
-  ) {
-    return `Expected input to contain ${expected}`;
-  },
-  /**
-   * @param prefixExpected
-   * @param expected
-   * @param actual
-   * @returns The string
-   * ```
-   * Expected input to contain ${prefixExpected}
-   * element(s) matching ${JSON.stringify(expected)},
-   * was ${actual}
-   * ```
-   */
-  expectedContainsMatch: function (
-    prefixExpected: string,
-    expected: unknown,
-    actual: number,
-  ) {
-    return this.expectedContains(
-      `${prefixExpected} element(s) matching ${
-        getMatchedOutputString(expected)
-      }, was ${actual}`,
-    );
-  },
-  expectedUniqueItems: function (actual: string) {
-    return `Expected input to have unique items, following indexes were duplicates: ${actual}`;
-  },
-  propertyFalse: (actual: unknown) =>
-    `Schema defines the property as false, this will always fail: ${
-      JSON.stringify(actual)
-    }`,
-} as const;
 
 /**
  * Schema properties for a specific type.
@@ -429,64 +354,23 @@ export function number(
           return failureResult(msg.invalidType("number", value));
         }
 
-        if (
-          typeof options?.multipleOf === "number" &&
-          value % options.multipleOf !== 0
-        ) {
-          return failureResult(
-            msg.expected(
-              "a multiple of",
-              options.multipleOf,
-              value,
-            ),
-          );
-        }
-
-        if (typeof options?.minimum === "number" && options.minimum > value) {
-          return failureResult(
-            msg.expected(
-              "a minimum (inclusive) value of",
-              options.minimum,
-              value,
-            ),
-          );
-        }
-
-        if (typeof options?.maximum === "number" && options.maximum < value) {
-          return failureResult(
-            msg.expected(
-              "a maximum (inclusive) value of",
-              options.maximum,
-              value,
-            ),
-          );
-        }
-
-        if (
-          typeof options?.exclusiveMinimum === "number" &&
-          options.exclusiveMinimum >= value
-        ) {
-          return failureResult(
-            msg.expected(
-              "a minimum (exclusive) value of",
-              options.exclusiveMinimum,
-              value,
-            ),
-          );
-        }
-
-        if (
-          typeof options?.exclusiveMaximum === "number" &&
-          options.exclusiveMaximum <= value
-        ) {
-          return failureResult(
-            msg.expected(
-              "a maximum (exclusive) value of",
-              options.exclusiveMaximum,
-              value,
-            ),
-          );
-        }
+        const numberIssue =
+          (typeof options?.multipleOf === "number"
+            ? checkMultipleOf(value, options.multipleOf)
+            : undefined) ??
+            (typeof options?.minimum === "number"
+              ? checkMinimum(value, options.minimum)
+              : undefined) ??
+            (typeof options?.maximum === "number"
+              ? checkMaximum(value, options.maximum)
+              : undefined) ??
+            (typeof options?.exclusiveMinimum === "number"
+              ? checkExclusiveMinimum(value, options.exclusiveMinimum)
+              : undefined) ??
+            (typeof options?.exclusiveMaximum === "number"
+              ? checkExclusiveMaximum(value, options.exclusiveMaximum)
+              : undefined);
+        if (numberIssue) return failureResult(numberIssue.message);
 
         return { value };
       },
@@ -622,27 +506,7 @@ export interface StringOptions
 export function string(
   options?: StringOptions,
 ): SchemaObject<"string", string, string> {
-  if (
-    options?.format && ![
-      "date-time",
-      "date",
-      "time",
-      "duration",
-      "email",
-      "idn-email",
-      "hostname",
-      "idn-hostname",
-      "ipv4",
-      "ipv6",
-      "uri",
-      "uri-reference",
-      "iri",
-      "iri-reference",
-      "uuid",
-      "json-pointer",
-      "relative-json-pointer",
-    ].includes(options?.format)
-  ) {
+  if (options?.format && !isSupportedFormat(options.format)) {
     throw new TypeError(
       `Format option of ${options.format} is not a supported format`,
     );
@@ -656,104 +520,22 @@ export function string(
           return failureResult(msg.invalidType("string", value));
         }
 
-        if (
-          typeof options?.minLength === "number" &&
-          options.minLength > value.length
-        ) {
-          return failureResult(
-            msg.expected(
-              "of minimum length",
-              options.minLength,
-              value,
-              value.length.toString(),
-            ),
-          );
-        }
-
-        if (
-          typeof options?.maxLength === "number" &&
-          options.maxLength < value.length
-        ) {
-          return failureResult(
-            msg.expected(
-              "of maximum length",
-              options.maxLength,
-              value,
-              value.length.toString(),
-            ),
-          );
-        }
+        const lengthIssue =
+          (typeof options?.minLength === "number"
+            ? checkMinLength(value, options.minLength)
+            : undefined) ??
+            (typeof options?.maxLength === "number"
+              ? checkMaxLength(value, options.maxLength)
+              : undefined);
+        if (lengthIssue) return failureResult(lengthIssue.message);
 
         if (options?.format) {
-          let format: RegExp | undefined;
-          switch (options.format) {
-            case "date-time":
-              format = ISO8601_DATETIME;
-              break;
-            case "date":
-              format = ISO8601_DATE;
-              break;
-            case "time":
-              format = ISO8601_TIME;
-              break;
-            case "duration":
-              format = ISO8601_DURATION;
-              break;
-            case "email":
-              format = RFC5321_EMAIL;
-              break;
-            case "idn-email":
-              format = RFC6531_IDN_EMAIL;
-              break;
-            case "hostname":
-              format = RFC1123_HOSTNAME;
-              break;
-            case "idn-hostname":
-              format = RFC5890_IDN_HOSTNAME;
-              break;
-            case "ipv4":
-              format = RFC2673_IPv4;
-              break;
-            case "ipv6":
-              format = RFC2373_IPv6;
-              break;
-            case "uri":
-              format = RFC3986_URI;
-              break;
-            case "uri-reference":
-              format = RFC3986_URI_REFERENCE;
-              break;
-            case "iri":
-              format = RFC3987_IRI;
-              break;
-            case "iri-reference":
-              format = RFC6570_URI_TEMPLATE;
-              break;
-            case "uuid":
-              format = RFC4122_UUID;
-              break;
-            case "json-pointer":
-              format = RFC6901_JSON_POINTER;
-              break;
-            case "relative-json-pointer":
-              format = RFC6901_RELATIVE_JSON_POINTER;
-              break;
-          }
-
-          if (!format?.test(value)) {
-            return failureResult(
-              msg.expected("of format", options.format, value),
-            );
-          }
+          const formatIssue = checkFormat(value, options.format);
+          if (formatIssue) return failureResult(formatIssue.message);
         }
-        if (
-          options?.pattern &&
-          !(options.pattern === value ||
-            new RegExp(options.pattern).test(value))
-        ) {
-          return failureResult(
-            msg.expected("matching the pattern", options.pattern, value),
-          );
+        if (options?.pattern) {
+          const patternIssue = checkPattern(value, options.pattern);
+          if (patternIssue) return failureResult(patternIssue.message);
         }
 
         return { value };
@@ -890,37 +672,19 @@ export function array(
           return failureResult(msg.invalidType("array", value));
         }
 
-        if (
-          typeof options?.minItems === "number" &&
-          options.minItems > value.length
-        ) {
-          return failureResult(
-            msg.expected(
-              "minimum length",
-              options.minItems,
-              value.length,
-            ),
-          );
-        }
-
-        if (
-          typeof options?.maxItems === "number" &&
-          options.maxItems < value.length
-        ) {
-          return failureResult(
-            msg.expected(
-              "maximum length",
-              options.maxItems,
-              value.length,
-            ),
-          );
-        }
+        const itemsIssue =
+          (typeof options?.minItems === "number"
+            ? checkMinItems(value.length, options.minItems)
+            : undefined) ??
+            (typeof options?.maxItems === "number"
+              ? checkMaxItems(value.length, options.maxItems)
+              : undefined);
+        if (itemsIssue) return failureResult(itemsIssue.message);
 
         const issues: StandardSchemaV1.Issue[] = [];
 
         let currentIndex: number = 0;
         const containsIndexes = new Set<number>();
-        const valueMap = new Map<string, Set<number>>();
 
         const checkContains = (value: unknown, index: number) => {
           if (!options?.contains) {
@@ -930,16 +694,6 @@ export function array(
           if (!res.issues?.length) {
             containsIndexes.add(index);
           }
-        };
-
-        const checkDuplicates = (value: unknown, index: number) => {
-          if (!options?.uniqueItems) {
-            return;
-          }
-
-          const key = JSON.stringify(value);
-          const duplicateSet = valueMap.getOrInsert(key, new Set());
-          duplicateSet.add(index);
         };
 
         if (options?.prefixItems) {
@@ -953,7 +707,6 @@ export function array(
             }
 
             checkContains(val, currentIndex);
-            checkDuplicates(val, currentIndex);
 
             currentIndex++;
           }
@@ -971,8 +724,6 @@ export function array(
               }
 
               checkContains(item, currentIndex);
-              checkDuplicates(item, currentIndex);
-
               currentIndex++;
             }
           }
@@ -993,46 +744,30 @@ export function array(
             }
           }
 
-          checkDuplicates(item, currentIndex);
-
           currentIndex++;
         }
 
         if (options?.contains) {
-          const minContains = options.minContains ?? 1;
-          if (minContains > containsIndexes.size) {
-            issues.push({
-              message: msg.expectedContainsMatch(
-                `a minimum of ${options.minContains}`,
-                options.contains,
-                containsIndexes.size,
-              ),
-            });
-          }
+          const minIssue = checkMinContains(
+            containsIndexes.size,
+            options.minContains,
+            options.contains,
+          );
+          if (minIssue) issues.push({ message: minIssue.message });
 
-          if (
-            typeof options?.maxContains === "number" &&
-            options.maxContains < containsIndexes.size
-          ) {
-            issues.push({
-              message: msg.expectedContainsMatch(
-                `a maximum of ${options.maxContains}`,
-                options.contains,
-                containsIndexes.size,
-              ),
-            });
-          }
+          const maxIssue = typeof options?.maxContains === "number"
+            ? checkMaxContains(
+              containsIndexes.size,
+              options.maxContains,
+              options.contains,
+            )
+            : undefined;
+          if (maxIssue) issues.push({ message: maxIssue.message });
         }
 
         if (options?.uniqueItems) {
-          for (const duplicateIndexes of valueMap.values()) {
-            if (duplicateIndexes.size > 1) {
-              issues.push({
-                message: msg.expectedUniqueItems(
-                  JSON.stringify([...duplicateIndexes]),
-                ),
-              });
-            }
+          for (const indexes of findDuplicateIndexes(value)) {
+            issues.push({ message: uniqueItemsIssue(indexes).message });
           }
         }
 
@@ -1143,9 +878,7 @@ export function object(
 
             if (!item) {
               issues.push({
-                message: msg.expectedContains(
-                  `the property ${propertyKey}, but it was missing`,
-                ),
+                message: missingPropertyIssue(propertyKey).message,
                 path: [propertyKey],
               });
             }
@@ -1158,31 +891,14 @@ export function object(
 
         const valueKeys = Object.keys(value);
 
-        if (
-          typeof options?.minProperties === "number" &&
-          options.minProperties > valueKeys.length
-        ) {
-          return failureResult(
-            msg.expected(
-              "containing a minimum amount of properties of",
-              options.minProperties,
-              valueKeys.length,
-            ),
-          );
-        }
-
-        if (
-          typeof options?.maxProperties === "number" &&
-          options.maxProperties < valueKeys.length
-        ) {
-          return failureResult(
-            msg.expected(
-              "containing a maximum amount of properties of",
-              options.maxProperties,
-              valueKeys.length,
-            ),
-          );
-        }
+        const propertiesIssue =
+          (typeof options?.minProperties === "number"
+            ? checkMinProperties(valueKeys.length, options.minProperties)
+            : undefined) ??
+            (typeof options?.maxProperties === "number"
+              ? checkMaxProperties(valueKeys.length, options.maxProperties)
+              : undefined);
+        if (propertiesIssue) return failureResult(propertiesIssue.message);
 
         if (options?.propertyNames) {
           for (const k of valueKeys) {

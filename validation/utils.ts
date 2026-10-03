@@ -163,10 +163,10 @@ export function isStandardJSONSchemaV1(
   value: unknown,
 ): value is StandardJSONSchemaV1 {
   if (
-    typeof (value as StandardJSONSchemaV1)?.["~standard"]?.jsonSchema.input ===
-      "function" &&
-    typeof (value as StandardJSONSchemaV1)?.["~standard"]?.jsonSchema.output ===
-      "function"
+    typeof (value as StandardJSONSchemaV1)?.["~standard"]?.jsonSchema
+        ?.input === "function" &&
+    typeof (value as StandardJSONSchemaV1)?.["~standard"]?.jsonSchema
+        ?.output === "function"
   ) {
     return true;
   }
@@ -200,6 +200,8 @@ export function getSchemaVersion(
  *
  * @param message - The error message for the validation issue
  * @param path - Optional path to the invalid value in the input
+ * @param extra - Optional structured metadata (`kind`, `expected`, `actual`)
+ * added to the issue
  * @returns A failure result object with the issue
  *
  * @example
@@ -211,8 +213,9 @@ export function getSchemaVersion(
 export function failureResult(
   message: StandardSchemaV1.Issue["message"],
   path?: StandardSchemaV1.Issue["path"],
+  extra?: { kind?: string; expected?: unknown; actual?: unknown },
 ): StandardSchemaV1.FailureResult {
-  return { issues: [{ message: message, path }] };
+  return { issues: [{ message: message, path, ...extra }] };
 }
 
 /**
@@ -230,10 +233,12 @@ export function failureResult(
  * // [{ message: "Invalid", path: ["user", "email"] }]
  * ```
  */
-export function concatPathToIssues(
+export function concatPathToIssues<
+  T extends StandardSchemaV1.Issue = StandardSchemaV1.Issue,
+>(
   path: Writeable<NonNullable<StandardSchemaV1.Issue["path"]>>,
-  issues: ReadonlyArray<StandardSchemaV1.Issue>,
-) {
+  issues: ReadonlyArray<T>,
+): Array<T & { path: StandardSchemaV1.Issue["path"] & object }> {
   return issues.map((iss) => ({
     ...iss,
     path: [...path, ...(iss.path || [])],

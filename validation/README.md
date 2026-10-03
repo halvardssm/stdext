@@ -120,6 +120,59 @@ const oneSchema = combination({
 });
 ```
 
+### Fluent pipe schemas (`@stdext/validation/fluent`)
+
+A valibot / zod-mini style system: a schema plus a sequence of small actions
+appended with `pipe()`. Input and output types may differ (transforms), and any
+Standard Schema (Zod, Valibot, ArkType, the builders above) can be mixed in
+wherever a schema is expected. Naming follows JSON Schema (`anyOf`, `oneOf`,
+`allOf`, `not`, `const_`, `enum_`, `minLength`, `pattern`, ...).
+
+```ts
+import {
+  anyOf,
+  const_,
+  fromJsonSchema,
+  object,
+  optional,
+  parseAsync,
+  pattern,
+  pipe,
+  string,
+  toJSONSchema,
+  transform,
+  validate,
+} from "@stdext/validation/fluent";
+import { RFC5321_EMAIL } from "@stdext/validation/utils";
+
+const User = object({
+  email: pipe(
+    string(),
+    pattern(RFC5321_EMAIL),
+    transform((s) => s.toLowerCase()),
+  ),
+  role: anyOf([const_("admin"), const_("user")]),
+  nickname: optional(string()),
+});
+
+validate(User, { email: "A@B.CO", role: "user" }); // sync, uses validator.ts
+await parseAsync(User, input); // throws SchemaError with standard issues
+
+const jsonSchema = toJSONSchema(User); // draft 2020-12
+const compiled = fromJsonSchema(jsonSchema); // best-effort compiler
+```
+
+- A schema is async if any step (`transformAsync`, `refineAsync`, a nested async
+  schema) returns a promise; `validate()` then throws a `TypeError`.
+- `toJSONSchema` is lossless for core types, keyword actions and combinators.
+  Transforms, custom refinements and foreign schemas without a JSON Schema
+  converter degrade to `true` per node (or throw with `{ strict: true }`).
+- `fromJsonSchema` supports `type`, `const`, `enum`, `allOf`/`anyOf`/`oneOf`/
+  `not`, string/number/array/object keywords and local `$ref`/`$defs`.
+  Unsupported keywords are ignored with a warning or throw, per params.
+- Keyword checks live in `@stdext/validation/keywords` and are shared with the
+  JSON Schema builders.
+
 ### Utility Functions
 
 The package exports utility functions for type checking and schema inspection.

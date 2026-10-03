@@ -70,7 +70,8 @@ console.log(dump(buffer));
 - [types](https://jsr.io/@stdext/types): The types package, contains general
   purpose type helpers
 - [validation](https://jsr.io/@stdext/validation): The validation package,
-  contains a Standard Schema compatible validator and schemas
+  contains a Standard Schema compatible validator, JSON Schema builders and
+  fluent pipe schemas
 - [xml](https://jsr.io/@stdext/xml): The xml package provides XML parsing,
   serialization, and XSD validation, backed by a WebAssembly implementation
 
