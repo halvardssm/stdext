@@ -55,6 +55,12 @@ console.log(dump(buffer));
   drivers
 - [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
   utility for text and binary encoding.
+- [event](https://jsr.io/@stdext/event): The event package contains extensions
+  for events
+- [ffi](https://jsr.io/@stdext/ffi): The FFI package contains helpers when using
+  FFI
+- [fs](https://jsr.io/@stdext/fs): The fs package contains helpers for the file
+  system
 - [http](https://jsr.io/@stdext/http): The http package contains utility for
   fetching and http servers
 - [json](https://jsr.io/@stdext/json): The json package, contains helpers for
@@ -65,6 +71,8 @@ console.log(dump(buffer));
   purpose type helpers
 - [validation](https://jsr.io/@stdext/validation): The validation package,
   contains a Standard Schema compatible validator and schemas
+- [xml](https://jsr.io/@stdext/xml): The xml package provides XML parsing,
+  serialization, and XSD validation, backed by a WebAssembly implementation
 
 ## Versioning
 
