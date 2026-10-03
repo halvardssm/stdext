@@ -53,7 +53,7 @@ console.log(dump(buffer));
 - [database](https://jsr.io/@stdext/database): The database package contains
   interfaces and helpers for interacting with databases
 - [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
-  utility for text encoding.
+  utility for text and binary encoding.
 - [http](https://jsr.io/@stdext/http): The http package contains utility for
   fetching and http servers
 - [json](https://jsr.io/@stdext/json): The json package, contains helpers for
