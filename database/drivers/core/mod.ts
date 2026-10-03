@@ -1,0 +1,85 @@
+/**
+ * Base classes for implementing the
+ * {@link https://jsr.io/@stdext/database/doc/sql | @stdext/database/sql}
+ * interfaces.
+ *
+ * The base classes implement everything that is the same for every database:
+ *
+ * - {@linkcode BaseDriver}: option merging, value transforms, abort checks,
+ *   error wrapping, events, prepared statements, and transactions with
+ *   savepoint based nesting
+ * - {@linkcode BaseClient}: the connection pool, built on
+ *   {@link https://jsr.io/@stdext/collections | DeferredStack}
+ *
+ * A driver only implements the database specific primitives: connecting,
+ * closing, pinging, executing, querying and preparing a single statement.
+ *
+ * @example A minimal driver
+ * ```ts
+ * import {
+ *   BaseClient,
+ *   BaseDriver,
+ *   type DriverParameters,
+ *   type StatementHandle,
+ * } from "@stdext/database/drivers/core";
+ * import type { Row } from "@stdext/database/sql";
+ *
+ * class EchoDriver extends BaseDriver {
+ *   #connected = false;
+ *
+ *   get connected(): boolean {
+ *     return this.#connected;
+ *   }
+ *
+ *   protected override connectDriver(): Promise<void> {
+ *     this.#connected = true;
+ *     return Promise.resolve();
+ *   }
+ *
+ *   protected override closeDriver(): Promise<void> {
+ *     this.#connected = false;
+ *     return Promise.resolve();
+ *   }
+ *
+ *   protected override pingDriver(): Promise<void> {
+ *     return Promise.resolve();
+ *   }
+ *
+ *   protected override executeDriver(): Promise<number | undefined> {
+ *     return Promise.resolve(undefined);
+ *   }
+ *
+ *   // Every query returns its parameters as a single row
+ *   protected override async *queryDriver(
+ *     _sql: string,
+ *     params: DriverParameters | undefined,
+ *   ): AsyncGenerator<Row> {
+ *     const values = Array.isArray(params) ? params : [];
+ *     yield { columns: values.map((_, i) => `p${i}`), values };
+ *   }
+ *
+ *   protected override prepareDriver(sql: string): Promise<StatementHandle> {
+ *     return Promise.resolve({
+ *       execute: () => this.executeDriver(),
+ *       query: (params) => this.queryDriver(sql, params),
+ *       deallocate: () => Promise.resolve(),
+ *     });
+ *   }
+ * }
+ *
+ * class EchoClient extends BaseClient<EchoDriver> {
+ *   protected override createDriver(): EchoDriver {
+ *     return new EchoDriver(this.connectionUrl, this.options);
+ *   }
+ * }
+ *
+ * await using client = new EchoClient("echo://");
+ * await client.connect();
+ * const ctx = await client.query("SELECT", [1, "a"]);
+ * console.log(await ctx.toRecords()); // [{ p0: 1, p1: "a" }]
+ * ```
+ *
+ * @module
+ */
+export * from "./client.ts";
+export * from "./driver.ts";

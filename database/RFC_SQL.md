@@ -645,11 +645,17 @@ Deno.test("MyClient conformance", async (t) => {
     query: "SELECT id, name FROM users",
     columns: ["id", "name"],
     count: 3,
+    parameterQuery: "SELECT ? AS value",
   });
 });
 ```
 
 A driver that passes the conformance suite is compliant with this specification.
+
+The `@stdext/database/drivers/core` package contains base classes that implement
+the specification on top of a few database specific primitives (connecting,
+closing, pinging, and executing, querying or preparing a single statement),
+including the connection pool and savepoint based nested transactions.
 
 ## Examples
 

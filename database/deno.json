@@ -3,6 +3,8 @@
   "name": "@stdext/database",
   "exports": {
     "./sql": "./sql/mod.ts",
-    "./sql/testing": "./sql/testing.ts"
+    "./sql/testing": "./sql/testing.ts",
+    "./drivers/core": "./drivers/core/mod.ts",
+    "./drivers/sqlite": "./drivers/sqlite/mod.ts"
   }
 }

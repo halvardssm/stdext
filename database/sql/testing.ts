@@ -15,10 +15,17 @@ import type {
   DriverConstructor,
   Pingable,
   Poolable,
+  PoolClient,
   Preparable,
   Queryable,
   Transactionable,
 } from "./core.ts";
+import {
+  ConnectionError,
+  DatabaseError,
+  QueryError,
+  TransactionError,
+} from "./errors.ts";
 import type {
   ClientEventTarget,
   DriverEventTarget,
@@ -58,6 +65,27 @@ export interface TestSql {
    * The expected number of rows of {@linkcode TestSql.query}
    */
   count: number;
+  /**
+   * A SQL query selecting the single string parameter it is given, as a
+   * column named `value`, for example `SELECT ? AS value` or
+   * `SELECT $1::text AS value`
+   */
+  parameterQuery: string;
+}
+
+/**
+ * A statement that is invalid in every SQL dialect
+ */
+const INVALID_SQL = "THIS IS NOT VALID SQL";
+
+/**
+ * Whether the promise is still pending after the pending work has run
+ */
+async function isPending(promise: Promise<unknown>): Promise<boolean> {
+  let pending = true;
+  promise.then(() => (pending = false), () => (pending = false));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  return pending;
 }
 
 /**
@@ -126,7 +154,7 @@ export async function testPingable(
     await pingable.close();
     await assertRejects(async () => {
       await pingable.ping();
-    });
+    }, ConnectionError);
   });
 }
 
@@ -174,11 +202,93 @@ export async function testQueryable(
     await queryable.close();
   });
 
-  await t.step("query throws when not connected", async () => {
+  await t.step("query and execute throw when not connected", async () => {
     const queryable = await create();
     await assertRejects(async () => {
       await queryable.query(sql.query);
+    }, ConnectionError);
+    await assertRejects(async () => {
+      await queryable.execute(sql.execute);
+    }, ConnectionError);
+  });
+
+  await t.step("binds parameters", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const ctx = await queryable.query(sql.parameterQuery, ["a"]);
+    assertEquals(ctx.metadata.columns, ["value"]);
+    assertEquals(await ctx.toValues(), [["a"]]);
+    await queryable.close();
+  });
+
+  await t.step("invalid statements throw a QueryError", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    await assertRejects(async () => {
+      await queryable.query(INVALID_SQL);
+    }, QueryError);
+    await assertRejects(async () => {
+      await queryable.execute(INVALID_SQL);
+    }, QueryError);
+    // The connection is still usable after an error.
+    await queryable.execute(sql.execute);
+    await queryable.close();
+  });
+
+  await t.step("transforms input and output values", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const ctx = await queryable.query(sql.parameterQuery, ["a"], {
+      transformInput: (value) => `${value}b`,
+      transformOutput: (value) =>
+        typeof value === "string" ? value.toUpperCase() : value,
     });
+    assertEquals(await ctx.toValues(), [["AB"]]);
+    await queryable.close();
+  });
+
+  await t.step("rejects with the reason of an aborted signal", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const reason = new Error("aborted");
+    const signal = AbortSignal.abort(reason);
+    assertEquals(
+      await assertRejects(() => queryable.query(sql.query, [], { signal })),
+      reason,
+    );
+    assertEquals(
+      await assertRejects(() => queryable.execute(sql.execute, [], { signal })),
+      reason,
+    );
+    await queryable.close();
+  });
+
+  if (sql.count > 1) {
+    await t.step("stops iterating when the signal aborts", async () => {
+      const queryable = await create();
+      await queryable.connect();
+      const controller = new AbortController();
+      const ctx = await queryable.query(sql.query, [], {
+        signal: controller.signal,
+      });
+      controller.abort(new Error("aborted"));
+      assertEquals(
+        await assertRejects(() => ctx.toValues()),
+        controller.signal.reason,
+      );
+      // The connection is still usable after an abort.
+      await queryable.execute(sql.execute);
+      await queryable.close();
+    });
+  }
+
+  await t.step("disposing a result stops fetching", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const ctx = await queryable.query(sql.query);
+    await ctx[Symbol.asyncDispose]();
+    await queryable.execute(sql.execute);
+    await queryable.close();
   });
 }
 
@@ -213,10 +323,42 @@ export async function testPreparable(
 
     await stmt.deallocate();
     assert(stmt.deallocated);
+    await stmt.deallocate();
     await assertRejects(async () => {
       await stmt.query();
-    });
+    }, QueryError);
+    await assertRejects(async () => {
+      await stmt.execute();
+    }, QueryError);
     await preparable.close();
+  });
+
+  await t.step("prepared statements are reusable with parameters", async () => {
+    const preparable = await create();
+    await preparable.connect();
+    const stmt = await preparable.prepare(sql.parameterQuery);
+    assertEquals(await (await stmt.query(["a"])).toValues(), [["a"]]);
+    assertEquals(await (await stmt.query(["b"])).toValues(), [["b"]]);
+    await stmt.deallocate();
+    await preparable.close();
+  });
+
+  await t.step("invalid statements throw a QueryError", async () => {
+    const preparable = await create();
+    await preparable.connect();
+    // Databases without native prepared statements fail on execution.
+    await assertRejects(async () => {
+      const stmt = await preparable.prepare(INVALID_SQL);
+      await stmt.query();
+    }, QueryError);
+    await preparable.close();
+  });
+
+  await t.step("prepare throws when not connected", async () => {
+    const preparable = await create();
+    await assertRejects(async () => {
+      await preparable.prepare(sql.query);
+    }, ConnectionError);
   });
 
   await t.step("async dispose deallocates", async () => {
@@ -254,7 +396,10 @@ export async function testTransactionable(
     assertFalse(tx.inTransaction);
     await assertRejects(async () => {
       await tx.execute(sql.execute);
-    });
+    }, TransactionError);
+    await assertRejects(async () => {
+      await tx.commitTransaction();
+    }, TransactionError);
     await transactionable.close();
   });
 
@@ -267,7 +412,10 @@ export async function testTransactionable(
     assertFalse(tx.inTransaction);
     await assertRejects(async () => {
       await tx.query(sql.query);
-    });
+    }, TransactionError);
+    await assertRejects(async () => {
+      await tx.rollbackTransaction();
+    }, TransactionError);
     await transactionable.close();
   });
 
@@ -278,6 +426,17 @@ export async function testTransactionable(
     await tx.createSavepoint("sp");
     await tx.execute(sql.execute);
     await tx.releaseSavepoint("sp");
+    await tx.commitTransaction();
+    await transactionable.close();
+  });
+
+  await t.step("savepoints with generated names", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const tx = await transactionable.beginTransaction();
+    await tx.createSavepoint();
+    await tx.execute(sql.execute);
+    await tx.releaseSavepoint();
     await tx.commitTransaction();
     await transactionable.close();
   });
@@ -323,6 +482,35 @@ export async function testTransactionable(
     );
     await outer.commitTransaction();
     await transactionable.close();
+  });
+
+  await t.step("ending a transaction invalidates nested ones", async () => {
+    const transactionable = await create();
+    await transactionable.connect();
+    const outer = await transactionable.beginTransaction();
+    const nested = await outer.beginTransaction();
+    const deeper = await nested.beginTransaction();
+    await nested.rollbackTransaction();
+    assertFalse(deeper.inTransaction);
+    await assertRejects(async () => {
+      await deeper.query(sql.query);
+    }, TransactionError);
+    assert(outer.inTransaction);
+
+    const other = await outer.beginTransaction();
+    await outer.commitTransaction();
+    assertFalse(other.inTransaction);
+    await assertRejects(async () => {
+      await other.commitTransaction();
+    }, TransactionError);
+    await transactionable.close();
+  });
+
+  await t.step("beginTransaction throws when not connected", async () => {
+    const transactionable = await create();
+    await assertRejects(async () => {
+      await transactionable.beginTransaction();
+    }, DatabaseError);
   });
 
   await t.step("transaction wrapper commits on success", async () => {
@@ -456,6 +644,114 @@ export async function testPoolable(
 }
 
 /**
+ * Test the pooling behavior of a {@linkcode Client}: the pool size, and the
+ * connections held by the query, prepare and transaction methods.
+ *
+ * @param t the test context
+ * @param create a factory creating a fresh client
+ * @param sql the SQL statements to test with
+ */
+export async function testPool(
+  t: Deno.TestContext,
+  create: Factory<Client>,
+  sql: TestSql,
+): Promise<void> {
+  /** Acquire all connections but one, and return a release function */
+  async function exhaust(
+    client: Client,
+    keep = 1,
+  ): Promise<() => Promise<void>> {
+    const maxSize = client.options.poolOptions?.maxSize ?? 1;
+    const held: PoolClient[] = [];
+    for (let i = 0; i < maxSize - keep; i++) held.push(await client.acquire());
+    return async () => {
+      for (const poolClient of held) await poolClient.release();
+    };
+  }
+
+  await t.step("acquire waits when the pool is exhausted", async () => {
+    const client = await create();
+    await client.connect();
+    const releaseAll = await exhaust(client);
+    const last = await client.acquire();
+    const pending = client.acquire();
+    assert(await isPending(pending), "acquire must wait for a release");
+    await last.release();
+    const next = await pending;
+    assert(next.connected);
+    await next.release();
+    await releaseAll();
+    await client.close();
+  });
+
+  await t.step("acquire waits for a removed connection", async () => {
+    const client = await create();
+    await client.connect();
+    const releaseAll = await exhaust(client);
+    const last = await client.acquire();
+    const pending = client.acquire();
+    assert(await isPending(pending), "acquire must wait for a removal");
+    await last.remove();
+    const next = await pending;
+    assert(next.connected);
+    await next.release();
+    await releaseAll();
+    await client.close();
+  });
+
+  await t.step("query holds the connection until fetched", async () => {
+    const client = await create();
+    await client.connect();
+    const releaseAll = await exhaust(client);
+    const ctx = await client.query(sql.query);
+    if (sql.count > 1) {
+      // The first row is fetched, so the result is not complete yet.
+      const pending = client.acquire();
+      assert(await isPending(pending), "query must hold the connection");
+      await ctx[Symbol.asyncDispose]();
+      await (await pending).release();
+    } else {
+      await ctx.toValues();
+    }
+    await (await client.acquire()).release();
+    await releaseAll();
+    await client.close();
+  });
+
+  await t.step("prepare holds the connection until deallocated", async () => {
+    const client = await create();
+    await client.connect();
+    const releaseAll = await exhaust(client);
+    const stmt = await client.prepare(sql.query);
+    const pending = client.acquire();
+    assert(await isPending(pending), "prepare must hold the connection");
+    await stmt.deallocate();
+    await (await pending).release();
+    await releaseAll();
+    await client.close();
+  });
+
+  await t.step(
+    "beginTransaction holds the connection until finished",
+    async () => {
+      const client = await create();
+      await client.connect();
+      const releaseAll = await exhaust(client);
+      const tx = await client.beginTransaction();
+      const pending = client.acquire();
+      assert(
+        await isPending(pending),
+        "beginTransaction must hold the connection",
+      );
+      await tx.commitTransaction();
+      await (await pending).release();
+      await releaseAll();
+      await client.close();
+    },
+  );
+}
+
+/**
  * Test that a value structurally satisfies the {@linkcode Driver} profile.
  *
  * @param value the value to test
@@ -569,6 +865,40 @@ export async function testClientIntegration<
         await poolable.close();
       },
     );
+  });
+
+  await t.step("pool", (t) => testPool(t, create, sql));
+
+  await t.step("connection initialization", async (t) => {
+    const [connectionUrl, options] = args;
+
+    await t.step("connects all connections up front", async () => {
+      const client = new ClientC(connectionUrl, {
+        ...options,
+        poolOptions: { ...options?.poolOptions, lazyInitialization: false },
+      });
+      let connects = 0;
+      client.eventTarget.addEventListener("connect", () => connects++);
+      await client.connect();
+      assertEquals(connects, client.options.poolOptions?.maxSize ?? 1);
+      await client.close();
+    });
+
+    await t.step("lazily connects on acquire", async () => {
+      const client = new ClientC(connectionUrl, {
+        ...options,
+        poolOptions: { ...options?.poolOptions, lazyInitialization: true },
+      });
+      let connects = 0;
+      client.eventTarget.addEventListener("connect", () => connects++);
+      await client.connect();
+      assertEquals(connects, 0);
+      const poolClient = await client.acquire();
+      assertEquals(connects, 1);
+      assert(poolClient.connected);
+      await poolClient.release();
+      await client.close();
+    });
   });
 
   await t.step("query methods release the pooled connection", async (t) => {

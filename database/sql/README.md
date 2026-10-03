@@ -195,9 +195,14 @@ Deno.test("MyClient conformance", async (t) => {
     query: "SELECT id, name FROM users",
     columns: ["id", "name"],
     count: 3,
+    parameterQuery: "SELECT ? AS value",
   });
 });
 ```
 
-See [conformance.test.ts](./conformance.test.ts) for a complete example
-implementation of all the interfaces.
+The suite also checks parameter binding, value transforms, aborting with an
+`AbortSignal`, error types, nested transactions and the pooling behavior.
+
+Drivers can be built on the base classes in
+[`@stdext/database/drivers/core`](../drivers/core/mod.ts), which implement
+everything except the database specific primitives.
