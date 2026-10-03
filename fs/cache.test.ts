@@ -1,10 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertNotEquals,
-  assertRejects,
-  assertThrows,
-} from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { cacheFile, denoCacheDir, homeDir } from "./cache.ts";
 import { exists } from "@std/fs";
 import { join } from "@std/path";
@@ -259,16 +253,14 @@ Deno.test("cacheFile", async (t) => {
   );
 
   await t.step("reloads file when cacheControl is 'reload'", async () => {
-    const originalStats = await Deno.stat(testFilePath);
+    // Corrupt the cached file to prove that the reload fetches a fresh copy
+    // from the remote. Inode and mtime based comparisons are unreliable here,
+    // as filesystems may reuse the freed inode or share millisecond mtimes.
+    await Deno.writeTextFile(testFilePath, "stale content");
 
     const cachedPath = await cacheFile(TEST_FILE_URL, testFilePath, {
       cacheControl: "reload",
     });
-
-    const cachedStats = await Deno.stat(testFilePath);
-
-    assertNotEquals(originalStats.ino, cachedStats.ino);
-    assertNotEquals(originalStats.mtime, cachedStats.mtime);
 
     const content = await Deno.readTextFile(cachedPath);
     assert(
