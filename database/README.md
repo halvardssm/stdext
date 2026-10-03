@@ -91,3 +91,33 @@ await client.execute("INSERT INTO users VALUES (?, ?)", [1, "Alice"]);
 const ctx = await client.query("SELECT * FROM users");
 console.log(await ctx.toRecords());
 ```
+
+#### Postgres
+
+`@stdext/database/drivers/postgres`, implemented in TypeScript on top of the
+Postgres frontend/backend protocol, and requires the `net` permission. It
+supports SCRAM-SHA-256, MD5 and cleartext password authentication, TLS,
+streaming results, prepared statements, and cancelling queries with an
+`AbortSignal`. Parameters use `$1`, `$2`, ... placeholders.
+
+```ts ignore
+import { PostgresClient } from "@stdext/database/drivers/postgres";
+
+await using client = new PostgresClient("postgres://user@localhost:5432/db", {
+  connectionOptions: { password: "secret" },
+  poolOptions: { maxSize: 4 },
+});
+await client.connect();
+await client.transaction(async (tx) => {
+  await tx.execute("INSERT INTO users (name) VALUES ($1)", ["Alice"]);
+});
+const ctx = await client.query("SELECT * FROM users WHERE id = $1", [1]);
+console.log(await ctx.toRecords());
+```
+
+The Postgres tests run against a live server when `STDEXT_POSTGRES_URL` is set:
+
+```sh
+docker run -d -p 54329:5432 -e POSTGRES_PASSWORD=postgres postgres:17
+STDEXT_POSTGRES_URL=postgres://postgres:postgres@localhost:54329/postgres deno task test
+```

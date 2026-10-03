@@ -5,6 +5,7 @@
     "./sql": "./sql/mod.ts",
     "./sql/testing": "./sql/testing.ts",
     "./drivers/core": "./drivers/core/mod.ts",
+    "./drivers/postgres": "./drivers/postgres/mod.ts",
     "./drivers/sqlite": "./drivers/sqlite/mod.ts"
   }
 }
