@@ -74,6 +74,13 @@ console.log(dump(buffer));
 - [xml](https://jsr.io/@stdext/xml): The xml package provides XML parsing,
   serialization, and XSD validation, backed by a WebAssembly implementation
 
+## Platform support
+
+The packages are primarily developed and tested on macOS and Linux. Windows
+support is not guaranteed, and packages may not work as expected on Windows. If
+you encounter an issue on Windows, please
+[report it](https://github.com/halvardssm/deno_stdext/issues).
+
 ## Versioning
 
 We follow the semantic versioning scheme. We will share major versions with Deno
