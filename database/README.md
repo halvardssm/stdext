@@ -1,29 +1,30 @@
 # @stdext/database
 
-The database package contains interfaces and helpers for interacting with
-databases. It draws inspiration from
+The database package contains a standard interface for SQL databases, and
+drivers implementing it for SQLite and Postgres. It draws inspiration from
 [go std/database](https://pkg.go.dev/database).
+
+Applications use one of the [drivers](#drivers), which all share the same
+interface:
+
+```ts
+import { SqliteClient } from "@stdext/database/drivers/sqlite";
+
+await using client = new SqliteClient(":memory:");
+await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+await client.execute("INSERT INTO users VALUES (?, ?)", [1, "Alice"]);
+console.log(await client.query("SELECT * FROM users").toRecords());
+// [{ id: 1, name: "Alice" }]
+```
 
 ## Entrypoints
 
 ### Sql
 
-The SQL package contains a standard interface for SQL based databases
-
-> The SQL entrypoint is not intended to be directly used in applications, but is
-> meant to be implemented by database drivers. This is mainly for library
-> authors.
-
-Databases implementing these interfaces can be used as following (see
-[database/sql](./sql/README.md) for more details):
-
-```ts
-await using client = new Client(connectionUrl, connectionOptions);
-await client.connect();
-await client.execute("SOME INSERT QUERY");
-const ctx = await client.query("SELECT * FROM table");
-const res = await ctx.toRecords();
-```
+The SQL entrypoint contains the standard interface for SQL databases, as
+specified in [RFC_SQL.md](./RFC_SQL.md): the types, helpers for driver authors,
+and a conformance test suite. It is meant for driver authors; applications use a
+driver. See [database/sql](./sql/README.md) for more details.
 
 ### Drivers
 
@@ -43,25 +44,30 @@ import {
   BaseClient,
   BaseDriver,
   type DriverParameters,
+  type DriverResult,
   type StatementHandle,
 } from "@stdext/database/drivers/core";
-import type { QueryOptions, Row } from "@stdext/database/sql";
+import type { ExecuteResult, QueryOptions } from "@stdext/database/sql";
 
 class MyDriver extends BaseDriver {
   get connected(): boolean {/* ... */}
-  protected connectDriver(): Promise<void> {/* ... */}
+  protected connectDriver(signal: AbortSignal): Promise<void> {/* ... */}
   protected closeDriver(): Promise<void> {/* ... */}
   protected pingDriver(): Promise<void> {/* ... */}
   protected executeDriver(
     sql: string,
     params: DriverParameters | undefined,
     options: QueryOptions,
-  ): Promise<number | undefined> {/* ... */}
+  ): Promise<ExecuteResult> {/* ... */}
   protected queryDriver(
     sql: string,
     params: DriverParameters | undefined,
     options: QueryOptions,
-  ): AsyncIterable<Row> {/* ... */}
+  ): Promise<DriverResult> {/* ... */}
+  protected executeScriptDriver(
+    sql: string,
+    options: QueryOptions,
+  ): Promise<void> {/* ... */}
   protected prepareDriver(
     sql: string,
     options: QueryOptions,
@@ -81,15 +87,23 @@ class MyClient extends BaseClient<MyDriver> {
 The connection URL is a file path, a `file:` URL, or `:memory:`. Parameters use
 `?` placeholders, or `:name`, `@name` and `$name` placeholders with a record.
 
+- SQLite has no connection pool, so `SqliteClient` emulates it with a single
+  connection: `maxSize` is always `1`, and acquiring waits for the connection.
+  This keeps transactions isolated, and makes `:memory:` behave as one database.
+- Connections wait up to 5 seconds for locks held by other connections to the
+  same file (`connectionOptions.timeout`).
+- Integers are returned as `number` (or `bigint` with
+  `connectionOptions.readBigInts`), `BLOB`s as `Uint8Array`. Booleans are bound
+  as `1`/`0`, and, as an extension, `Date`s as ISO 8601 strings. `execute`
+  reports the `rowid` of inserted rows as `lastInsertId`.
+
 ```ts
 import { SqliteClient } from "@stdext/database/drivers/sqlite";
 
 await using client = new SqliteClient(":memory:");
-await client.connect();
 await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
 await client.execute("INSERT INTO users VALUES (?, ?)", [1, "Alice"]);
-const ctx = await client.query("SELECT * FROM users");
-console.log(await ctx.toRecords());
+console.log(await client.query("SELECT * FROM users").toRecords());
 ```
 
 #### Postgres
@@ -99,6 +113,21 @@ Postgres frontend/backend protocol, and requires the `net` permission. It
 supports SCRAM-SHA-256, MD5 and cleartext password authentication, TLS,
 streaming results, prepared statements, and cancelling queries with an
 `AbortSignal`. Parameters use `$1`, `$2`, ... placeholders.
+
+- The connection URL follows the libpq connection URI format
+  (`postgres://user:password@host:port/database`), and supports the `sslmode`
+  and `application_name` parameters. The connection options take precedence.
+- TLS always verifies the server certificate, also for `sslmode=prefer` and
+  `sslmode=require`, as Deno can not encrypt without verifying. Self-signed
+  certificates can be trusted with `connectionOptions.tls.caCerts`.
+- SQL templates are rendered with `$1`, `$2`, ... placeholders, and scripts run
+  with the simple query protocol. Postgres has no insert ids: use `RETURNING`.
+- A query result holds its connection until it is fully read or disposed. Other
+  commands on the same connection are rejected meanwhile, rather than buffering
+  the rest of the result in memory.
+- Values are parsed by type: `int8` as `bigint`, `timestamptz` and `timestamp`
+  (as UTC) as `Date`, `numeric` and `date` as strings, `json`/`jsonb` parsed,
+  and arrays of these. Override the parsers with `connectionOptions.parsers`.
 
 ```ts ignore
 import { PostgresClient } from "@stdext/database/drivers/postgres";
@@ -111,8 +140,9 @@ await client.connect();
 await client.transaction(async (tx) => {
   await tx.execute("INSERT INTO users (name) VALUES ($1)", ["Alice"]);
 });
-const ctx = await client.query("SELECT * FROM users WHERE id = $1", [1]);
-console.log(await ctx.toRecords());
+console.log(
+  await client.query("SELECT * FROM users WHERE id = $1", [1]).toRecords(),
+);
 ```
 
 The Postgres tests run against a live server when `STDEXT_POSTGRES_URL` is set:
