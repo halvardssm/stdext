@@ -11,7 +11,12 @@ import {
   TransactionError,
 } from "../../sql/mod.ts";
 import { testDriverIntegration } from "../../sql/testing.ts";
-import { FAILING_URL, MemoryDriver, memorySql } from "./_memory_driver.ts";
+import {
+  FAILING_URL,
+  HANGING_URL,
+  MemoryDriver,
+  memorySql,
+} from "./_memory_driver.ts";
 import { onStatementDeallocate, onTransactionEnd, resetDriver } from "./mod.ts";
 
 Deno.test("BaseDriver conformance", async (t) => {
@@ -26,7 +31,7 @@ Deno.test("BaseDriver", async (t) => {
       },
     });
     await driver.connect();
-    const ctx = await driver.query(memorySql.parameterQuery, ["a"], {
+    const ctx = driver.query(memorySql.parameterQuery, ["a"], {
       transformInput: (value) => `${value}b`,
     });
     assertEquals(await ctx.toValues(), [["ab!"]]);
@@ -42,7 +47,7 @@ Deno.test("BaseDriver", async (t) => {
     );
     await driver.connect();
     const error = await assertRejects(
-      () => driver.query("SELEC"),
+      () => driver.query("SELEC").toValues(),
       QueryError,
       "Syntax error",
     );
@@ -51,6 +56,67 @@ Deno.test("BaseDriver", async (t) => {
     // Each error is dispatched once.
     assertEquals(errors.length, 2);
     assertEquals(errors[0], error);
+  });
+
+  await t.step("connects implicitly once", async () => {
+    await using driver = new MemoryDriver("memory://");
+    let connects = 0;
+    driver.eventTarget.addEventListener("connect", () => connects++);
+    const results = await Promise.all([
+      driver.execute(memorySql.execute),
+      driver.query(memorySql.query).toValues(),
+      driver.ping(),
+    ]);
+    assertEquals(results[0], { affectedRows: 0 });
+    assertEquals(connects, 1);
+    await driver.close();
+    // Closing is explicit: it is not undone implicitly.
+    await assertRejects(
+      () => driver.execute(memorySql.execute),
+      ConnectionError,
+      "closed",
+    );
+    await driver.connect();
+    await driver.execute(memorySql.execute);
+    assertEquals(connects, 2);
+  });
+
+  await t.step("times out connecting", async () => {
+    const driver = new MemoryDriver(HANGING_URL, {
+      connectionOptions: { connectTimeout: 20 },
+    });
+    await assertRejects(() => driver.connect(), ConnectionError, "20 ms");
+    assertFalse(driver.connected);
+    await assertRejects(
+      () =>
+        new MemoryDriver("memory://", {
+          connectionOptions: { connectTimeout: -1 },
+        }).connect(),
+      RangeError,
+    );
+  });
+
+  await t.step("ends a transaction when the connection is lost", async () => {
+    await using driver = new MemoryDriver("memory://");
+    const tx = await driver.beginTransaction();
+    const stmt = await driver.prepare(memorySql.query);
+    driver.loseConnection();
+    await assertRejects(
+      () => tx.execute(memorySql.execute),
+      ConnectionError,
+      "transaction was rolled back",
+    );
+    assertFalse(tx.inTransaction);
+    assertFalse(driver.inTransaction);
+    // The driver reconnects, but statements of the lost connection reject.
+    await driver.execute(memorySql.execute);
+    await assertRejects(
+      () => stmt.query().toValues(),
+      QueryError,
+      "closed connection",
+    );
+    await assertRejects(() => stmt.execute(), QueryError, "closed connection");
+    await stmt.deallocate();
   });
 
   await t.step("rejects a failed connect with a ConnectionError", async () => {
@@ -69,8 +135,8 @@ Deno.test("BaseDriver", async (t) => {
     // Transactions on the driver nest in the active transaction.
     const nested = await driver.beginTransaction();
     assertEquals(driver.statements.at(-1), "SAVEPOINT sp_1");
-    await nested.commitTransaction();
-    await tx.commitTransaction();
+    await nested.commit();
+    await tx.commit();
     assertFalse(driver.inTransaction);
   });
 
@@ -106,7 +172,7 @@ Deno.test("BaseDriver", async (t) => {
     await driver.connect();
     await using tx = await driver.beginTransaction();
     const nested = await tx.beginTransaction();
-    await nested.rollbackTransaction();
+    await nested.rollback();
     assertEquals(driver.statements.slice(-2), [
       "ROLLBACK TO SAVEPOINT sp_1",
       "RELEASE SAVEPOINT sp_1",
@@ -135,14 +201,14 @@ Deno.test("hooks", async (t) => {
     onTransactionEnd(committed, () => {
       calls.push("second");
     });
-    await committed.commitTransaction();
+    await committed.commit();
     assertEquals(calls, ["first", "second"]);
 
     const rolledBack = await driver.beginTransaction();
     onTransactionEnd(rolledBack, () => {
       calls.push("rollback");
     });
-    await rolledBack.rollbackTransaction();
+    await rolledBack.rollback();
     assertEquals(calls, ["first", "second", "rollback"]);
   });
 

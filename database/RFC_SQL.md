@@ -51,7 +51,7 @@ taken from the respective readmes.
 
 **Node: mysql** ([link](https://github.com/mysqljs/mysql))
 
-```ts
+```ts ignore
 var mysql = require("mysql");
 
 var connection = mysql.createConnection({
@@ -70,7 +70,7 @@ connection.end();
 
 **Node: mysql2** ([link](https://github.com/sidorares/node-mysql2))
 
-```ts
+```ts ignore
 import mysql from "mysql2/promise";
 
 const connection = await mysql.createConnection({
@@ -85,7 +85,7 @@ connection.end();
 
 **Node: sqlite3** ([link](https://github.com/TryGhost/node-sqlite3))
 
-```ts
+```ts ignore
 const sqlite3 = require("sqlite3").verbose();
 const db = new sqlite3.Database(":memory:");
 
@@ -100,7 +100,7 @@ db.close();
 
 **Node: better-sqlite3** ([link](https://github.com/WiseLibs/better-sqlite3))
 
-```ts
+```ts ignore
 import Database from "better-sqlite3";
 const db = new Database("foobar.db", options);
 
@@ -110,7 +110,7 @@ console.log(row.solution);
 
 **Node: pg** ([link](https://github.com/brianc/node-postgres))
 
-```ts
+```ts ignore
 import pg from "pg";
 const { Client } = pg;
 const client = new Client();
@@ -123,7 +123,7 @@ await client.end();
 
 **Node: postgres** ([link](https://github.com/porsager/postgres))
 
-```ts
+```ts ignore
 import postgres from "postgres";
 
 const sql = postgres({
@@ -135,7 +135,7 @@ console.log(res[0].solution);
 
 **Deno: mysql** ([link](https://github.com/denodrivers/mysql/))
 
-```ts
+```ts ignore
 import { Client } from "https://deno.land/x/mysql/mod.ts";
 const client = await new Client().connect({
   hostname: "127.0.0.1",
@@ -149,7 +149,7 @@ console.log(res.rows[0].solution);
 
 **Deno: sqlite** ([link](https://github.com/denodrivers/sqlite3))
 
-```ts
+```ts ignore
 import { Database } from "jsr:@db/sqlite@0.11";
 
 const db = new Database("test.db");
@@ -161,7 +161,7 @@ db.close();
 
 **Deno: postgres** ([link](https://github.com/denodrivers/postgres))
 
-```ts
+```ts ignore
 import { Client } from "https://deno.land/x/postgres/mod.ts";
 const client = new Client({
   user: "user",
@@ -216,10 +216,11 @@ facilitating smoother development and integration processes.
 
 ## Design Principles
 
-1. **Async only.** All methods resolve to a `Promise`. Synchronous databases may
-   implement the interface by wrapping their operations in resolved promises.
-   This keeps the call sites uniform and allows the same code to be written for
-   all databases.
+1. **Async only.** All methods resolve to a `Promise`, except `query`, which
+   returns a lazy result whose consuming methods resolve to promises.
+   Synchronous databases may implement the interface by wrapping their
+   operations in resolved promises. This keeps the call sites uniform and allows
+   the same code to be written for all databases.
 2. **Small, independent capability interfaces.** Each capability ("able") is its
    own interface: `Connectable`, `Pingable`, `Queryable`, `Preparable`,
    `Transactionable`, `Poolable`, `Driverable` and `Eventable`. Drivers
@@ -231,9 +232,10 @@ facilitating smoother development and integration processes.
    to a single connection (`maxSize` of `1`) and becomes a connection pool when
    `maxSize` is raised. This mirrors `database/sql` in Go, where `*sql.DB` is
    always a pool.
-4. **Minimal query surface.** The standard query surface is two methods:
-   `execute` for statements and `query` for queries returning rows. All other
-   result shapes (`queryOne`, array results, tagged template helpers, ...) are
+4. **Minimal query surface.** The standard query surface is three methods:
+   `execute` for statements, `query` for queries returning rows, and
+   `executeScript` for scripts. Both `execute` and `query` accept SQL text or a
+   portable SQL template. All other result shapes (`queryOne`, ...) are
    derivable and left to extensions. Every method added to the standard is a
    permanent compatibility requirement for every compliant driver, so the
    surface is kept as small as possible.
@@ -260,7 +262,7 @@ The parameters to bind to a SQL statement are passed as an ordered array or as a
 record of named parameters, depending on the placeholder style supported by the
 database. The recommended parameter types are:
 
-```ts
+```ts ignore
 type ParameterType =
   | string
   | number
@@ -268,26 +270,29 @@ type ParameterType =
   | boolean
   | null
   | undefined
-  | Date
-  | Uint8Array;
+  | ArrayBufferView
+  | ArrayBuffer;
 
 type QueryParameters = ParameterType[] | Record<string, ParameterType>;
 ```
 
 Drivers must at minimum support `string`, and should support the full
-recommended set. The parameter type may be extended with database specific
-types.
+recommended set, which are the types JavaScript runtimes bind natively (Node and
+Bun bind binary data from any `ArrayBufferView` or `ArrayBuffer`). The parameter
+type may be extended with database specific types, such as `Date`.
+
+The placeholder style (for example `?`, `$1` or `:name`) and the mapping of
+values to and from database types are database specific, and are not
+standardized. Drivers must document both. Applications that need the same values
+across databases can use the `transformInput` and `transformOutput`
+[query options](#options).
 
 #### Result Context
 
 Queries return a result context. It is both an async iterable of rows and
 provides convenience methods for collecting the rows as values or records:
 
-```ts
-interface ContextMetadata<C extends string[] = string[]> {
-  columns: C;
-}
-
+```ts ignore
 interface ResultObject<V = unknown[], R = Record<string, unknown>> {
   values: V;
   toRecord: () => R;
@@ -295,47 +300,91 @@ interface ResultObject<V = unknown[], R = Record<string, unknown>> {
 
 interface ResultIterableContext<
   V extends unknown[] = unknown[],
-  M extends ContextMetadata = ContextMetadata,
-  R = Record<M["columns"][number], V[number]>,
-> extends AsyncIterable<ResultObject<V, R>> {
-  metadata: M;
-  toValues: () => Promise<V[]>;
-  toRecords: () => Promise<R[]>;
-  toRecord: (values: V) => R;
+  R = Record<string, V[number]>,
+> extends AsyncIterable<ResultObject<V, R>>, AsyncDisposable {
+  columns(): Promise<string[]>;
+  toValues(): Promise<V[]>;
+  toRecords(): Promise<R[]>;
 }
 ```
 
-- `metadata` contains the column names, available as soon as the first row
-  arrives.
-- Iterating the context streams the rows lazily, which is good for iterating
-  over a massive amount of rows.
-- `toValues` collects the rows as an array of value arrays, and `toRecords`
-  collects them as an array of records.
-- Rows are buffered as they are lazily fetched, so the context can be iterated
-  and collected in any combination: rows already fetched are replayed from the
-  buffer, and the collect methods drain any remaining rows. Note that the
-  buffered rows are kept in memory, so for a massive amount of rows, iterate the
-  context once instead of collecting it.
-- The context is asynchronously disposable: disposing stops fetching and
-  releases the underlying connection. Rows already fetched remain buffered and
-  can still be replayed.
+- The result is lazy: `query` returns it synchronously, and the query runs when
+  the result is first consumed, or when its columns are requested. Errors, such
+  as invalid SQL or a lost connection, are thrown by the consuming methods.
+- `columns()` resolves to the column names of the result, without consuming the
+  rows. The columns must be known also when there are no rows. Only when the
+  database does not report the columns without rows may they be empty for an
+  empty result, which the driver must document.
+- Iterating the result streams the rows lazily, and `toValues` and `toRecords`
+  collect them as arrays of values or records.
+- The rows are not kept in memory, so a result can be consumed once: either
+  iterated or collected. Consuming it again rejects with a `QueryError`. This
+  keeps the memory use of streaming a massive result constant.
+- A result holds its connection from when the query runs until all rows are read
+  or the result is disposed. A started result that is not needed must therefore
+  be read or disposed. Implementations should not buffer the rest of a result
+  that is still being read in order to run other commands on the same
+  connection, as it may not fit in memory; they may reject such commands
+  instead.
+- The result is asynchronously disposable: disposing stops fetching and releases
+  the connection. Disposing a result that was never started does not run the
+  query.
+- The result is deliberately not awaitable (it has no `then` method), as
+  thenables are unwrapped implicitly by `await` and by async functions that
+  return them.
 
 The `@stdext/database` package provides `createResultIterableContext` as a
-helper for constructing a result context from a stream of low-level rows:
+helper for driver authors, which creates a result from a function starting the
+query:
 
-```ts
-interface Row {
-  columns: string[];
-  values: unknown[];
-  meta?: Record<string, unknown>;
+```ts ignore
+interface ResultSource {
+  columns: string[]; // known before the first row
+  rows: AsyncIterable<unknown[]>;
 }
+
+function createResultIterableContext(
+  start: () => Promise<ResultSource>,
+): ResultIterableContext;
 ```
+
+#### SQL Templates
+
+Statements can also be written as tagged templates with the `sql` tag provided
+by the `@stdext/database` package. The tag creates a `SqlTemplate`, which keeps
+the SQL text and the interpolated values apart, independent of the placeholder
+style of the database:
+
+```ts ignore
+interface SqlTemplate {
+  readonly strings: readonly string[];
+  readonly values: readonly ParameterType[];
+}
+
+type Statement = string | SqlTemplate;
+
+await client.query(sql`SELECT * FROM users WHERE id = ${id}`).toRecords();
+```
+
+- `execute` and `query` accept a `SqlTemplate` in place of SQL text. The driver
+  renders its own placeholders, and binds the values as parameters. Values must
+  never be inserted into the SQL text.
+- A template carries its values, so passing parameters with a template must
+  reject with a `QueryError`.
+- `prepare` only accepts SQL text, as a prepared statement is executed with new
+  values each time.
+- Further template features, such as escaping identifiers or composing
+  fragments, are left to implementations.
+
+The columns can be passed up front with
+`createResultIterableContext(rows, { columns })`, so they are known when there
+are no rows.
 
 #### Options
 
 Options are grouped and passed as the second constructor argument:
 
-```ts
+```ts ignore
 interface Options {
   connectionOptions?: ConnectionOptions;
   queryOptions?: QueryOptions;
@@ -348,7 +397,7 @@ interface Options {
 - `queryOptions` are merged into every query, and contain the standard query
   options:
 
-```ts
+```ts ignore
 interface QueryOptions {
   signal?: AbortSignal;
   transformInput?: (value: unknown) => unknown;
@@ -358,51 +407,70 @@ interface QueryOptions {
 
 - Method level options are merged with the constructor level options, with the
   method level options taking precedence.
-- When the `signal` is aborted, the implementation must stop the current query,
-  release the connection, and reject with the abort error.
+- When the `signal` is aborted, the implementation must stop the current query
+  as soon as the database allows, release the connection, and reject with the
+  abort reason. Databases with a synchronous API can only stop before a
+  statement runs and between rows, while databases with a cancel mechanism
+  should cancel the running statement.
 
 ### Capability Interfaces
 
 Each capability is an independent interface. All methods resolve to a promise.
 
-| Interface         | Methods                                              | Description                                                                                                                                                                                 |
-| ----------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Connectable`     | `connectionUrl`, `connected`, `connect()`, `close()` | Connection lifecycle. Also `AsyncDisposable`. `connect` and `close` are idempotent. A failed `connect` rejects with a `ConnectionError`, leaves `connected` as `false`, and may be retried. |
-| `Pingable`        | `ping()`                                             | Checks that the connection is alive. Throws a `ConnectionError` if not.                                                                                                                     |
-| `Queryable`       | `execute()`, `query()`                               | Executes statements and queries. See below.                                                                                                                                                 |
-| `Preparable`      | `prepare()`                                          | Creates a prepared statement.                                                                                                                                                               |
-| `Transactionable` | `beginTransaction()`, `transaction()`                | Creates transactions.                                                                                                                                                                       |
-| `Poolable`        | `acquire()`                                          | Acquires a pool client from a pool.                                                                                                                                                         |
-| `Driverable`      | `driver`                                             | Wraps and exposes a `Driver`.                                                                                                                                                               |
-| `Eventable`       | `eventTarget`                                        | Dispatches events.                                                                                                                                                                          |
+| Interface         | Methods                                              | Description                                                                                                                                                                                                                |
+| ----------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Connectable`     | `connectionUrl`, `connected`, `connect()`, `close()` | Connection lifecycle. Also `AsyncDisposable`. `connect` and `close` are idempotent. A failed `connect` rejects with a `ConnectionError`, leaves `connected` as `false`, and may be retried. See [Connecting](#connecting). |
+| `Pingable`        | `ping()`                                             | Checks that the connection is alive. Throws a `ConnectionError` if not.                                                                                                                                                    |
+| `Queryable`       | `execute()`, `query()`, `executeScript()`            | Executes statements and queries. See below.                                                                                                                                                                                |
+| `Preparable`      | `prepare()`                                          | Creates a prepared statement.                                                                                                                                                                                              |
+| `Transactionable` | `beginTransaction()`, `transaction()`                | Creates transactions.                                                                                                                                                                                                      |
+| `Poolable`        | `acquire()`                                          | Acquires a pool client from a pool.                                                                                                                                                                                        |
+| `Driverable`      | `driver`                                             | Wraps and exposes a `Driver`.                                                                                                                                                                                              |
+| `Eventable`       | `eventTarget`                                        | Dispatches events.                                                                                                                                                                                                         |
 
 #### Queryable
 
 The minimal query surface:
 
-```ts
+```ts ignore
 interface Queryable {
   execute(
-    sql: string,
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined>;
+  ): Promise<ExecuteResult>;
   query(
-    sql: string,
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext>;
+  ): ResultIterableContext;
+  executeScript(sql: string, options?: QueryOptions): Promise<void>;
+}
+
+interface ExecuteResult {
+  affectedRows: number | undefined;
+  lastInsertId?: number | bigint | string;
 }
 ```
 
-- `execute` executes a statement and resolves to the number of affected rows, or
-  `undefined` if the database does not report it.
-- `query` executes a query and resolves to a [result context](#result-context).
-- Both must reject with a `ConnectionError` when the object is not connected.
+- `execute` executes a statement. `affectedRows` is the number of rows inserted,
+  updated or deleted by it. Statements that modify no rows, such as `SELECT` or
+  `CREATE TABLE`, report `0`; it is `undefined` only if the database does not
+  report the number. `lastInsertId` is the id of the last inserted row, when the
+  database reports it (such as the SQLite `rowid` or the MySQL auto increment
+  id); databases without insert ids, such as Postgres, use `RETURNING` instead.
+- `query` returns a lazy [result context](#result-context) for a query.
+- `execute` and `query` run exactly one statement. Running several statements in
+  one call is not portable (most databases only allow it without parameters, if
+  at all), so drivers may reject it, and must not silently ignore statements.
+- `executeScript` runs a script of one or more statements without parameters,
+  such as a migration, and resolves when all have run. Databases without native
+  support for running several statements must emulate it.
+- After the object is closed, all three must reject with a `ConnectionError`.
 
 #### Preparable
 
-```ts
+```ts ignore
 interface Preparable {
   prepare(sql: string, options?: QueryOptions): Promise<PreparedStatement>;
 }
@@ -411,13 +479,13 @@ interface Preparable {
 The `PreparedStatement` provides `execute` and `query` without the `sql`
 argument, plus its own lifecycle:
 
-```ts
+```ts ignore
 interface PreparedStatement extends AsyncDisposable {
   readonly sql: string;
   readonly deallocated: boolean;
   deallocate(): Promise<void>;
-  execute(params?, options?): Promise<number | undefined>;
-  query(params?, options?): Promise<ResultIterableContext>;
+  execute(params?, options?): Promise<ExecuteResult>;
+  query(params?, options?): ResultIterableContext;
 }
 ```
 
@@ -429,7 +497,7 @@ interface PreparedStatement extends AsyncDisposable {
 
 #### Transactionable
 
-```ts
+```ts ignore
 interface Transactionable {
   beginTransaction(options?: TransactionOptions): Promise<Transaction>;
   transaction<T>(
@@ -446,12 +514,12 @@ interface Transactionable {
 The `Transaction` provides the query and prepare methods, plus transaction
 specific methods:
 
-```ts
+```ts ignore
 interface Transaction
   extends AsyncDisposable, Queryable, Preparable, Transactionable {
   readonly inTransaction: boolean;
-  commitTransaction(options?): Promise<void>;
-  rollbackTransaction(options?): Promise<void>;
+  commit(options?): Promise<void>;
+  rollback(options?): Promise<void>;
   createSavepoint(name?: string, options?): Promise<void>;
   releaseSavepoint(name?: string, options?): Promise<void>;
 }
@@ -467,9 +535,9 @@ interface Transaction
 Calling `beginTransaction()` or `transaction()` on an object that is already in
 an active transaction creates a savepoint instead of a new transaction:
 
-- The nested transaction's `commitTransaction()` releases the savepoint, and its
-  `rollbackTransaction()` rolls back to it. The enclosing transaction stays
-  active and can still commit.
+- The nested transaction's `commit()` releases the savepoint, and its
+  `rollback()` rolls back to it. The enclosing transaction stays active and can
+  still commit.
 - Savepoint based nesting is the only portable mechanism across SQL databases:
   SQLite, Postgres, MySQL/MariaDB and MSSQL all support savepoints with these
   semantics, and none support true nested transactions.
@@ -484,20 +552,22 @@ an active transaction creates a savepoint instead of a new transaction:
   a `TransactionError`.
 - Nesting only applies on the same connection. Calling `Client.transaction()`
   inside a transaction acquires a separate pooled connection and starts an
-  independent transaction; nest with `Transaction.transaction()` instead.
+  independent transaction; nest with `Transaction.transaction()` instead. With a
+  `maxSize` of `1`, this waits for the transaction to end, which never happens;
+  an `acquireTimeout` turns this into an error.
 
 ### Profiles and Compliance Matrix
 
 The profiles are the classes users interact with. Each profile is a composition
 of the mandatory capabilities:
 
-| Class               | Extends                                                                                                        | Additional members                                                                                 |
-| ------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `Driver`            | `Optionable`, `Connectable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`, `Eventable`             |                                                                                                    |
-| `Transaction`       | `AsyncDisposable`, `Queryable`, `Preparable`, `Transactionable`                                                | `inTransaction`, `commitTransaction`, `rollbackTransaction`, `createSavepoint`, `releaseSavepoint` |
-| `PreparedStatement` | `AsyncDisposable`                                                                                              | `sql`, `deallocated`, `deallocate`, `execute`, `query`                                             |
-| `PoolClient`        | `AsyncDisposable`, `Driverable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`                      | `connected`, `disposed`, `release`, `remove`                                                       |
-| `Client`            | `Optionable`, `Connectable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`, `Poolable`, `Eventable` |                                                                                                    |
+| Class               | Extends                                                                                                        | Additional members                                                           |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `Driver`            | `Optionable`, `Connectable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`, `Eventable`             |                                                                              |
+| `Transaction`       | `AsyncDisposable`, `Queryable`, `Preparable`, `Transactionable`                                                | `inTransaction`, `commit`, `rollback`, `createSavepoint`, `releaseSavepoint` |
+| `PreparedStatement` | `AsyncDisposable`                                                                                              | `sql`, `deallocated`, `deallocate`, `execute`, `query`                       |
+| `PoolClient`        | `AsyncDisposable`, `Driverable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`                      | `connected`, `disposed`, `release`, `remove`                                 |
+| `Client`            | `Optionable`, `Connectable`, `Pingable`, `Queryable`, `Preparable`, `Transactionable`, `Poolable`, `Eventable` |                                                                              |
 
 - The `Driver` represents a single connection and is implemented by driver
   authors. Applications should use a `Client`.
@@ -513,28 +583,51 @@ of the mandatory capabilities:
 
 All profiles follow the same constructor signature:
 
-```ts
+```ts ignore
 new Driver(connectionUrl: string | URL, options?: Options);
 new Client(connectionUrl: string | URL, options?: ClientOptions);
 ```
 
-- The `connectionUrl` can be either a string or a URL, interpreted by the
-  implementation.
+- The `connectionUrl` can be either a string or a URL, interpreted according to
+  the connection URI format of the database, such as the libpq connection URI
+  for Postgres. Drivers should support the parameters of that format where they
+  apply, and document the ones they support.
 - The options object is the only `Record` argument, and can be extended by the
-  implementations. Additional connection options must be passed through the
-  options, not through the URL.
+  implementations. Options take precedence over parameters in the URL, and
+  connection options that are not part of the database's URI format must be
+  passed through the options.
 - The `ClientOptions` extends `Options` with the pool options (see
   [Pooling](#pooling)).
+
+#### Connecting
+
+- The connection is opened implicitly by the first operation, like the SQLite
+  APIs of Node and Bun open the database on construction. Calling `connect()` is
+  optional, and connects eagerly, for example to report connection errors early.
+  Concurrent connects, implicit or explicit, share one attempt.
+- Closing is explicit: once `close()` is called, operations reject with a
+  `ConnectionError` until `connect()` is called again.
+- When a connection is lost while a transaction is active, the database rolls
+  the transaction back, so the transaction must be ended, and its operations
+  must reject with a `ConnectionError`, instead of implicitly running on a new
+  connection. Prepared statements of a lost connection must reject with a
+  `QueryError`.
+- `connectionOptions.connectTimeout` is the standard timeout for establishing a
+  connection, in milliseconds. When it passes, connecting rejects with a
+  `ConnectionError`.
 
 ### Pooling
 
 Pooling is implicit and always enabled. A `Client` manages a pool of
 connections:
 
-```ts
+```ts ignore
 interface PoolOptions {
   lazyInitialization?: boolean; // default: false
   maxSize?: number; // default: 1
+  acquireTimeout?: number; // ms, default: wait indefinitely
+  idleTimeout?: number; // ms, default: keep idle connections
+  maxLifetime?: number; // ms, default: no maximum
 }
 ```
 
@@ -544,12 +637,24 @@ interface PoolOptions {
   up front.
 - `maxSize`: the maximum amount of connections in the pool. It defaults to `1`,
   which makes the client behave like a single connection. The client becomes a
-  connection pool when `maxSize` is raised.
+  connection pool when `maxSize` is raised. Databases without connection pools
+  may emulate the pool with fewer connections than `maxSize`, and must reflect
+  the actual size in the options.
+- `acquireTimeout`: how long `acquire()` waits for a connection when the pool is
+  exhausted, after which it rejects with a `ConnectionError`.
+- `idleTimeout`: how long a connection may be idle in the pool before it is
+  closed. A new connection is opened when one is needed again.
+- `maxLifetime`: the maximum age of a connection. A connection that reached it
+  is closed instead of reused, once it is no longer in use.
+
+Implementations should support `acquireTimeout`, `idleTimeout` and
+`maxLifetime`, and document it if they do not.
 
 Lifecycle and rules:
 
-- `Client.connect()` must be called before the client is used. `acquire()` on a
-  client that is not connected must reject with a `ConnectionError`.
+- The client connects implicitly on the first operation, see
+  [Connecting](#connecting). `acquire()` on a closed client must reject with a
+  `ConnectionError`.
 - `acquire()` resolves to a connected `PoolClient`. If the pool is at `maxSize`
   with no idle connections, `acquire()` waits until a connection is released or
   removed.
@@ -557,11 +662,12 @@ Lifecycle and rules:
   with `remove()` when the connection is in a broken state so it is not reused.
   Both are idempotent, and both mark the pool client as disposed. Disposing a
   pool client releases it.
-- The query methods (`execute`, `query`) automatically acquire a pool client and
-  release it when the operation completes. Because the `query` result context is
-  lazy, the connection is held until the buffered result is complete or the
-  context is disposed; after that, the context can still be replayed from the
-  buffer.
+- The query methods (`execute`, `query`, `executeScript`) automatically acquire
+  a pool client and release it when the operation completes. A `query` result
+  acquires its connection when the query runs, and holds it until the result is
+  fully read or disposed. A started result that is neither read nor disposed
+  holds its connection, so an `acquireTimeout` is recommended to turn such a
+  leak into an error.
 - `beginTransaction` and `prepare` acquire a pool client that is held until the
   transaction is finished or the prepared statement is deallocated.
 - `Client.close()` closes all connections in the pool and is idempotent.
@@ -612,9 +718,10 @@ In general we follow
 > 3. The 'options' argument is the only argument that is a `Record` type
 >    `Object`.
 
-Extension examples: tagged template query helpers (`sql`...``), `queryOne` /
-`queryMany` convenience wrappers, batch operations, subscriptions, and database
-specific features such as SQLite blob I/O or Postgres `LISTEN`/`NOTIFY`.
+Extension examples: SQL template features such as identifiers and fragments,
+`queryOne` / `queryMany` convenience wrappers, batch operations, subscriptions,
+and database specific features such as SQLite blob I/O or Postgres
+`LISTEN`/`NOTIFY`.
 
 ## Implementation
 
@@ -636,7 +743,7 @@ The `@stdext/database/sql` package contains the TypeScript interfaces and helper
 utilities to implement against, and `@stdext/database/sql/testing` contains a
 conformance test suite:
 
-```ts
+```ts ignore
 import { testClientIntegration } from "@stdext/database/sql/testing";
 
 Deno.test("MyClient conformance", async (t) => {
@@ -659,64 +766,58 @@ including the connection pool and savepoint based nested transactions.
 
 ## Examples
 
-Connect and query:
+Connect and query (the connection is opened by the first operation):
 
-```ts
-await using client = new Client(connectionUrl);
-await client.connect();
+FENCEts ignore await using client = new Client(connectionUrl);
 
 await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
 
-const ctx = await client.query("SELECT id, name FROM users");
-console.log(ctx.metadata.columns);
-// ["id", "name"]
-console.log(await ctx.toRecords());
-// [{ id: 1, name: "Alice" }]
-```
+const result = client.query("SELECT id, name FROM users"); console.log(await
+result.columns()); // ["id", "name"] console.log(await result.toRecords()); //
+[{ id: 1, name: "Alice" }] FENCE
 
-Streaming a large result:
+Streaming a large result, with constant memory use:
 
-```ts
-const ctx = await client.query("SELECT * FROM events");
-for await (const row of ctx) {
-  console.log(row.toRecord());
-}
-```
+FENCEts ignore for await (const row of client.query("SELECT * FROM events")) {
+console.log(row.toRecord()); } FENCE
 
-Prepared statement:
+SQL templates, with placeholders rendered by the driver:
 
-```ts
-await using stmt = await client.prepare("SELECT * FROM users WHERE id = ?");
-const ctx = await stmt.query([1]);
-console.log(await ctx.toRecords());
-// disposed (deallocated) at the end of the scope
-```
+FENCEts ignore const { affectedRows, lastInsertId } = await client.execute(
+sql`INSERT INTO users (name) VALUES (${name})`, ); const users = await
+client.query(sql`SELECT * FROM users WHERE name = ${name}`) .toRecords(); FENCE
+
+Prepared statement, with the placeholder style of the database (`?` in SQLite,
+`$1` in Postgres):
+
+FENCEts ignore await using stmt = await client.prepare("SELECT * FROM users
+WHERE id = ?"); console.log(await stmt.query([1]).toRecords()); // disposed
+(deallocated) at the end of the scope FENCE
 
 Transaction:
 
-```ts
-await using tx = await client.beginTransaction();
-await tx.execute("INSERT INTO users (name) VALUES ('Alice')");
-await tx.commitTransaction();
-// if the scope ends without a commit, the transaction is rolled back
-```
+FENCEts ignore await using tx = await client.beginTransaction(); await
+tx.execute("INSERT INTO users (name) VALUES ('Alice')"); await tx.commit(); //
+if the scope ends without a commit, the transaction is rolled back FENCE
 
 Transaction wrapper:
 
-```ts
-const users = await client.transaction(async (tx) => {
-  await tx.execute("INSERT INTO users (name) VALUES ('Alice')");
-  return (await tx.query("SELECT * FROM users")).toRecords();
-});
-```
+FENCEts ignore const users = await client.transaction(async (tx) => { await
+tx.execute("INSERT INTO users (name) VALUES ('Alice')"); return await
+tx.query("SELECT * FROM users").toRecords(); }); FENCE
+
+Script:
+
+FENCEts ignore await
+client.executeScript(`CREATE TABLE users (id INTEGER, name TEXT);
+  CREATE INDEX users_name ON users (name);`);
+FENCE
 
 Manual pool usage:
 
-```ts
-await using poolClient = await client.acquire();
-await poolClient.execute("INSERT INTO users (name) VALUES ('Bob')");
-// released back to the pool at the end of the scope
-```
+FENCEts ignore await using poolClient = await client.acquire(); await
+poolClient.execute("INSERT INTO users (name) VALUES ('Bob')"); // released back
+to the pool at the end of the scope FENCE
 
 ## Acknowledgment
 

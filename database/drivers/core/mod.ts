@@ -20,9 +20,10 @@
  *   BaseClient,
  *   BaseDriver,
  *   type DriverParameters,
+ *   type DriverResult,
  *   type StatementHandle,
  * } from "@stdext/database/drivers/core";
- * import type { Row } from "@stdext/database/sql";
+ * import type { ExecuteResult } from "@stdext/database/sql";
  *
  * class EchoDriver extends BaseDriver {
  *   #connected = false;
@@ -45,17 +46,27 @@
  *     return Promise.resolve();
  *   }
  *
- *   protected override executeDriver(): Promise<number | undefined> {
- *     return Promise.resolve(undefined);
+ *   protected override executeDriver(): Promise<ExecuteResult> {
+ *     return Promise.resolve({ affectedRows: 0 });
+ *   }
+ *
+ *   protected override executeScriptDriver(): Promise<void> {
+ *     return Promise.resolve();
  *   }
  *
  *   // Every query returns its parameters as a single row
- *   protected override async *queryDriver(
+ *   protected override queryDriver(
  *     _sql: string,
  *     params: DriverParameters | undefined,
- *   ): AsyncGenerator<Row> {
+ *   ): Promise<DriverResult> {
  *     const values = Array.isArray(params) ? params : [];
- *     yield { columns: values.map((_, i) => `p${i}`), values };
+ *     async function* rows() {
+ *       yield values;
+ *     }
+ *     return Promise.resolve({
+ *       columns: values.map((_, i) => `p${i}`),
+ *       rows: rows(),
+ *     });
  *   }
  *
  *   protected override prepareDriver(sql: string): Promise<StatementHandle> {
@@ -74,9 +85,7 @@
  * }
  *
  * await using client = new EchoClient("echo://");
- * await client.connect();
- * const ctx = await client.query("SELECT", [1, "a"]);
- * console.log(await ctx.toRecords()); // [{ p0: 1, p1: "a" }]
+ * console.log(await client.query("SELECT", [1, "a"]).toRecords()); // [{ p0: 1, p1: "a" }]
  * ```
  *
  * @module

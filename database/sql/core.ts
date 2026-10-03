@@ -4,8 +4,10 @@ import type { ClientEventTarget, Eventable } from "./events.ts";
  * ParameterType
  *
  * The recommended set of primitive parameter types that a driver should
- * support when binding query parameters. Drivers may extend this with
- * database specific types.
+ * support when binding query parameters: the types that JavaScript runtimes
+ * bind natively. Binary data is bound from any `ArrayBufferView` or
+ * `ArrayBuffer`. Drivers may extend this with database specific types, such
+ * as `Date`.
  */
 export type ParameterType =
   | string
@@ -14,8 +16,8 @@ export type ParameterType =
   | boolean
   | null
   | undefined
-  | Date
-  | Uint8Array;
+  | ArrayBufferView
+  | ArrayBuffer;
 
 /**
  * QueryParameters
@@ -29,20 +31,64 @@ export type QueryParameters =
   | Record<string, ParameterType>;
 
 /**
- * ContextMetadata
+ * SqlTemplate
  *
- * Metadata about the result of a query, such as the returned columns.
- *
- * @template C the column names
+ * A SQL statement written as a tagged template, created with the `sql` tag. The statement is kept as the text between the
+ * interpolated values, and the values, so that it is independent of the
+ * placeholder style of the database: the driver renders its own placeholders
+ * and binds the values as parameters. Values are never inserted into the SQL
+ * text.
  *
  * @example
  * ```ts
- * type Metadata = ContextMetadata<["id", "name"]>;
+ * import { sql } from "@stdext/database/sql";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const id = 1;
+ * const template = sql`SELECT * FROM users WHERE id = ${id}`;
+ * assertEquals(template.strings, ["SELECT * FROM users WHERE id = ", ""]);
+ * assertEquals(template.values, [1]);
  * ```
  */
-export type ContextMetadata<C extends string[] = string[]> = {
-  columns: C;
-};
+export interface SqlTemplate {
+  /**
+   * The SQL text before, between and after the values. There is always one
+   * more string than there are values.
+   */
+  readonly strings: readonly string[];
+  /**
+   * The values to bind as parameters
+   */
+  readonly values: readonly ParameterType[];
+}
+
+/**
+ * Statement
+ *
+ * A SQL statement: either SQL text with placeholders in the style of the
+ * database, or a {@linkcode SqlTemplate}.
+ */
+export type Statement = string | SqlTemplate;
+
+/**
+ * ExecuteResult
+ *
+ * The result of executing a statement.
+ */
+export interface ExecuteResult {
+  /**
+   * The number of rows inserted, updated or deleted by the statement. It is
+   * `0` for statements that modify no rows, such as `SELECT` or
+   * `CREATE TABLE`, and `undefined` only if the database does not report it.
+   */
+  affectedRows: number | undefined;
+  /**
+   * The id of the last inserted row, if the database reports it, such as the
+   * `rowid` in SQLite or the auto increment id in MySQL. Databases without
+   * insert ids, such as Postgres, return the ids with `RETURNING` instead.
+   */
+  lastInsertId?: number | bigint | string;
+}
 
 /**
  * ResultObject
@@ -58,8 +104,8 @@ export interface ResultObject<
   R = Record<string, V[keyof V]>,
 > {
   /**
-   * The values of the row, in the same order as the columns in the
-   * {@linkcode ContextMetadata}
+   * The values of the row, in the same order as the columns of the
+   * {@linkcode ResultIterableContext}
    */
   values: V;
   /**
@@ -74,57 +120,68 @@ export interface ResultObject<
  * The result of a query. It is both an async iterable of rows and provides
  * convenience methods for collecting the rows as values or records.
  *
- * Rows are buffered as they are lazily fetched, so the context can be
- * iterated and collected in any combination. Note that the buffered rows are
- * kept in memory, so for a massive amount of rows, iterate the context once
- * instead of collecting it.
+ * The result is lazy: the query runs when the result is first consumed, so
+ * errors, such as invalid SQL, are thrown by the iteration or collect
+ * methods. Rows are streamed and not kept in memory, so the result can be
+ * consumed once: either iterated, or collected with
+ * {@linkcode ResultIterableContext.toValues} or
+ * {@linkcode ResultIterableContext.toRecords}. Consuming it again rejects
+ * with a {@linkcode QueryError}.
  *
- * The context is asynchronously disposable: disposing stops fetching and
- * releases the underlying connection. Rows already fetched remain buffered
- * and can still be replayed.
+ * The result holds its connection from when the query runs until all rows
+ * are read or the result is disposed. Disposing stops fetching and releases
+ * the connection; disposing a result that was never consumed does not run
+ * the query.
  *
  * @template V the row values
- * @template M the result metadata
  * @template R the record representation of a row
  *
  * @example
- * ```ts
- * const ctx = await client.query("SELECT id, name FROM users");
- * for await (const row of ctx) {
+ * FENCEts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ *
+ * for await (const row of client.query("SELECT id, name FROM users")) {
  *   console.log(row.toRecord());
  * }
- * ```
+ * console.log(await client.query("SELECT id, name FROM users").toRecords());
+ * FENCE
  */
 export interface ResultIterableContext<
   V extends unknown[] = unknown[],
-  M extends ContextMetadata = ContextMetadata,
-  R = Record<M["columns"][number], V[number]>,
+  R = Record<string, V[number]>,
 > extends AsyncDisposable, AsyncIterable<ResultObject<V, R>> {
   /**
-   * Metadata about the result, such as the returned columns
+   * The column names of the result. Runs the query if it has not run yet,
+   * without consuming the rows. The columns are also known when there are no
+   * rows, unless the database does not report them without rows.
    */
-  metadata: M;
+  columns(): Promise<string[]>;
   /**
    * Collect all rows as an array of values
    */
-  toValues: () => Promise<V[]>;
+  toValues(): Promise<V[]>;
   /**
    * Collect all rows as an array of records
    */
-  toRecords: () => Promise<R[]>;
-  /**
-   * Map a single row's values to a record
-   */
-  toRecord: (values: V) => R;
+  toRecords(): Promise<R[]>;
 }
 
 /**
  * ConnectionOptions
  *
- * Placeholder for driver specific connection options. There are no standard
- * connection options; drivers extend this with the options they support.
+ * Options used when connecting to the database. Drivers extend this with
+ * database specific options.
  */
 export interface ConnectionOptions {
+  /**
+   * How long establishing a connection may take, in milliseconds. When it
+   * passes, connecting rejects with a {@linkcode ConnectionError}. Defaults to
+   * no timeout.
+   */
+  connectTimeout?: number;
   [key: string]: unknown;
 }
 
@@ -137,8 +194,9 @@ export interface ConnectionOptions {
 export interface QueryOptions {
   /**
    * A signal to abort the query. When aborted, the implementation must stop
-   * the current query, release the connection, and reject with the abort
-   * error.
+   * the current query as soon as the database allows (for synchronous
+   * databases, before the statement runs and between rows), release the
+   * connection, and reject with the abort reason.
    */
   signal?: AbortSignal;
   /**
@@ -182,6 +240,28 @@ export interface PoolOptions {
    * connection pool when this is raised.
    */
   maxSize?: number;
+  /**
+   * How long {@linkcode Poolable.acquire} waits for a connection when the
+   * pool is exhausted, in milliseconds. When it passes, `acquire` rejects
+   * with a {@linkcode ConnectionError}. Defaults to waiting indefinitely.
+   *
+   * Because query results hold their connection until they are fully read
+   * or disposed, this also turns a leaked result into an error instead of a
+   * hang.
+   */
+  acquireTimeout?: number;
+  /**
+   * How long a connection may be idle in the pool before it is closed, in
+   * milliseconds. A new connection is opened when one is needed again.
+   * Defaults to keeping idle connections open.
+   */
+  idleTimeout?: number;
+  /**
+   * The maximum age of a connection, in milliseconds. A connection that
+   * reached this age is closed instead of reused, once it is no longer in
+   * use. Defaults to no maximum.
+   */
+  maxLifetime?: number;
 }
 
 /**
@@ -254,6 +334,11 @@ export interface ClientOptions<
  *
  * Represents an object with a connection lifecycle to a database. A connectable
  * is also asynchronously disposable; disposing closes the connection.
+ *
+ * The connection is opened implicitly by the first operation, so calling
+ * {@linkcode Connectable.connect} is optional: it connects eagerly, for
+ * example to report connection errors early. Once closed, operations reject
+ * with a {@linkcode ConnectionError} until it is connected again.
  */
 export interface Connectable extends AsyncDisposable {
   /**
@@ -303,34 +388,49 @@ export interface Pingable {
  */
 export interface Queryable {
   /**
-   * Execute a SQL statement.
+   * Execute a single SQL statement.
    *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
+   * @param sql the SQL statement, as text or a {@linkcode SqlTemplate}
+   * @param params the parameters to bind to the SQL statement. Not allowed
+   * with a {@linkcode SqlTemplate}, which carries its own values.
    * @param options the options to pass to the method, will be merged with the
    * global options
-   * @returns the number of affected rows, if known by the database
+   * @returns the number of affected rows and the last inserted id
    */
   execute(
-    sql: string,
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined>;
+  ): Promise<ExecuteResult>;
   /**
-   * Query the database and return the rows as a
+   * Query the database with a single SQL statement, and return the rows as a
    * {@linkcode ResultIterableContext}.
    *
-   * @param sql the SQL statement
-   * @param params the parameters to bind to the SQL statement
+   * The result is lazy: the query runs when the result is consumed. It holds
+   * its connection until all rows are read or the result is disposed.
+   *
+   * @param sql the SQL statement, as text or a {@linkcode SqlTemplate}
+   * @param params the parameters to bind to the SQL statement. Not allowed
+   * with a {@linkcode SqlTemplate}, which carries its own values.
    * @param options the options to pass to the method, will be merged with the
    * global options
    * @returns the result of the query
    */
   query(
-    sql: string,
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext>;
+  ): ResultIterableContext;
+  /**
+   * Execute a script of one or more SQL statements, such as a migration. The
+   * statements run in order, and the method resolves once all have run.
+   * Scripts take no parameters.
+   *
+   * @param sql the SQL statements
+   * @param options the options to pass to the method, will be merged with the
+   * global options
+   */
+  executeScript(sql: string, options?: QueryOptions): Promise<void>;
 }
 
 /**
@@ -352,9 +452,12 @@ export interface Preparable {
    *
    * @example
    * ```ts
+   * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+   *
+   * await using client = new SqliteClient(":memory:");
+   * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
    * const stmt = await client.prepare("SELECT * FROM users WHERE id = ?");
-   * const ctx = await stmt.query([1]);
-   * console.log(await ctx.toRecords());
+   * console.log(await stmt.query([1]).toRecords());
    * await stmt.deallocate();
    * ```
    */
@@ -389,14 +492,14 @@ export interface PreparedStatement extends AsyncDisposable {
    * @param params the parameters to bind to the SQL statement
    * @param options the options to pass to the method, will be merged with the
    * global options
-   * @returns the number of affected rows, if known by the database
+   * @returns the number of affected rows and the last inserted id
    */
   execute(
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined>;
+  ): Promise<ExecuteResult>;
   /**
-   * Query the database and return the rows as a
+   * Query the database and return the rows as a lazy
    * {@linkcode ResultIterableContext}.
    *
    * @param params the parameters to bind to the SQL statement
@@ -407,7 +510,7 @@ export interface PreparedStatement extends AsyncDisposable {
   query(
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext>;
+  ): ResultIterableContext;
 }
 
 /**
@@ -441,9 +544,13 @@ export interface Transactionable {
    *
    * @example
    * ```ts
+   * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+   *
+   * await using client = new SqliteClient(":memory:");
+   * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
    * const result = await client.transaction(async (tx) => {
    *   await tx.execute("INSERT INTO users (name) VALUES ('Alice')");
-   *   return (await tx.query("SELECT * FROM users")).toRecords();
+   *   return await tx.query("SELECT * FROM users").toRecords();
    * });
    * ```
    */
@@ -479,7 +586,7 @@ export interface Transaction
    * @param options the options to pass to the method, will be merged with the
    * global options
    */
-  commitTransaction(options?: TransactionOptions): Promise<void>;
+  commit(options?: TransactionOptions): Promise<void>;
   /**
    * Rollback the transaction. After rolling back, the transaction can no
    * longer be used.
@@ -487,7 +594,7 @@ export interface Transaction
    * @param options the options to pass to the method, will be merged with the
    * global options
    */
-  rollbackTransaction(options?: TransactionOptions): Promise<void>;
+  rollback(options?: TransactionOptions): Promise<void>;
   /**
    * Create a savepoint within the transaction.
    *

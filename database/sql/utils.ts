@@ -1,4 +1,5 @@
 import type { ResultIterableContext, ResultObject } from "./core.ts";
+import { QueryError } from "./errors.ts";
 
 /**
  * Row
@@ -52,116 +53,132 @@ export function getObjectFromRow(row: Row): Record<string, unknown> {
 }
 
 /**
- * Create a {@linkcode ResultIterableContext} from a stream of
- * {@linkcode Row}s. This is a helper for driver authors implementing the
- * return value of the query methods.
+ * ResultSource
  *
- * Rows are buffered as they are lazily fetched, so the context can be
- * iterated and collected in any combination: rows already fetched are
- * replayed from the buffer, and the collect methods drain any remaining
- * rows. Note that the buffered rows are kept in memory, so for a massive
- * amount of rows, iterate the context once instead of collecting it.
+ * The result of a query as produced by a driver, from which
+ * {@linkcode createResultIterableContext} creates a
+ * {@linkcode ResultIterableContext}.
+ */
+export interface ResultSource {
+  /**
+   * The column names of the result, known before the first row. Only empty
+   * for a result without rows when the database does not report the columns
+   * without rows.
+   */
+  columns: string[];
+  /**
+   * The values of the rows, in the order of the columns. The rows are read
+   * lazily, and the iterator is returned early when the result is disposed,
+   * so that the driver can clean up, such as in a `finally` block.
+   */
+  rows: AsyncIterable<unknown[]>;
+}
+
+/**
+ * Create a lazy, single-pass {@linkcode ResultIterableContext}. This is a
+ * helper for driver authors implementing the query methods.
  *
- * The context is asynchronously disposable: disposing stops fetching, and
- * rows already fetched remain buffered and can still be replayed.
+ * The query is started with `start` when the result is first consumed, or
+ * when its columns are requested. Starting reads the first row, so that the
+ * query runs and errors are thrown, and so that the cleanup of the rows
+ * iterator runs when the result is disposed. Rows are not kept in memory, so
+ * the result can be consumed once: consuming it again rejects with a
+ * {@linkcode QueryError}. Disposing a result that was never started does not
+ * start it.
  *
- * The first row is consumed to resolve the columns of the
- * {@linkcode ResultIterableContext.metadata}, so the returned context is
- * available as soon as the first row arrives. When there are no rows, the
- * metadata columns are empty.
- *
- * @param rows the rows returned by the database
+ * @param start starts the query and resolves to its source
  * @returns the result context
  *
  * @example
  * ```ts
  * import { createResultIterableContext } from "@stdext/database/sql";
+ * import { assertEquals } from "@std/assert";
  *
  * async function* rows() {
- *   yield { columns: ["a"], values: ["b"] };
+ *   yield [1, "Alice"];
  * }
  *
- * const ctx = await createResultIterableContext(rows());
- * for await (const row of ctx) {
- *   console.log(row.toRecord());
- * }
- * console.log(await ctx.toRecords());
+ * const ctx = createResultIterableContext(() =>
+ *   Promise.resolve({ columns: ["id", "name"], rows: rows() })
+ * );
+ * assertEquals(await ctx.columns(), ["id", "name"]);
+ * assertEquals(await ctx.toRecords(), [{ id: 1, name: "Alice" }]);
  * ```
  */
-export async function createResultIterableContext(
-  rows: AsyncIterable<Row>,
-): Promise<ResultIterableContext> {
-  const source = rows[Symbol.asyncIterator]();
-
-  // Rows are buffered as they are fetched, so the context can be iterated
-  // and collected in any combination.
-  const buffer: ResultObject[] = [];
-  let done = false;
-  let columns: string[] = [];
-
-  async function next(): Promise<IteratorResult<Row>> {
-    const result = await source.next();
-    if (result.done) {
-      done = true;
-    } else if (columns.length === 0) {
-      columns = result.value.columns;
-    }
-    return result;
+export function createResultIterableContext(
+  start: () => Promise<ResultSource>,
+): ResultIterableContext {
+  interface Started {
+    columns: string[];
+    iterator: AsyncIterator<unknown[]>;
+    first: IteratorResult<unknown[]>;
   }
+  let started: Promise<Started> | undefined;
+  let consumed = false;
+  let disposed = false;
 
-  async function* iterate(): AsyncGenerator<ResultObject> {
-    for (let i = 0;; i++) {
-      if (i < buffer.length) {
-        yield buffer[i];
-        continue;
-      }
-      if (done) return;
-      const result = await next();
-      if (result.done) return;
-      const row = result.value;
-      const object: ResultObject = {
-        values: row.values,
-        toRecord: () => getObjectFromRow(row),
+  function begin(): Promise<Started> {
+    return started ??= (async () => {
+      const source = await start();
+      const iterator = source.rows[Symbol.asyncIterator]();
+      return {
+        columns: source.columns,
+        iterator,
+        first: await iterator.next(),
       };
-      buffer.push(object);
-      yield object;
+    })();
+  }
+
+  function assertUsable(): void {
+    if (disposed) throw new QueryError("The result is disposed");
+  }
+
+  async function* rows(): AsyncGenerator<ResultObject> {
+    assertUsable();
+    if (consumed) {
+      throw new QueryError(
+        "The result has already been consumed: a result can be iterated or collected once",
+      );
+    }
+    consumed = true;
+    const { columns, iterator, first } = await begin();
+    let result = first;
+    try {
+      while (!result.done) {
+        const values = result.value;
+        yield { values, toRecord: () => getObjectFromRow({ columns, values }) };
+        if (disposed) return;
+        result = await iterator.next();
+      }
+    } finally {
+      // Stops the source when the iteration ends early.
+      if (!result.done) await iterator.return?.();
     }
   }
 
-  async function collect<T>(
-    mapper: (row: ResultObject) => T,
-  ): Promise<T[]> {
+  async function collect<T>(map: (row: ResultObject) => T): Promise<T[]> {
     const values: T[] = [];
-    for await (const row of iterate()) {
-      values.push(mapper(row));
-    }
+    for await (const row of rows()) values.push(map(row));
     return values;
   }
 
-  // The first row is primed into the buffer so that the columns in the
-  // metadata are known when the context is returned.
-  const first = await next();
-  if (!first.done) {
-    const row = first.value;
-    buffer.push({
-      values: row.values,
-      toRecord: () => getObjectFromRow(row),
-    });
-  }
-
   return {
-    metadata: { columns },
-    async *[Symbol.asyncIterator]() {
-      yield* iterate();
-    },
+    [Symbol.asyncIterator]: rows,
     async [Symbol.asyncDispose](): Promise<void> {
-      // Stops fetching further rows. Rows already fetched remain in the
-      // buffer and can still be replayed.
-      done = true;
-      await source.return?.(undefined);
+      if (disposed) return;
+      disposed = true;
+      if (!started) return;
+      try {
+        await (await started).iterator.return?.();
+      } catch {
+        // The query failed to start, so there is nothing to clean up.
+      }
+    },
+    async columns(): Promise<string[]> {
+      assertUsable();
+      return (await begin()).columns;
     },
     toValues: () => collect((row) => row.values),
     toRecords: () => collect((row) => row.toRecord()),
-    toRecord: (values) => getObjectFromRow({ columns, values }),
   };
 }

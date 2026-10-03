@@ -7,12 +7,13 @@
  *
  * @module
  */
-import type { QueryOptions, Row } from "../../sql/mod.ts";
+import { type ExecuteResult, type QueryOptions, sql } from "../../sql/mod.ts";
 import type { TestSql } from "../../sql/testing.ts";
 import { BaseClient } from "./client.ts";
 import {
   BaseDriver,
   type DriverParameters,
+  type DriverResult,
   type StatementHandle,
 } from "./driver.ts";
 
@@ -22,6 +23,8 @@ export const memorySql: TestSql = {
   columns: ["id", "name"],
   count: 3,
   parameterQuery: "SELECT ? AS value",
+  emptyQuery: "SELECT id, name FROM users WHERE 1 = 0",
+  parameterTemplate: (value) => sql`SELECT ${value} AS value`,
 };
 
 const USERS = [[1, "Alice"], [2, "Bob"], [3, "Charlie"]];
@@ -29,6 +32,8 @@ const CONTROL = /^(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b/;
 
 /** The connection URL of a database that fails to connect */
 export const FAILING_URL = "memory://fail";
+/** The connection URL of a database that connects until aborted */
+export const HANGING_URL = "memory://hang";
 
 export class MemoryDriver extends BaseDriver {
   #connected = false;
@@ -39,22 +44,40 @@ export class MemoryDriver extends BaseDriver {
     return this.#connected;
   }
 
-  #run(sql: string, params: DriverParameters | undefined): Row[] | number {
+  /** Simulate a connection lost without closing the driver */
+  loseConnection(): void {
+    this.#connected = false;
+  }
+
+  #run(
+    sql: string,
+    params: DriverParameters | undefined,
+  ): { columns: string[]; rows: unknown[][] } {
     this.statements.push(sql);
     if (sql === memorySql.query) {
-      return USERS.map((values) => ({ columns: memorySql.columns, values }));
+      return { columns: memorySql.columns, rows: USERS };
+    }
+    if (sql === memorySql.emptyQuery) {
+      return { columns: memorySql.columns, rows: [] };
     }
     if (sql === memorySql.parameterQuery) {
       const values = Array.isArray(params) ? params : [];
-      return [{ columns: ["value"], values: [values[0]] }];
+      return { columns: ["value"], rows: [[values[0]]] };
     }
-    if (sql === memorySql.execute || CONTROL.test(sql)) return 0;
+    if (sql === memorySql.execute || CONTROL.test(sql)) {
+      return { columns: [], rows: [] };
+    }
     throw new Error(`Syntax error: ${sql}`);
   }
 
-  protected override connectDriver(): Promise<void> {
+  protected override connectDriver(signal: AbortSignal): Promise<void> {
     if (this.connectionUrl.toString() === FAILING_URL) {
       return Promise.reject(new Error("Connection refused"));
+    }
+    if (this.connectionUrl.toString() === HANGING_URL) {
+      return new Promise((_, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason))
+      );
     }
     this.#connected = true;
     return Promise.resolve();
@@ -73,18 +96,32 @@ export class MemoryDriver extends BaseDriver {
     sql: string,
     params: DriverParameters | undefined,
     _options: QueryOptions,
-  ): Promise<number | undefined> {
-    const result = this.#run(sql, params);
-    return Promise.resolve(typeof result === "number" ? result : 0);
+  ): Promise<ExecuteResult> {
+    // Only the statements that do not modify rows are supported.
+    this.#run(sql, params);
+    return Promise.resolve({ affectedRows: 0 });
   }
 
-  protected override async *queryDriver(
+  protected override executeScriptDriver(
+    sql: string,
+    _options: QueryOptions,
+  ): Promise<void> {
+    for (const statement of sql.split(";")) {
+      if (statement.trim()) this.#run(statement.trim(), undefined);
+    }
+    return Promise.resolve();
+  }
+
+  protected override queryDriver(
     sql: string,
     params: DriverParameters | undefined,
     _options: QueryOptions,
-  ): AsyncGenerator<Row> {
-    const result = this.#run(sql, params);
-    if (typeof result !== "number") yield* result;
+  ): Promise<DriverResult> {
+    const { columns, rows } = this.#run(sql, params);
+    async function* iterate(): AsyncGenerator<unknown[]> {
+      yield* rows;
+    }
+    return Promise.resolve({ columns, rows: iterate() });
   }
 
   protected override prepareDriver(

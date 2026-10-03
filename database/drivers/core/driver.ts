@@ -5,13 +5,16 @@ import {
   type Driver,
   DriverEvent,
   DriverEventTarget,
+  type ExecuteResult,
   type Options,
   type PreparedStatement,
   QueryError,
   type QueryOptions,
   type QueryParameters,
+  renderStatement,
   type ResultIterableContext,
-  type Row,
+  type ResultSource,
+  type Statement,
   type Transaction,
   TransactionError,
   type TransactionOptions,
@@ -24,20 +27,26 @@ import {
 export type DriverParameters = unknown[] | Record<string, unknown>;
 
 /**
+ * The result of a query, as returned by a driver implementation: the columns,
+ * known before the first row, and the lazily read rows.
+ */
+export type DriverResult = ResultSource;
+
+/**
  * A database specific prepared statement, as created by
  * {@linkcode BaseDriver.prepareDriver}.
  */
 export interface StatementHandle {
-  /** Execute the statement, resolving to the affected rows if known */
+  /** Execute the statement */
   execute(
     params: DriverParameters | undefined,
     options: QueryOptions,
-  ): Promise<number | undefined>;
-  /** Query the statement, streaming the rows */
+  ): Promise<ExecuteResult>;
+  /** Query the statement */
   query(
     params: DriverParameters | undefined,
     options: QueryOptions,
-  ): AsyncIterable<Row>;
+  ): Promise<DriverResult>;
   /** Release the statement in the database */
   deallocate(): Promise<void>;
 }
@@ -87,15 +96,53 @@ async function runTransaction<T>(
 ): Promise<T> {
   try {
     const result = await fn(tx);
-    if (tx.inTransaction) await tx.commitTransaction();
+    if (tx.inTransaction) await tx.commit();
     return result;
   } catch (error) {
     if (tx.inTransaction) {
       // The original error is more relevant than a failing rollback.
-      await tx.rollbackTransaction().catch(() => {});
+      await tx.rollback().catch(() => {});
     }
     throw error;
   }
+}
+
+/**
+ * Create a lazy result that delegates to the result of another object, such
+ * as the driver of a transaction or a pool client. The delegate is only
+ * created when the result is started, so that checks, such as whether a
+ * transaction is still active, run when the query runs. The `done` callback
+ * runs once the delegated result is read or disposed.
+ *
+ * @param start creates the delegated result, and optionally a callback that
+ * runs when it is done
+ * @returns the result
+ */
+export function delegateResult(
+  start: () => Promise<{ result: ResultIterableContext; done?: Callback }>,
+): ResultIterableContext {
+  return createResultIterableContext(async () => {
+    const { result, done } = await start();
+    const finish = async () => {
+      await result[Symbol.asyncDispose]();
+      await done?.();
+    };
+    let columns: string[];
+    try {
+      columns = await result.columns();
+    } catch (error) {
+      await finish();
+      throw error;
+    }
+    async function* rows(): AsyncGenerator<unknown[]> {
+      try {
+        for await (const row of result) yield row.values;
+      } finally {
+        await finish();
+      }
+    }
+    return { columns, rows: rows() };
+  });
 }
 
 /**
@@ -107,12 +154,12 @@ export interface PreparedStatementCalls {
   execute(
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined>;
+  ): Promise<ExecuteResult>;
   /** Query the statement */
   query(
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext>;
+  ): ResultIterableContext;
   /** Deallocate the statement */
   deallocate(): Promise<void>;
 }
@@ -158,17 +205,19 @@ export class BasePreparedStatement implements PreparedStatement {
   async execute(
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined> {
+  ): Promise<ExecuteResult> {
     this.#assertUsable();
     return await this.#calls.execute(params, options);
   }
 
-  async query(
+  query(
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext> {
-    this.#assertUsable();
-    return await this.#calls.query(params, options);
+  ): ResultIterableContext {
+    return delegateResult(() => {
+      this.#assertUsable();
+      return Promise.resolve({ result: this.#calls.query(params, options) });
+    });
   }
 
   static {
@@ -228,21 +277,30 @@ export class BaseTransaction implements Transaction {
   }
 
   async execute(
-    sql: string,
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined> {
+  ): Promise<ExecuteResult> {
     this.#assertActive();
     return await this.#context.driver.execute(sql, params, options);
   }
 
-  async query(
-    sql: string,
+  query(
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext> {
+  ): ResultIterableContext {
+    return delegateResult(() => {
+      this.#assertActive();
+      return Promise.resolve({
+        result: this.#context.driver.query(sql, params, options),
+      });
+    });
+  }
+
+  async executeScript(sql: string, options?: QueryOptions): Promise<void> {
     this.#assertActive();
-    return await this.#context.driver.query(sql, params, options);
+    await this.#context.driver.executeScript(sql, options);
   }
 
   async prepare(
@@ -271,7 +329,7 @@ export class BaseTransaction implements Transaction {
     return await runTransaction(await this.beginTransaction(options), fn);
   }
 
-  async commitTransaction(_options?: TransactionOptions): Promise<void> {
+  async commit(_options?: TransactionOptions): Promise<void> {
     this.#assertActive();
     await this.#context.control(
       this.#savepoint ? `RELEASE SAVEPOINT ${this.#savepoint}` : "COMMIT",
@@ -279,7 +337,7 @@ export class BaseTransaction implements Transaction {
     await this.#end();
   }
 
-  async rollbackTransaction(_options?: TransactionOptions): Promise<void> {
+  async rollback(_options?: TransactionOptions): Promise<void> {
     this.#assertActive();
     try {
       if (this.#savepoint) {
@@ -335,15 +393,22 @@ export class BaseTransaction implements Transaction {
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
-    if (this.#active) await this.rollbackTransaction();
+    if (this.#active) await this.rollback();
   }
+}
+
+interface Call {
+  sql: string;
+  params: DriverParameters | undefined;
+  options: QueryOptions;
 }
 
 /**
  * The base of the SQL drivers. It implements the parts of the
  * {@linkcode Driver} specification that are the same for every database:
- * option merging, value transforms, abort checks, error wrapping, events,
- * prepared statement and transaction (savepoint) bookkeeping.
+ * implicit connecting, connect timeouts, option merging, SQL templates, value
+ * transforms, abort checks, error wrapping, events, lazy results, prepared
+ * statement and transaction (savepoint) bookkeeping.
  *
  * Implementations provide the database specific primitives.
  *
@@ -357,6 +422,11 @@ export abstract class BaseDriver<IOptions extends Options = Options>
   readonly #dispatched = new WeakSet<DatabaseError>();
   #transaction?: BaseTransaction;
   #savepointId = 0;
+  #connecting?: Promise<void>;
+  #closed = false;
+  // Incremented on every connect, to detect prepared statements of a
+  // previous connection.
+  #generation = 0;
 
   constructor(connectionUrl: string | URL, options?: IOptions) {
     this.#connectionUrl = connectionUrl;
@@ -378,39 +448,53 @@ export abstract class BaseDriver<IOptions extends Options = Options>
 
   abstract get connected(): boolean;
 
-  /** Open the database connection */
-  protected abstract connectDriver(): Promise<void>;
+  /**
+   * Open the database connection. When the signal aborts, because the
+   * connect timeout passed, connecting should stop and reject.
+   */
+  protected abstract connectDriver(signal: AbortSignal): Promise<void>;
   /** Close the database connection */
   protected abstract closeDriver(): Promise<void>;
   /** Check that the database connection is alive */
   protected abstract pingDriver(): Promise<void>;
-  /** Execute a single statement */
+  /**
+   * Execute a single statement. The affected rows are the rows inserted,
+   * updated or deleted, `0` for other statements, or `undefined` if the
+   * database does not report them.
+   */
   protected abstract executeDriver(
     sql: string,
     params: DriverParameters | undefined,
     options: QueryOptions,
-  ): Promise<number | undefined>;
-  /** Query a single statement, streaming the rows */
+  ): Promise<ExecuteResult>;
+  /** Query a single statement */
   protected abstract queryDriver(
     sql: string,
     params: DriverParameters | undefined,
     options: QueryOptions,
-  ): AsyncIterable<Row>;
+  ): Promise<DriverResult>;
+  /** Execute a script of one or more statements, without parameters */
+  protected abstract executeScriptDriver(
+    sql: string,
+    options: QueryOptions,
+  ): Promise<void>;
   /** Prepare a statement */
   protected abstract prepareDriver(
     sql: string,
     options: QueryOptions,
   ): Promise<StatementHandle>;
 
+  /**
+   * The placeholder of the parameter at the zero-based index, used to render
+   * SQL templates. Defaults to `?`.
+   */
+  protected placeholder(_index: number): string {
+    return "?";
+  }
+
   /** The statement that begins a transaction */
   protected beginStatement(_options: TransactionOptions): string {
     return "BEGIN";
-  }
-
-  #assertConnected(): void {
-    if (!this.connected) {
-      throw new ConnectionError("Driver is not connected");
-    }
   }
 
   #error(
@@ -440,86 +524,142 @@ export abstract class BaseDriver<IOptions extends Options = Options>
     }
   }
 
-  #call(
+  /**
+   * Connect implicitly, unless the driver was closed. A transaction whose
+   * connection was lost is rolled back by the database, so it is ended,
+   * instead of running its statements on a new connection.
+   */
+  async #ensureConnected(): Promise<void> {
+    if (this.connected) return;
+    if (this.#transaction?.inTransaction) {
+      invalidate(this.#transaction);
+      this.#transaction = undefined;
+      throw new ConnectionError(
+        "The connection was lost, and the transaction was rolled back",
+      );
+    }
+    if (this.#closed) throw new ConnectionError("Driver is closed");
+    await this.connect();
+  }
+
+  #merge(options: QueryOptions | undefined): QueryOptions {
+    return { ...this.#options.queryOptions, ...options };
+  }
+
+  async #call(
+    statement: Statement,
     params: QueryParameters | undefined,
-    options: QueryOptions | undefined,
-  ): { params: DriverParameters | undefined; options: QueryOptions } {
-    this.#assertConnected();
-    const merged = { ...this.#options.queryOptions, ...options };
+    merged: QueryOptions,
+  ): Promise<Call> {
     merged.signal?.throwIfAborted();
+    await this.#ensureConnected();
+    const rendered = renderStatement(
+      statement,
+      params,
+      (index) => this.placeholder(index),
+    );
     return {
-      params: transformParams(params, merged.transformInput),
+      sql: rendered.sql,
+      params: transformParams(rendered.params, merged.transformInput),
       options: merged,
     };
   }
 
   async *#rows(
-    source: AsyncIterable<Row>,
+    result: DriverResult,
     options: QueryOptions,
-  ): AsyncGenerator<Row> {
+  ): AsyncGenerator<unknown[]> {
     const transform = options.transformOutput;
     try {
-      for await (const row of source) {
+      for await (const values of result.rows) {
         options.signal?.throwIfAborted();
-        yield transform ? { ...row, values: row.values.map(transform) } : row;
+        yield transform ? values.map(transform) : values;
       }
     } catch (error) {
       throw this.#error(error, QueryError, options.signal);
     }
   }
 
-  async #execute(
-    params: QueryParameters | undefined,
-    options: QueryOptions | undefined,
-    fn: (
-      params: DriverParameters | undefined,
-      options: QueryOptions,
-    ) => Promise<number | undefined>,
-  ): Promise<number | undefined> {
-    const call = this.#call(params, options);
-    return await this.#guard(call.options, () => fn(call.params, call.options));
-  }
-
-  async #query(
-    params: QueryParameters | undefined,
-    options: QueryOptions | undefined,
-    fn: (
-      params: DriverParameters | undefined,
-      options: QueryOptions,
-    ) => AsyncIterable<Row>,
-  ): Promise<ResultIterableContext> {
-    const call = this.#call(params, options);
-    return await this.#guard(
-      call.options,
-      () =>
-        createResultIterableContext(
-          this.#rows(fn(call.params, call.options), call.options),
-        ),
+  #result(
+    options: QueryOptions,
+    call: () => Promise<Call>,
+    fn: (call: Call) => Promise<DriverResult>,
+  ): ResultIterableContext {
+    return createResultIterableContext(() =>
+      this.#guard(options, async () => {
+        const resolved = await call();
+        const result = await fn(resolved);
+        return {
+          columns: result.columns,
+          rows: this.#rows(result, resolved.options),
+        };
+      })
     );
   }
 
   async #control(sql: string): Promise<void> {
-    this.#assertConnected();
     try {
+      await this.#ensureConnected();
       await this.executeDriver(sql, undefined, {});
     } catch (error) {
       throw this.#error(error, TransactionError);
     }
   }
 
-  async connect(): Promise<void> {
-    if (this.connected) return;
+  async #open(): Promise<void> {
+    const timeout = this.#options.connectionOptions?.connectTimeout;
+    if (timeout !== undefined && !(timeout >= 0)) {
+      throw new RangeError(
+        `Cannot connect as 'connectTimeout' must be a non-negative number: received ${timeout}`,
+      );
+    }
+    const controller = new AbortController();
+    const timer = timeout === undefined ? undefined : setTimeout(
+      () =>
+        controller.abort(
+          new ConnectionError(`Timed out after ${timeout} ms connecting`),
+        ),
+      timeout,
+    );
     try {
-      await this.connectDriver();
+      const connecting = this.connectDriver(controller.signal);
+      const aborted = new Promise<never>((_, reject) =>
+        controller.signal.addEventListener(
+          "abort",
+          () => reject(controller.signal.reason),
+          { once: true },
+        )
+      );
+      try {
+        await Promise.race([connecting, aborted]);
+      } catch (error) {
+        // A connection that is established after the timeout is closed.
+        connecting.then(() => this.closeDriver()).catch(() => {});
+        throw error;
+      }
     } catch (error) {
       throw this.#error(error, ConnectionError);
+    } finally {
+      clearTimeout(timer);
     }
+    this.#closed = false;
+    this.#generation++;
     this.eventTarget.dispatchEvent(
       new DriverEvent("connect", { detail: { client: this } }),
     );
   }
 
+  async connect(): Promise<void> {
+    if (this.connected) return;
+    // Concurrent calls share the same attempt.
+    this.#connecting ??= this.#open().finally(() => {
+      this.#connecting = undefined;
+    });
+    await this.#connecting;
+  }
+
   async close(): Promise<void> {
+    this.#closed = true;
     if (!this.connected) return;
     this.eventTarget.dispatchEvent(
       new DriverEvent("close", { detail: { client: this } }),
@@ -534,60 +674,90 @@ export abstract class BaseDriver<IOptions extends Options = Options>
   }
 
   async ping(): Promise<void> {
-    this.#assertConnected();
     try {
+      await this.#ensureConnected();
       await this.pingDriver();
     } catch (error) {
       throw this.#error(error, ConnectionError);
     }
   }
 
-  execute(
-    sql: string,
+  async execute(
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined> {
-    return this.#execute(
-      params,
-      options,
-      (params, options) => this.executeDriver(sql, params, options),
-    );
+  ): Promise<ExecuteResult> {
+    const merged = this.#merge(options);
+    return await this.#guard(merged, async () => {
+      const call = await this.#call(sql, params, merged);
+      return await this.executeDriver(call.sql, call.params, call.options);
+    });
   }
 
   query(
-    sql: string,
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext> {
-    return this.#query(
-      params,
-      options,
-      (params, options) => this.queryDriver(sql, params, options),
+  ): ResultIterableContext {
+    const merged = this.#merge(options);
+    return this.#result(
+      merged,
+      () => this.#call(sql, params, merged),
+      (call) => this.queryDriver(call.sql, call.params, call.options),
     );
+  }
+
+  async executeScript(sql: string, options?: QueryOptions): Promise<void> {
+    const merged = this.#merge(options);
+    await this.#guard(merged, async () => {
+      merged.signal?.throwIfAborted();
+      await this.#ensureConnected();
+      await this.executeScriptDriver(sql, merged);
+    });
   }
 
   async prepare(
     sql: string,
     options?: QueryOptions,
   ): Promise<BasePreparedStatement> {
-    this.#assertConnected();
-    const base = { ...this.#options.queryOptions, ...options };
-    const handle = await this.#guard(base, () => this.prepareDriver(sql, base));
+    const base = this.#merge(options);
+    const handle = await this.#guard(base, async () => {
+      await this.#ensureConnected();
+      return await this.prepareDriver(sql, base);
+    });
+    const generation = this.#generation;
+    // A prepared statement only exists on the connection it was prepared on.
+    const call = async (
+      params: QueryParameters | undefined,
+      options: QueryOptions | undefined,
+    ): Promise<Call> => {
+      if (!this.connected || this.#generation !== generation) {
+        throw new QueryError(
+          "The prepared statement belongs to a closed connection",
+        );
+      }
+      const merged = { ...base, ...options };
+      merged.signal?.throwIfAborted();
+      return {
+        sql,
+        params: transformParams(params, merged.transformInput),
+        options: merged,
+      };
+    };
     return new BasePreparedStatement(sql, {
       execute: (params, options) =>
-        this.#execute(
-          params,
-          { ...base, ...options },
-          (params, options) => handle.execute(params, options),
-        ),
+        this.#guard({ ...base, ...options }, async () => {
+          const resolved = await call(params, options);
+          return await handle.execute(resolved.params, resolved.options);
+        }),
       query: (params, options) =>
-        this.#query(
-          params,
+        this.#result(
           { ...base, ...options },
-          (params, options) => handle.query(params, options),
+          () => call(params, options),
+          (resolved) => handle.query(resolved.params, resolved.options),
         ),
       deallocate: () =>
-        this.connected
+        this.connected && this.#generation === generation
           ? this.#guard(base, () => handle.deallocate())
           : Promise.resolve(),
     });
@@ -599,7 +769,6 @@ export abstract class BaseDriver<IOptions extends Options = Options>
     if (this.#transaction?.inTransaction) {
       return await this.#transaction.beginTransaction(options);
     }
-    this.#assertConnected();
     let statement: string;
     try {
       statement = this.beginStatement({
@@ -631,7 +800,7 @@ export abstract class BaseDriver<IOptions extends Options = Options>
 
   async #reset(): Promise<void> {
     if (this.#transaction?.inTransaction) {
-      await this.#transaction.rollbackTransaction();
+      await this.#transaction.rollback();
     }
   }
 

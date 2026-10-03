@@ -18,6 +18,7 @@ import type {
   PoolClient,
   Preparable,
   Queryable,
+  SqlTemplate,
   Transactionable,
 } from "./core.ts";
 import {
@@ -71,6 +72,18 @@ export interface TestSql {
    * `SELECT $1::text AS value`
    */
   parameterQuery: string;
+  /**
+   * A SQL query returning the columns of {@linkcode TestSql.columns}, but no
+   * rows, for example `SELECT id, name FROM users WHERE 1 = 0`
+   */
+  emptyQuery: string;
+  /**
+   * Create a {@linkcode SqlTemplate} selecting the single string value it is
+   * given, as a column named `value`, for example
+   * ``(value) => sql`SELECT ${value} AS value` `` or
+   * ``(value) => sql`SELECT ${value}::text AS value` ``
+   */
+  parameterTemplate: (value: string) => SqlTemplate;
 }
 
 /**
@@ -79,13 +92,24 @@ export interface TestSql {
 const INVALID_SQL = "THIS IS NOT VALID SQL";
 
 /**
- * Whether the promise is still pending after the pending work has run
+ * Assert that the promise only settles after the action has run
  */
-async function isPending(promise: Promise<unknown>): Promise<boolean> {
-  let pending = true;
-  promise.then(() => (pending = false), () => (pending = false));
-  await new Promise((resolve) => setTimeout(resolve, 10));
-  return pending;
+async function assertWaitsFor(
+  promise: Promise<unknown>,
+  action: () => PromiseLike<void>,
+  message: string,
+): Promise<void> {
+  const order: string[] = [];
+  const settled = promise.then(
+    () => void order.push("settled"),
+    () => void order.push("settled"),
+  );
+  // Let the pending work run, so a promise that does not wait settles first.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  order.push("action");
+  await action();
+  await settled;
+  assertEquals(order, ["action", "settled"], message);
 }
 
 /**
@@ -113,6 +137,14 @@ export async function testConnectable(
     await connectable.connect();
     assert(connectable.connected);
     await connectable.close();
+  });
+
+  await t.step("concurrent connects share the connection", async () => {
+    const connectable = await create();
+    await Promise.all([connectable.connect(), connectable.connect()]);
+    assert(connectable.connected);
+    await connectable.close();
+    assertFalse(connectable.connected);
   });
 
   await t.step("close is idempotent", async () => {
@@ -148,7 +180,14 @@ export async function testPingable(
     await pingable.close();
   });
 
-  await t.step("ping throws when not connected", async () => {
+  await t.step("ping connects implicitly", async () => {
+    const pingable = await create();
+    await pingable.ping();
+    assert(pingable.connected);
+    await pingable.close();
+  });
+
+  await t.step("ping throws after close", async () => {
     const pingable = await create();
     await pingable.connect();
     await pingable.close();
@@ -173,51 +212,121 @@ export async function testQueryable(
   await t.step("execute", async () => {
     const queryable = await create();
     await queryable.connect();
-    const affected = await queryable.execute(sql.execute);
+    // The statement does not modify rows.
+    const result = await queryable.execute(sql.execute);
     assert(
-      affected === undefined || typeof affected === "number",
-      "execute must resolve to a number or undefined",
+      result.affectedRows === undefined || result.affectedRows === 0,
+      "execute must report 0 or undefined affected rows for statements that modify no rows",
     );
     await queryable.close();
   });
 
-  await t.step("query returns a result context", async () => {
+  await t.step("connects implicitly on first use", async () => {
+    const queryable = await create();
+    await queryable.execute(sql.execute);
+    assert(queryable.connected);
+    await queryable.close();
+
+    const other = await create();
+    assertEquals((await other.query(sql.query).toValues()).length, sql.count);
+    assert(other.connected);
+    await other.close();
+  });
+
+  await t.step("rejects after close", async () => {
     const queryable = await create();
     await queryable.connect();
-    const ctx = await queryable.query(sql.query);
-    assertEquals(ctx.metadata.columns, sql.columns);
-    assertEquals((await ctx.toValues()).length, sql.count);
+    await queryable.close();
+    await assertRejects(async () => {
+      await queryable.execute(sql.execute);
+    }, ConnectionError);
+    await assertRejects(async () => {
+      await queryable.query(sql.query).toValues();
+    }, ConnectionError);
+    await assertRejects(async () => {
+      await queryable.executeScript(sql.execute);
+    }, ConnectionError);
+  });
+
+  await t.step("query returns a result", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const result = queryable.query(sql.query);
+    assertEquals(await result.columns(), sql.columns);
+    assertEquals((await result.toValues()).length, sql.count);
+    await queryable.close();
+  });
+
+  await t.step("query is lazy", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    // Errors are thrown when the result is consumed.
+    const result = queryable.query(INVALID_SQL);
+    await assertRejects(() => result.toValues(), QueryError);
+    // A result that is never consumed does not run.
+    await queryable.query(INVALID_SQL)[Symbol.asyncDispose]();
+    await queryable.close();
+  });
+
+  await t.step("query reports the columns of an empty result", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    const result = queryable.query(sql.emptyQuery);
+    assertEquals(await result.columns(), sql.columns);
+    assertEquals(await result.toValues(), []);
     await queryable.close();
   });
 
   await t.step("query can be iterated", async () => {
     const queryable = await create();
     await queryable.connect();
-    const ctx = await queryable.query(sql.query);
     let count = 0;
-    for await (const _row of ctx) {
+    for await (const row of queryable.query(sql.query)) {
+      assertEquals(Object.keys(row.toRecord()), sql.columns);
       count++;
     }
     assertEquals(count, sql.count);
     await queryable.close();
   });
 
-  await t.step("query and execute throw when not connected", async () => {
+  await t.step("query results can be consumed once", async () => {
     const queryable = await create();
+    await queryable.connect();
+    const result = queryable.query(sql.query);
+    assertEquals((await result.toRecords()).length, sql.count);
+    await assertRejects(() => result.toValues(), QueryError, "consumed");
     await assertRejects(async () => {
-      await queryable.query(sql.query);
-    }, ConnectionError);
-    await assertRejects(async () => {
-      await queryable.execute(sql.execute);
-    }, ConnectionError);
+      for await (const _row of result) {
+        // Not reached
+      }
+    }, QueryError);
+    // The columns are still available.
+    assertEquals(await result.columns(), sql.columns);
+    await queryable.close();
   });
 
   await t.step("binds parameters", async () => {
     const queryable = await create();
     await queryable.connect();
-    const ctx = await queryable.query(sql.parameterQuery, ["a"]);
-    assertEquals(ctx.metadata.columns, ["value"]);
-    assertEquals(await ctx.toValues(), [["a"]]);
+    const result = queryable.query(sql.parameterQuery, ["a"]);
+    assertEquals(await result.columns(), ["value"]);
+    assertEquals(await result.toValues(), [["a"]]);
+    await queryable.close();
+  });
+
+  await t.step("runs SQL templates", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    assertEquals(
+      await queryable.query(sql.parameterTemplate("a")).toValues(),
+      [["a"]],
+    );
+    const result = await queryable.execute(sql.parameterTemplate("b"));
+    assertEquals(result.affectedRows ?? 0, 0);
+    // Templates carry their own values.
+    await assertRejects(async () => {
+      await queryable.execute(sql.parameterTemplate("c"), ["d"]);
+    }, QueryError);
     await queryable.close();
   });
 
@@ -225,7 +334,7 @@ export async function testQueryable(
     const queryable = await create();
     await queryable.connect();
     await assertRejects(async () => {
-      await queryable.query(INVALID_SQL);
+      await queryable.query(INVALID_SQL).toValues();
     }, QueryError);
     await assertRejects(async () => {
       await queryable.execute(INVALID_SQL);
@@ -238,12 +347,12 @@ export async function testQueryable(
   await t.step("transforms input and output values", async () => {
     const queryable = await create();
     await queryable.connect();
-    const ctx = await queryable.query(sql.parameterQuery, ["a"], {
+    const result = queryable.query(sql.parameterQuery, ["a"], {
       transformInput: (value) => `${value}b`,
       transformOutput: (value) =>
         typeof value === "string" ? value.toUpperCase() : value,
     });
-    assertEquals(await ctx.toValues(), [["AB"]]);
+    assertEquals(await result.toValues(), [["AB"]]);
     await queryable.close();
   });
 
@@ -253,11 +362,19 @@ export async function testQueryable(
     const reason = new Error("aborted");
     const signal = AbortSignal.abort(reason);
     assertEquals(
-      await assertRejects(() => queryable.query(sql.query, [], { signal })),
+      await assertRejects(() =>
+        queryable.query(sql.query, [], { signal }).toValues()
+      ),
       reason,
     );
     assertEquals(
       await assertRejects(() => queryable.execute(sql.execute, [], { signal })),
+      reason,
+    );
+    assertEquals(
+      await assertRejects(() =>
+        queryable.executeScript(sql.execute, { signal })
+      ),
       reason,
     );
     await queryable.close();
@@ -268,12 +385,13 @@ export async function testQueryable(
       const queryable = await create();
       await queryable.connect();
       const controller = new AbortController();
-      const ctx = await queryable.query(sql.query, [], {
+      const result = queryable.query(sql.query, [], {
         signal: controller.signal,
       });
+      await result.columns();
       controller.abort(new Error("aborted"));
       assertEquals(
-        await assertRejects(() => ctx.toValues()),
+        await assertRejects(() => result.toValues()),
         controller.signal.reason,
       );
       // The connection is still usable after an abort.
@@ -285,8 +403,21 @@ export async function testQueryable(
   await t.step("disposing a result stops fetching", async () => {
     const queryable = await create();
     await queryable.connect();
-    const ctx = await queryable.query(sql.query);
-    await ctx[Symbol.asyncDispose]();
+    const result = queryable.query(sql.query);
+    await result.columns();
+    await result[Symbol.asyncDispose]();
+    await assertRejects(() => result.toValues(), QueryError, "disposed");
+    await queryable.execute(sql.execute);
+    await queryable.close();
+  });
+
+  await t.step("executes scripts", async () => {
+    const queryable = await create();
+    await queryable.connect();
+    await queryable.executeScript(`${sql.execute};\n${sql.execute};`);
+    await assertRejects(async () => {
+      await queryable.executeScript(INVALID_SQL);
+    }, QueryError);
     await queryable.execute(sql.execute);
     await queryable.close();
   });
@@ -312,20 +443,20 @@ export async function testPreparable(
     assertEquals(stmt.sql, sql.query);
     assertFalse(stmt.deallocated);
 
-    const ctx = await stmt.query();
-    assertEquals((await ctx.toValues()).length, sql.count);
+    assertEquals((await stmt.query().toValues()).length, sql.count);
 
-    const affected = await stmt.execute();
+    const result = await stmt.execute();
     assert(
-      affected === undefined || typeof affected === "number",
-      "execute must resolve to a number or undefined",
+      typeof result === "object" &&
+        (result.affectedRows === undefined || result.affectedRows === 0),
+      "execute must report 0 or undefined affected rows for statements that modify no rows",
     );
 
     await stmt.deallocate();
     assert(stmt.deallocated);
     await stmt.deallocate();
     await assertRejects(async () => {
-      await stmt.query();
+      await stmt.query().toValues();
     }, QueryError);
     await assertRejects(async () => {
       await stmt.execute();
@@ -337,8 +468,8 @@ export async function testPreparable(
     const preparable = await create();
     await preparable.connect();
     const stmt = await preparable.prepare(sql.parameterQuery);
-    assertEquals(await (await stmt.query(["a"])).toValues(), [["a"]]);
-    assertEquals(await (await stmt.query(["b"])).toValues(), [["b"]]);
+    assertEquals(await stmt.query(["a"]).toValues(), [["a"]]);
+    assertEquals(await stmt.query(["b"]).toValues(), [["b"]]);
     await stmt.deallocate();
     await preparable.close();
   });
@@ -349,13 +480,23 @@ export async function testPreparable(
     // Databases without native prepared statements fail on execution.
     await assertRejects(async () => {
       const stmt = await preparable.prepare(INVALID_SQL);
-      await stmt.query();
+      await stmt.query().toValues();
     }, QueryError);
     await preparable.close();
   });
 
-  await t.step("prepare throws when not connected", async () => {
+  await t.step("prepare connects implicitly", async () => {
     const preparable = await create();
+    const stmt = await preparable.prepare(sql.query);
+    assertEquals((await stmt.query().toValues()).length, sql.count);
+    await stmt.deallocate();
+    await preparable.close();
+  });
+
+  await t.step("prepare rejects after close", async () => {
+    const preparable = await create();
+    await preparable.connect();
+    await preparable.close();
     await assertRejects(async () => {
       await preparable.prepare(sql.query);
     }, ConnectionError);
@@ -390,15 +531,14 @@ export async function testTransactionable(
     assertIsTransaction(tx);
     assert(tx.inTransaction);
     await tx.execute(sql.execute);
-    const ctx = await tx.query(sql.query);
-    assertEquals((await ctx.toValues()).length, sql.count);
-    await tx.commitTransaction();
+    assertEquals((await tx.query(sql.query).toValues()).length, sql.count);
+    await tx.commit();
     assertFalse(tx.inTransaction);
     await assertRejects(async () => {
       await tx.execute(sql.execute);
     }, TransactionError);
     await assertRejects(async () => {
-      await tx.commitTransaction();
+      await tx.commit();
     }, TransactionError);
     await transactionable.close();
   });
@@ -408,13 +548,13 @@ export async function testTransactionable(
     await transactionable.connect();
     const tx = await transactionable.beginTransaction();
     await tx.execute(sql.execute);
-    await tx.rollbackTransaction();
+    await tx.rollback();
     assertFalse(tx.inTransaction);
     await assertRejects(async () => {
-      await tx.query(sql.query);
+      await tx.query(sql.query).toValues();
     }, TransactionError);
     await assertRejects(async () => {
-      await tx.rollbackTransaction();
+      await tx.rollback();
     }, TransactionError);
     await transactionable.close();
   });
@@ -426,7 +566,7 @@ export async function testTransactionable(
     await tx.createSavepoint("sp");
     await tx.execute(sql.execute);
     await tx.releaseSavepoint("sp");
-    await tx.commitTransaction();
+    await tx.commit();
     await transactionable.close();
   });
 
@@ -437,7 +577,7 @@ export async function testTransactionable(
     await tx.createSavepoint();
     await tx.execute(sql.execute);
     await tx.releaseSavepoint();
-    await tx.commitTransaction();
+    await tx.commit();
     await transactionable.close();
   });
 
@@ -451,16 +591,15 @@ export async function testTransactionable(
     assertIsTransaction(inner);
     assert(inner.inTransaction);
     await inner.execute(sql.execute);
-    await inner.rollbackTransaction();
+    await inner.rollback();
     assertFalse(inner.inTransaction);
 
     assert(
       outer.inTransaction,
       "The outer transaction must still be active after a nested rollback",
     );
-    const ctx = await outer.query(sql.query);
-    assertEquals((await ctx.toValues()).length, sql.count);
-    await outer.commitTransaction();
+    assertEquals((await outer.query(sql.query).toValues()).length, sql.count);
+    await outer.commit();
     assertFalse(outer.inTransaction);
     await transactionable.close();
   });
@@ -480,7 +619,7 @@ export async function testTransactionable(
       outer.inTransaction,
       "The outer transaction must still be active after a nested commit",
     );
-    await outer.commitTransaction();
+    await outer.commit();
     await transactionable.close();
   });
 
@@ -490,24 +629,26 @@ export async function testTransactionable(
     const outer = await transactionable.beginTransaction();
     const nested = await outer.beginTransaction();
     const deeper = await nested.beginTransaction();
-    await nested.rollbackTransaction();
+    await nested.rollback();
     assertFalse(deeper.inTransaction);
     await assertRejects(async () => {
-      await deeper.query(sql.query);
+      await deeper.query(sql.query).toValues();
     }, TransactionError);
     assert(outer.inTransaction);
 
     const other = await outer.beginTransaction();
-    await outer.commitTransaction();
+    await outer.commit();
     assertFalse(other.inTransaction);
     await assertRejects(async () => {
-      await other.commitTransaction();
+      await other.commit();
     }, TransactionError);
     await transactionable.close();
   });
 
-  await t.step("beginTransaction throws when not connected", async () => {
+  await t.step("beginTransaction rejects after close", async () => {
     const transactionable = await create();
+    await transactionable.connect();
+    await transactionable.close();
     await assertRejects(async () => {
       await transactionable.beginTransaction();
     }, DatabaseError);
@@ -606,11 +747,21 @@ export async function testPoolable(
     await poolable.close();
   });
 
-  await t.step("acquire throws when not connected", async () => {
+  await t.step("acquire connects implicitly", async () => {
     const poolable = await create();
+    const poolClient = await poolable.acquire();
+    assert(poolClient.connected);
+    await poolClient.release();
+    await poolable.close();
+  });
+
+  await t.step("acquire rejects after close", async () => {
+    const poolable = await create();
+    await poolable.connect();
+    await poolable.close();
     await assertRejects(async () => {
       await poolable.acquire();
-    });
+    }, ConnectionError);
   });
 
   await t.step("release is idempotent", async () => {
@@ -675,8 +826,11 @@ export async function testPool(
     const releaseAll = await exhaust(client);
     const last = await client.acquire();
     const pending = client.acquire();
-    assert(await isPending(pending), "acquire must wait for a release");
-    await last.release();
+    await assertWaitsFor(
+      pending,
+      () => last.release(),
+      "acquire must wait for a release",
+    );
     const next = await pending;
     assert(next.connected);
     await next.release();
@@ -690,8 +844,11 @@ export async function testPool(
     const releaseAll = await exhaust(client);
     const last = await client.acquire();
     const pending = client.acquire();
-    assert(await isPending(pending), "acquire must wait for a removal");
-    await last.remove();
+    await assertWaitsFor(
+      pending,
+      () => last.remove(),
+      "acquire must wait for a removal",
+    );
     const next = await pending;
     assert(next.connected);
     await next.release();
@@ -703,16 +860,16 @@ export async function testPool(
     const client = await create();
     await client.connect();
     const releaseAll = await exhaust(client);
-    const ctx = await client.query(sql.query);
-    if (sql.count > 1) {
-      // The first row is fetched, so the result is not complete yet.
-      const pending = client.acquire();
-      assert(await isPending(pending), "query must hold the connection");
-      await ctx[Symbol.asyncDispose]();
-      await (await pending).release();
-    } else {
-      await ctx.toValues();
-    }
+    const result = client.query(sql.query);
+    // Running the query acquires the connection.
+    await result.columns();
+    const pending = client.acquire();
+    await assertWaitsFor(
+      pending,
+      () => result[Symbol.asyncDispose](),
+      "query must hold the connection",
+    );
+    await (await pending).release();
     await (await client.acquire()).release();
     await releaseAll();
     await client.close();
@@ -724,8 +881,11 @@ export async function testPool(
     const releaseAll = await exhaust(client);
     const stmt = await client.prepare(sql.query);
     const pending = client.acquire();
-    assert(await isPending(pending), "prepare must hold the connection");
-    await stmt.deallocate();
+    await assertWaitsFor(
+      pending,
+      () => stmt.deallocate(),
+      "prepare must hold the connection",
+    );
     await (await pending).release();
     await releaseAll();
     await client.close();
@@ -739,11 +899,11 @@ export async function testPool(
       const releaseAll = await exhaust(client);
       const tx = await client.beginTransaction();
       const pending = client.acquire();
-      assert(
-        await isPending(pending),
+      await assertWaitsFor(
+        pending,
+        () => tx.commit(),
         "beginTransaction must hold the connection",
       );
-      await tx.commitTransaction();
       await (await pending).release();
       await releaseAll();
       await client.close();
@@ -905,8 +1065,7 @@ export async function testClientIntegration<
     await t.step("query", async () => {
       const poolable = await create();
       await poolable.connect();
-      const ctx = await poolable.query(sql.query);
-      await ctx.toValues();
+      await poolable.query(sql.query).toValues();
       // The connection is idle again, so it can be acquired manually.
       const poolClient = await poolable.acquire();
       assert(poolClient.connected);

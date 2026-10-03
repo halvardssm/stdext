@@ -82,7 +82,8 @@ export function assertIsPingable(value: unknown): asserts value is Pingable {
  * Check if a value is {@linkcode Queryable}
  */
 export function isQueryable(value: unknown): value is Queryable {
-  return isFn(value, "execute") && isFn(value, "query");
+  return isFn(value, "execute") && isFn(value, "query") &&
+    isFn(value, "executeScript");
 }
 
 /**
@@ -133,8 +134,8 @@ export function isTransaction(value: unknown): value is Transaction {
     isPreparable(value) &&
     isTransactionable(value) &&
     isBool(value, "inTransaction") &&
-    isFn(value, "commitTransaction") &&
-    isFn(value, "rollbackTransaction") &&
+    isFn(value, "commit") &&
+    isFn(value, "rollback") &&
     isFn(value, "createSavepoint") &&
     isFn(value, "releaseSavepoint");
 }

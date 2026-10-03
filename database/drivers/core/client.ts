@@ -5,13 +5,14 @@ import {
   ClientEventTarget,
   type ClientOptions,
   ConnectionError,
-  createResultIterableContext,
   type DatabaseError,
+  type ExecuteResult,
   type PoolClient,
+  type PoolOptions,
   type QueryOptions,
   type QueryParameters,
   type ResultIterableContext,
-  type Row,
+  type Statement,
   type Transaction,
   type TransactionOptions,
 } from "../../sql/mod.ts";
@@ -19,6 +20,7 @@ import {
   type BaseDriver,
   type BasePreparedStatement,
   type BaseTransaction,
+  delegateResult,
   onStatementDeallocate,
   onTransactionEnd,
   resetDriver,
@@ -82,21 +84,30 @@ export class BasePoolClient<IDriver extends BaseDriver = BaseDriver>
   }
 
   async execute(
-    sql: string,
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined> {
+  ): Promise<ExecuteResult> {
     this.#assertUsable();
     return await this.#driver.execute(sql, params, options);
   }
 
-  async query(
-    sql: string,
+  query(
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext> {
+  ): ResultIterableContext {
+    return delegateResult(() => {
+      this.#assertUsable();
+      return Promise.resolve({
+        result: this.#driver.query(sql, params, options),
+      });
+    });
+  }
+
+  async executeScript(sql: string, options?: QueryOptions): Promise<void> {
     this.#assertUsable();
-    return await this.#driver.query(sql, params, options);
+    await this.#driver.executeScript(sql, options);
   }
 
   async prepare(
@@ -144,6 +155,10 @@ export abstract class BaseClient<
   #stack?: DeferredStack<IDriver>;
   #opening = 0;
   #connected = false;
+  #closed = false;
+  #connecting?: Promise<void>;
+  readonly #openedAt = new Map<IDriver, number>();
+  readonly #idleTimers = new Map<IDriver, ReturnType<typeof setTimeout>>();
 
   constructor(connectionUrl: string | URL, options?: IOptions) {
     this.#connectionUrl = connectionUrl;
@@ -171,10 +186,47 @@ export abstract class BaseClient<
     );
   }
 
+  get #poolOptions(): PoolOptions {
+    return this.#options.poolOptions ?? {};
+  }
+
   /** Whether a connection can be opened without exceeding the pool size */
   get #canOpen(): boolean {
     const stack = this.#stack!;
     return stack.totalCount + this.#opening < stack.maxSize;
+  }
+
+  /** Whether a connection has reached its maximum lifetime */
+  #expired(driver: IDriver): boolean {
+    const { maxLifetime } = this.#poolOptions;
+    return maxLifetime !== undefined &&
+      Date.now() - (this.#openedAt.get(driver) ?? 0) >= maxLifetime;
+  }
+
+  #clearIdleTimer(driver: IDriver): void {
+    clearTimeout(this.#idleTimers.get(driver));
+    this.#idleTimers.delete(driver);
+  }
+
+  /** Close the connection once it has been idle for the idle timeout */
+  #scheduleIdle(driver: IDriver): void {
+    const { idleTimeout } = this.#poolOptions;
+    const stack = this.#stack;
+    if (idleTimeout === undefined || !stack) return;
+    // The connection may have been handed to a waiting acquire instead.
+    if (!stack.stack.some((element) => element._value === driver)) return;
+    this.#clearIdleTimer(driver);
+    this.#idleTimers.set(
+      driver,
+      setTimeout(() => {
+        this.#idleTimers.delete(driver);
+        const element = stack.stack.find((element) =>
+          element._value === driver
+        );
+        // A failure to close is dispatched as an error event by the driver.
+        element?.remove().catch(() => {});
+      }, idleTimeout),
+    );
   }
 
   /** Open a connection and add it to the pool */
@@ -196,7 +248,9 @@ export abstract class BaseClient<
         throw new ConnectionError("Client is closed");
       }
       this.#dispatch("connect");
+      this.#openedAt.set(driver, Date.now());
       stack.add(driver);
+      this.#scheduleIdle(driver);
     } finally {
       this.#opening--;
     }
@@ -224,8 +278,11 @@ export abstract class BaseClient<
       // A connection that can not be reset is broken, and is not reused.
       return await this.#remove(element);
     }
-    if (!driver.connected) return await this.#remove(element);
+    if (!driver.connected || this.#expired(driver)) {
+      return await this.#remove(element);
+    }
     await element.release();
+    this.#scheduleIdle(driver);
   }
 
   async #remove(element: DeferredStackElement<IDriver>): Promise<void> {
@@ -233,17 +290,61 @@ export abstract class BaseClient<
     await this.#replenish();
   }
 
+  /** Pop a connection, waiting at most until the deadline */
+  async #pop(
+    stack: DeferredStack<IDriver>,
+    deadline: number | undefined,
+  ): Promise<DeferredStackElement<IDriver>> {
+    if (deadline === undefined) return await stack.pop();
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      Math.max(0, deadline - Date.now()),
+    );
+    try {
+      return await stack.pop({ signal: controller.signal });
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+      throw new ConnectionError(
+        `Timed out after ${this.#poolOptions.acquireTimeout} ms waiting for a connection`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async connect(): Promise<void> {
     if (this.#connected) return;
+    // Concurrent calls share the same attempt.
+    this.#connecting ??= this.#start().finally(() => {
+      this.#connecting = undefined;
+    });
+    await this.#connecting;
+  }
+
+  async #start(): Promise<void> {
+    const { maxSize, acquireTimeout, idleTimeout, maxLifetime } =
+      this.#poolOptions;
+    const durations = { acquireTimeout, idleTimeout, maxLifetime };
+    for (const [name, value] of Object.entries(durations)) {
+      if (value !== undefined && !(value >= 0)) {
+        throw new RangeError(
+          `Cannot connect as '${name}' must be a non-negative number: received ${value}`,
+        );
+      }
+    }
     this.#connected = true;
+    this.#closed = false;
     this.#stack = new DeferredStack<IDriver>({
-      maxSize: Math.max(1, this.#options.poolOptions?.maxSize ?? 1),
+      maxSize: Math.max(1, maxSize ?? 1),
       removeFn: (driver) => {
+        this.#clearIdleTimer(driver);
+        this.#openedAt.delete(driver);
         this.#dispatch("close");
         return driver.close();
       },
     });
-    if (this.#options.poolOptions?.lazyInitialization) return;
+    if (this.#poolOptions.lazyInitialization) return;
     try {
       while (this.#canOpen) await this.#open();
     } catch (error) {
@@ -253,6 +354,7 @@ export abstract class BaseClient<
   }
 
   async close(): Promise<void> {
+    this.#closed = true;
     if (!this.#connected) return;
     this.#connected = false;
     // Closing is best effort: a connection failing to close is gone anyway.
@@ -261,25 +363,34 @@ export abstract class BaseClient<
   }
 
   async acquire(): Promise<BasePoolClient<IDriver>> {
-    if (!this.#connected) {
-      throw new ConnectionError("Client is not connected");
+    const { acquireTimeout } = this.#poolOptions;
+    const deadline = acquireTimeout === undefined
+      ? undefined
+      : Date.now() + acquireTimeout;
+    // Connect implicitly, unless the client was closed.
+    if (!this.#connected && !this.#closed) await this.connect();
+    while (true) {
+      if (!this.#connected) {
+        throw new ConnectionError("Client is closed");
+      }
+      const stack = this.#stack!;
+      if (stack.availableCount === 0 && this.#canOpen) await this.#open();
+      // Waits for a release when the pool is exhausted, and rejects when the
+      // client closes or the acquire timeout passes.
+      const element = await this.#pop(stack, deadline);
+      const driver = element.value;
+      this.#clearIdleTimer(driver);
+      if (!driver.connected || this.#expired(driver)) {
+        await this.#remove(element);
+        continue;
+      }
+      this.#dispatch("acquire");
+      return new BasePoolClient(
+        driver,
+        () => this.#release(element, driver),
+        () => this.#remove(element),
+      );
     }
-    const stack = this.#stack!;
-    if (stack.availableCount === 0 && this.#canOpen) await this.#open();
-    // Waits for a release when the pool is exhausted, and rejects when the
-    // client closes.
-    const element = await stack.pop();
-    const driver = element.value;
-    if (!driver.connected) {
-      await this.#remove(element);
-      return await this.acquire();
-    }
-    this.#dispatch("acquire");
-    return new BasePoolClient(
-      driver,
-      () => this.#release(element, driver),
-      () => this.#remove(element),
-    );
   }
 
   async ping(): Promise<void> {
@@ -288,39 +399,33 @@ export abstract class BaseClient<
   }
 
   async execute(
-    sql: string,
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<number | undefined> {
+  ): Promise<ExecuteResult> {
     await using poolClient = await this.acquire();
     return await poolClient.execute(sql, params, options);
   }
 
-  async query(
-    sql: string,
+  query(
+    sql: Statement,
     params?: QueryParameters,
     options?: QueryOptions,
-  ): Promise<ResultIterableContext> {
-    const poolClient = await this.acquire();
-    let ctx: ResultIterableContext;
-    try {
-      ctx = await poolClient.query(sql, params, options);
-    } catch (error) {
-      await poolClient.release();
-      throw error;
-    }
-    // The connection is held until the result is fully fetched or the
-    // context is disposed.
-    const columns = ctx.metadata.columns;
-    async function* rows(): AsyncGenerator<Row> {
-      try {
-        for await (const row of ctx) yield { columns, values: row.values };
-      } finally {
-        await ctx[Symbol.asyncDispose]();
-        await poolClient.release();
-      }
-    }
-    return await createResultIterableContext(rows());
+  ): ResultIterableContext {
+    // The connection is acquired when the query runs, and held until the
+    // result is fully read or disposed.
+    return delegateResult(async () => {
+      const poolClient = await this.acquire();
+      return {
+        result: poolClient.query(sql, params, options),
+        done: () => poolClient.release(),
+      };
+    });
+  }
+
+  async executeScript(sql: string, options?: QueryOptions): Promise<void> {
+    await using poolClient = await this.acquire();
+    await poolClient.executeScript(sql, options);
   }
 
   async prepare(
