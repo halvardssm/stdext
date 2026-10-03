@@ -55,7 +55,8 @@ export function parseTimestamptz(value: string): Date | string {
 }
 
 /**
- * Parse a Postgres `timestamp`, which has no time zone, in local time. Values
+ * Parse a Postgres `timestamp`, which has no time zone, as UTC, so that the
+ * result does not depend on the time zone of the machine. Values
  * that can not be represented as a date, such as `infinity`, are returned as
  * strings.
  */
@@ -63,7 +64,7 @@ export function parseTimestamp(value: string): Date | string {
   try {
     return new Date(
       Temporal.PlainDateTime.from(toIsoYears(value))
-        .toZonedDateTime(Temporal.Now.timeZoneId()).epochMilliseconds,
+        .toZonedDateTime("UTC").epochMilliseconds,
     );
   } catch {
     return value;
@@ -228,7 +229,17 @@ export function encodeParameter(value: unknown): string | null {
   }
   if (value === null) return null;
   if (value instanceof Date) return value.toISOString();
-  if (value instanceof Uint8Array) return `\\x${value.toHex()}`;
+  if (value instanceof ArrayBuffer) {
+    return `\\x${new Uint8Array(value).toHex()}`;
+  }
+  if (ArrayBuffer.isView(value)) {
+    const bytes = new Uint8Array(
+      value.buffer,
+      value.byteOffset,
+      value.byteLength,
+    );
+    return `\\x${bytes.toHex()}`;
+  }
   if (Array.isArray(value)) return encodeArray(value);
   return JSON.stringify(value);
 }

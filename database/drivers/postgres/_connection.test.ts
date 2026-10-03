@@ -204,6 +204,24 @@ Deno.test("Connection authentication", async (t) => {
   });
 });
 
+Deno.test("Connection aborts while authenticating", async () => {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await withServer(async () => {
+    // The server never answers the startup message.
+    await released;
+  }, async (config) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new Error("timed out")), 20);
+    await assertRejects(
+      () => Connection.connect(config, controller.signal),
+      Error,
+      "timed out",
+    );
+    release();
+  });
+});
+
 Deno.test("Connection TLS negotiation", async (t) => {
   await t.step("disabled TLS skips the SSL request", async () => {
     await withServer(async (conn, reader, startup) => {

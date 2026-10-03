@@ -36,14 +36,14 @@ Deno.test("parseTimestamptz", () => {
 Deno.test("parseTimestamp", () => {
   assertEquals(
     parseTimestamp("2024-01-02 03:04:05.5"),
-    new Date(2024, 0, 2, 3, 4, 5, 500),
+    new Date("2024-01-02T03:04:05.500Z"),
   );
   assertEquals(
-    (parseTimestamp("0099-01-01 00:00:00") as Date).getFullYear(),
+    (parseTimestamp("0099-01-01 00:00:00") as Date).getUTCFullYear(),
     99,
   );
   assertEquals(
-    (parseTimestamp("0001-01-01 00:00:00 BC") as Date).getFullYear(),
+    (parseTimestamp("0001-01-01 00:00:00 BC") as Date).getUTCFullYear(),
     0,
   );
   assertEquals(parseTimestamp("-infinity"), "-infinity");

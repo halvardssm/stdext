@@ -1,21 +1,23 @@
 import {
   ConnectionError,
   type ConnectionOptions,
+  type ExecuteResult,
   type Options,
   QueryError,
   type QueryOptions,
-  type Row,
   TransactionError,
   type TransactionOptions,
 } from "../../sql/mod.ts";
 import {
   BaseDriver,
   type DriverParameters,
+  type DriverResult,
   type StatementHandle,
 } from "../core/driver.ts";
 import {
   Connection,
   type ConnectionConfig,
+  type Cursor,
   type Target,
 } from "./_connection.ts";
 import { defaultParsers, encodeParameter, type Parser } from "./_types.ts";
@@ -25,7 +27,8 @@ import { defaultParsers, encodeParameter, type Parser } from "./_types.ts";
  */
 export interface PostgresTlsOptions {
   /**
-   * Whether to connect with TLS. Defaults to `"prefer"`.
+   * Whether to connect with TLS. Defaults to the `sslmode` of the connection
+   * URL, or `"prefer"`.
    *
    * - `"disable"`: never use TLS
    * - `"prefer"`: use TLS when the server supports it
@@ -45,7 +48,9 @@ export interface PostgresTlsOptions {
  * PostgresConnectionOptions
  *
  * Options used when connecting to the database. The host, port, user,
- * password and database are read from the connection URL.
+ * password and database, and the `sslmode` and `application_name`
+ * parameters, are read from the connection URL; these options take
+ * precedence.
  */
 export interface PostgresConnectionOptions extends ConnectionOptions {
   /**
@@ -72,7 +77,7 @@ export interface PostgresConnectionOptions extends ConnectionOptions {
    * By default, `bool` is parsed as `boolean`, `int2`, `int4`, `oid`,
    * `float4` and `float8` as `number`, `int8` as `bigint`, `json` and
    * `jsonb` with `JSON.parse`, `bytea` as `Uint8Array`, `timestamp` and
-   * `timestamptz` as `Date` (`timestamp` in local time), and arrays of these
+   * `timestamptz` as `Date` (`timestamp` in UTC), and arrays of these
    * types as arrays. `numeric` and `date` are returned as strings to not lose
    * precision.
    */
@@ -109,6 +114,17 @@ export interface PostgresOptions extends
     PostgresTransactionOptions
   > {}
 
+// libpq `sslmode` values. Deno can not encrypt without verifying the server
+// certificate, so the certificate is verified in every mode with TLS.
+const SSL_MODES: Record<string, ConnectionConfig["tls"]> = {
+  disable: "disable",
+  allow: "prefer",
+  prefer: "prefer",
+  require: "require",
+  "verify-ca": "require",
+  "verify-full": "require",
+};
+
 const ISOLATION_LEVELS = new Set([
   "serializable",
   "repeatable read",
@@ -132,12 +148,18 @@ function parseConfig(
     );
   }
   const user = decodeURIComponent(url.username) || "postgres";
+  // The libpq connection URI parameters, which the options take precedence
+  // over.
+  const sslmode = url.searchParams.get("sslmode");
+  if (sslmode !== null && !(sslmode in SSL_MODES)) {
+    throw new ConnectionError(`Invalid sslmode: ${sslmode}`);
+  }
+  const applicationName = options.applicationName ??
+    url.searchParams.get("application_name");
   const parameters: Record<string, string> = {
     ...options.runtimeParameters,
   };
-  if (options.applicationName) {
-    parameters.application_name = options.applicationName;
-  }
+  if (applicationName) parameters.application_name = applicationName;
   return {
     hostname: url.hostname.replace(/^\[(.*)\]$/, "$1") || "localhost",
     port: url.port ? Number(url.port) : 5432,
@@ -145,7 +167,7 @@ function parseConfig(
     password: options.password ??
       (url.password ? decodeURIComponent(url.password) : undefined),
     database: decodeURIComponent(url.pathname.slice(1)) || user,
-    tls: options.tls?.mode ?? "prefer",
+    tls: options.tls?.mode ?? (sslmode ? SSL_MODES[sslmode] : "prefer"),
     caCerts: options.tls?.caCerts,
     parameters,
   };
@@ -163,15 +185,19 @@ function encodeParameters(
   return params.map(encodeParameter);
 }
 
+// Commands that report the rows they modified in their tag
+const MODIFYING_COMMANDS = new Set(["INSERT", "UPDATE", "DELETE", "MERGE"]);
+
 /**
- * Parse the affected rows from a command tag, such as `INSERT 0 3` or
- * `UPDATE 2`. Commands without a row count, such as `CREATE TABLE`, resolve
- * to `undefined`.
+ * Parse the rows inserted, updated or deleted from a command tag, such as
+ * `INSERT 0 3` or `UPDATE 2`. Other commands, such as `SELECT 2` or
+ * `CREATE TABLE`, modify no rows.
  */
-function parseCommandTag(tag: string | undefined): number | undefined {
+function parseCommandTag(tag: string | undefined): ExecuteResult {
   const parts = tag?.split(" ") ?? [];
-  const count = Number(parts.at(-1));
-  return parts.length > 1 && Number.isInteger(count) ? count : undefined;
+  if (!MODIFYING_COMMANDS.has(parts[0])) return { affectedRows: 0 };
+  // Postgres has no insert ids: they are returned with RETURNING instead.
+  return { affectedRows: Number(parts.at(-1)) };
 }
 
 /**
@@ -182,8 +208,10 @@ function parseCommandTag(tag: string | undefined): number | undefined {
  * permission.
  *
  * The connection URL has the format
- * `postgres://user:password@host:port/database`; other options are passed
- * through the {@linkcode PostgresConnectionOptions}. Supported authentication
+ * `postgres://user:password@host:port/database`, following the libpq
+ * connection URI format, with the `sslmode` and `application_name`
+ * parameters; other options are passed through the
+ * {@linkcode PostgresConnectionOptions}, which take precedence. Supported authentication
  * methods are SCRAM-SHA-256, MD5 and cleartext passwords.
  *
  * Parameters use the positional `$1`, `$2`, ... placeholders and are sent in
@@ -198,9 +226,7 @@ function parseCommandTag(tag: string | undefined): number | undefined {
  * await using driver = new PostgresDriver("postgres://user@localhost/db", {
  *   connectionOptions: { password: "secret" },
  * });
- * await driver.connect();
- * const ctx = await driver.query("SELECT $1::int + 1 AS solution", [1]);
- * console.log(await ctx.toRecords());
+ * console.log(await driver.query("SELECT $1::int + 1 AS solution", [1]).toRecords());
  * ```
  */
 export class PostgresDriver extends BaseDriver<PostgresOptions> {
@@ -229,7 +255,7 @@ export class PostgresDriver extends BaseDriver<PostgresOptions> {
     target: Target,
     params: DriverParameters | undefined,
     signal: AbortSignal | undefined,
-  ): Promise<number | undefined> {
+  ): Promise<ExecuteResult> {
     try {
       const cursor = await connection.execute(
         target,
@@ -243,12 +269,12 @@ export class PostgresDriver extends BaseDriver<PostgresOptions> {
     }
   }
 
-  async *#query(
+  async #query(
     connection: Connection,
     target: Target,
     params: DriverParameters | undefined,
     signal: AbortSignal | undefined,
-  ): AsyncGenerator<Row> {
+  ): Promise<DriverResult> {
     const parsers = this.#parsers();
     let cursor;
     try {
@@ -256,21 +282,34 @@ export class PostgresDriver extends BaseDriver<PostgresOptions> {
         target,
         encodeParameters(params),
         signal,
+        true,
       );
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
       throw error;
     }
+    return {
+      columns: cursor.fields.map((field) => field.name),
+      rows: this.#rows(
+        cursor,
+        cursor.fields.map((field) => parsers[field.typeOid]),
+        signal,
+      ),
+    };
+  }
+
+  async *#rows(
+    cursor: Cursor,
+    parse: (Parser | undefined)[],
+    signal: AbortSignal | undefined,
+  ): AsyncGenerator<unknown[]> {
     try {
-      const columns = cursor.fields.map((field) => field.name);
-      const parse = cursor.fields.map((field) => parsers[field.typeOid]);
       while (true) {
         const raw = await cursor.next();
         if (raw === null) return;
-        const values = raw.map((value, i) =>
+        yield raw.map((value, i) =>
           value === null || parse[i] === undefined ? value : parse[i](value)
         );
-        yield { columns, values };
       }
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
@@ -287,9 +326,10 @@ export class PostgresDriver extends BaseDriver<PostgresOptions> {
     return this.#connection;
   }
 
-  protected override async connectDriver(): Promise<void> {
+  protected override async connectDriver(signal: AbortSignal): Promise<void> {
     this.#connection = await Connection.connect(
       parseConfig(this.connectionUrl, this.options.connectionOptions ?? {}),
+      signal,
     );
   }
 
@@ -307,15 +347,27 @@ export class PostgresDriver extends BaseDriver<PostgresOptions> {
     sql: string,
     params: DriverParameters | undefined,
     options: QueryOptions,
-  ): Promise<number | undefined> {
+  ): Promise<ExecuteResult> {
     return this.#execute(this.#active, { sql }, params, options.signal);
+  }
+
+  protected override async executeScriptDriver(
+    sql: string,
+    _options: QueryOptions,
+  ): Promise<void> {
+    // The simple query protocol runs several statements without parameters.
+    await this.#active.simpleQuery(sql);
+  }
+
+  protected override placeholder(index: number): string {
+    return `$${index + 1}`;
   }
 
   protected override queryDriver(
     sql: string,
     params: DriverParameters | undefined,
     options: QueryOptions,
-  ): AsyncIterable<Row> {
+  ): Promise<DriverResult> {
     return this.#query(this.#active, { sql }, params, options.signal);
   }
 

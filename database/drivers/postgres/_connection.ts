@@ -1,6 +1,6 @@
-import { Semaphore } from "@std/async/unstable-semaphore";
+import { DeferredStack } from "@stdext/collections";
 import { writeAll } from "@std/io/write-all";
-import { ConnectionError } from "../../sql/mod.ts";
+import { ConnectionError, QueryError } from "../../sql/mod.ts";
 import { ScramClient } from "@stdext/crypto/scram";
 import { md5Password } from "./_auth.ts";
 import { type Message, MessageReader, MessageWriter } from "./_wire.ts";
@@ -9,6 +9,8 @@ import { createError } from "./errors.ts";
 const decoder = new TextDecoder();
 
 const PROTOCOL_VERSION = 196608; // 3.0
+const STREAMING_MESSAGE =
+  "Cannot run a command while a query result is being read: read the result to the end or dispose it first";
 const SSL_REQUEST_CODE = 80877103;
 const CANCEL_REQUEST_CODE = 80877102;
 
@@ -100,9 +102,9 @@ function parseDataRow(message: Message): (string | null)[] {
  * A single connection speaking the Postgres frontend/backend protocol.
  *
  * Commands are serialized: only one command uses the connection at a time.
- * A query result holds the connection until all rows are read. When another
- * command is issued while a result is still being read, the remaining rows
- * of that result are buffered so the command can run.
+ * A query result holds the connection until all rows are read or it is
+ * disposed. Commands issued meanwhile are rejected, rather than buffering the
+ * rest of the result, which may not fit in memory.
  */
 export class Connection {
   readonly #config: ConnectionConfig;
@@ -113,9 +115,11 @@ export class Connection {
   #processId = 0;
   #secretKey = new Uint8Array();
   #closed = false;
-  readonly #lock = new Semaphore(1);
-  #waiting = 0;
-  #active?: Cursor;
+  // Commands use the connection one at a time.
+  readonly #lock = new DeferredStack<true>({ maxSize: 1 });
+  readonly #waiting = new Set<AbortController>();
+  // The result being read by the caller, which holds the connection.
+  #streaming?: Cursor;
   #cancelling?: Promise<void>;
   /** The transaction status of the last ReadyForQuery message */
   status = "I";
@@ -124,16 +128,29 @@ export class Connection {
     this.#config = config;
     this.#conn = conn;
     this.#reader = new MessageReader(conn);
+    this.#lock.add(true);
   }
 
-  /** Open and authenticate a connection */
-  static async connect(config: ConnectionConfig): Promise<Connection> {
+  /**
+   * Open and authenticate a connection. When the signal aborts while
+   * authenticating, the socket is closed and connecting rejects.
+   */
+  static async connect(
+    config: ConnectionConfig,
+    signal?: AbortSignal,
+  ): Promise<Connection> {
     const connection = new Connection(config, await openSocket(config));
+    const onAbort = () => connection.#terminate();
+    signal?.addEventListener("abort", onAbort, { once: true });
     try {
+      signal?.throwIfAborted();
       await connection.#startup();
+      signal?.throwIfAborted();
     } catch (error) {
       connection.#terminate();
-      throw error;
+      throw signal?.aborted ? signal.reason : error;
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
     }
     return connection;
   }
@@ -327,28 +344,32 @@ export class Connection {
 
   async #acquire(): Promise<() => void> {
     if (this.#closed) throw new ConnectionError("Connection is closed");
-    this.#waiting++;
+    // A result that is being read is not buffered, as it may not fit in
+    // memory, so commands are rejected until it is read or disposed.
+    if (this.#streaming) throw new QueryError(STREAMING_MESSAGE);
+    const controller = new AbortController();
+    this.#waiting.add(controller);
+    let element;
     try {
-      // Buffer the rest of a result that is still being read, so that this
-      // command does not wait for the consumer of that result.
-      this.#active?.buffer();
-      const permit = await this.#lock.acquire();
-      let released = false;
-      const release = () => {
-        if (released) return;
-        released = true;
-        permit[Symbol.dispose]();
-      };
+      element = await this.#lock.pop({ signal: controller.signal });
+    } finally {
+      this.#waiting.delete(controller);
+    }
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      void element.release();
+    };
+    try {
       // A pending cancel request must not cancel this command.
       await this.#cancelling;
-      if (this.#closed) {
-        release();
-        throw new ConnectionError("Connection is closed");
-      }
-      return release;
-    } finally {
-      this.#waiting--;
+      if (this.#closed) throw new ConnectionError("Connection is closed");
+    } catch (error) {
+      release();
+      throw error;
     }
+    return release;
   }
 
   /** Run a statement with the simple query protocol, discarding results */
@@ -376,11 +397,15 @@ export class Connection {
    *
    * When the signal is aborted while the statement runs, a cancel request is
    * sent to the server.
+   *
+   * A streaming result is read by the caller, and holds the connection until
+   * it is read or disposed: other commands are rejected meanwhile.
    */
   async execute(
     target: Target,
     params: (string | null)[],
     signal?: AbortSignal,
+    streaming = false,
   ): Promise<Cursor> {
     const release = await this.#acquire();
     let cursor: Cursor | undefined;
@@ -389,7 +414,7 @@ export class Connection {
     };
     const done = () => {
       signal?.removeEventListener("abort", onAbort);
-      if (this.#active === cursor) this.#active = undefined;
+      if (this.#streaming === cursor) this.#streaming = undefined;
       release();
     };
     try {
@@ -423,8 +448,14 @@ export class Connection {
               message.type === "T" ? parseRowDescription(message) : [],
               done,
             );
-            this.#active = cursor;
-            if (this.#waiting > 0) cursor.buffer();
+            if (streaming && !cursor.done) {
+              this.#streaming = cursor;
+              // Commands that wait for the connection would wait until the
+              // result is read, which may only happen after they finish.
+              for (const waiting of this.#waiting) {
+                waiting.abort(new QueryError(STREAMING_MESSAGE));
+              }
+            }
             return cursor;
           case "E": {
             const error = createError(message.body);
@@ -487,17 +518,14 @@ export class Connection {
 
 /**
  * The rows of a running statement. Rows are read from the connection as they
- * are requested, and buffered when another command needs the connection.
+ * are requested.
  */
 export class Cursor {
   readonly fields: Field[];
   readonly #connection: Connection;
   readonly #done: () => void;
-  readonly #buffer: (string | null)[][] = [];
   #chain: Promise<unknown> = Promise.resolve();
-  #buffering?: Promise<void>;
   #finished = false;
-  #error: unknown;
   #command?: string;
 
   constructor(connection: Connection, fields: Field[], done: () => void) {
@@ -563,28 +591,8 @@ export class Cursor {
   /** Read the next row, or `null` when there are no more rows */
   next(): Promise<(string | null)[] | null> {
     return this.#serial(async () => {
-      if (this.#buffer.length > 0) return this.#buffer.shift()!;
-      if (this.#finished) {
-        const error = this.#error;
-        this.#error = undefined;
-        if (error) throw error;
-        return null;
-      }
+      if (this.#finished) return null;
       return await this.#read();
-    });
-  }
-
-  /** Read all remaining rows into memory, releasing the connection */
-  buffer(): Promise<void> {
-    return this.#buffering ??= this.#serial(async () => {
-      try {
-        while (!this.#finished) {
-          const row = await this.#read();
-          if (row) this.#buffer.push(row);
-        }
-      } catch (error) {
-        this.#error = error;
-      }
     });
   }
 
@@ -594,11 +602,7 @@ export class Cursor {
    */
   complete(): Promise<string | undefined> {
     return this.#serial(async () => {
-      this.#buffer.length = 0;
       while (!this.#finished) await this.#read();
-      const error = this.#error;
-      this.#error = undefined;
-      if (error) throw error;
       return this.#command;
     });
   }

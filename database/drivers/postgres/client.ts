@@ -38,12 +38,10 @@ export interface PostgresClientOptions extends
  *   connectionOptions: { password: "secret" },
  *   poolOptions: { maxSize: 4 },
  * });
- * await client.connect();
  * await client.transaction(async (tx) => {
  *   await tx.execute("INSERT INTO users (name) VALUES ($1)", ["Alice"]);
  * });
- * const ctx = await client.query("SELECT * FROM users");
- * console.log(await ctx.toRecords());
+ * console.log(await client.query("SELECT * FROM users").toRecords());
  * ```
  */
 export class PostgresClient

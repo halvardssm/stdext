@@ -11,9 +11,7 @@
  * await using client = new PostgresClient("postgres://user@localhost/db", {
  *   connectionOptions: { password: "secret" },
  * });
- * await client.connect();
- * const ctx = await client.query("SELECT 1 + 1 AS solution");
- * console.log(await ctx.toRecords());
+ * console.log(await client.query("SELECT 1 + 1 AS solution").toRecords());
  * ```
  *
  * @module
