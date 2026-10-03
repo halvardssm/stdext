@@ -12,6 +12,24 @@ import type { ClientEventTarget, Eventable } from "./events.ts";
  * bind natively. Binary data is bound from any `ArrayBufferView` or
  * `ArrayBuffer`. Drivers may extend this with database specific types, such
  * as `Date`.
+ *
+ * @example
+ * ```ts
+ * import type { ParameterType } from "@stdext/database/sql";
+ *
+ * // The types that JavaScript runtimes bind natively.
+ * const values: ParameterType[] = [
+ *   "Alice",
+ *   1,
+ *   9007199254740993n,
+ *   true,
+ *   null,
+ *   undefined,
+ *   new Uint8Array([1, 2]),
+ *   new ArrayBuffer(2),
+ * ];
+ * console.log(values.length); // 8
+ * ```
  */
 export type ParameterType =
   | string
@@ -29,6 +47,17 @@ export type ParameterType =
  * The parameters to bind to a SQL statement. Depending on the placeholder
  * style supported by the database, parameters are passed either as an ordered
  * array or as a record of named parameters.
+ *
+ * @example
+ * ```ts
+ * import type { QueryParameters } from "@stdext/database/sql";
+ *
+ * // Positional parameters, for databases with `?` or `$1` placeholders.
+ * const positional: QueryParameters = ["Alice", 1];
+ * // Named parameters, for databases with `:name` placeholders.
+ * const named: QueryParameters = { name: "Alice", id: 1 };
+ * console.log(Array.isArray(positional), typeof named); // true object
+ * ```
  */
 export type QueryParameters =
   | ParameterType[]
@@ -38,6 +67,18 @@ export type QueryParameters =
  * ExecuteResult
  *
  * The result of executing a statement.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)");
+ * // SQLite reports the rowid of the inserted row.
+ * const result = await client.execute("INSERT INTO users DEFAULT VALUES");
+ * console.log(result.affectedRows); // 1
+ * console.log(result.lastInsertId); // 1
+ * ```
  */
 export interface ExecuteResult {
   /**
@@ -92,6 +133,20 @@ export interface SqlTemplate {
  *
  * A SQL statement: either SQL text with placeholders in the style of the
  * database, or a {@linkcode SqlTemplate}.
+ *
+ * @example
+ * ```ts
+ * import { sql } from "@stdext/database/sql";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * const id = 1;
+ * // Both forms are accepted by execute and query.
+ * const fromText = await client.query("SELECT * FROM users WHERE id = ?", [id]);
+ * const fromTemplate = await client.query(sql`SELECT * FROM users WHERE id = ${id}`);
+ * console.log(await fromText.toValues(), await fromTemplate.toValues()); // [] []
+ * ```
  */
 export type Statement = string | SqlTemplate;
 
@@ -100,6 +155,20 @@ export type Statement = string | SqlTemplate;
  *
  * Options used when connecting to the database. Drivers extend this with
  * database specific options.
+ *
+ * @example
+ * ```ts
+ * import type { ConnectionOptions } from "@stdext/database/sql";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * // The standard option, and a driver specific one.
+ * const options: ConnectionOptions = {
+ *   connectTimeout: 5000,
+ *   // SqliteConnectionOptions, extended by the driver:
+ *   readOnly: true,
+ * };
+ * await using client = new SqliteClient(":memory:", { connectionOptions: options });
+ * ```
  */
 export interface ConnectionOptions {
   /**
@@ -115,6 +184,20 @@ export interface ConnectionOptions {
  * DriverQueryOptions
  *
  * The options of the query methods of the driver level.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ *
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:");
+ * // The driver level only receives the signal.
+ * const controller = new AbortController();
+ * const rows = await connection.query("SELECT 1", [], {
+ *   signal: controller.signal,
+ * });
+ * await rows[Symbol.asyncDispose]();
+ * ```
  */
 export interface DriverQueryOptions {
   /**
@@ -130,6 +213,23 @@ export interface DriverQueryOptions {
  *
  * Options to pass to the query methods of the client level. Merged with the
  * query options given to the client.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:", {
+ *   // Merged into every query of the client.
+ *   queryOptions: { transformOutput: (value) => `${value}!` },
+ * });
+ * await client.execute("CREATE TABLE users (name TEXT)");
+ * await client.execute("INSERT INTO users VALUES ('Alice')");
+ * // The method level options take precedence.
+ * const result = await client.query("SELECT name FROM users", undefined, {
+ *   transformOutput: (value) => `${value}?`,
+ * });
+ * console.log(await result.toRecords()); // [{ name: "Alice?" }]
+ * ```
  */
 export interface QueryOptions extends DriverQueryOptions {
   /**
@@ -155,6 +255,16 @@ export interface QueryOptions extends DriverQueryOptions {
  * Options for beginning a transaction. There are no standard transaction
  * options; drivers extend this with the options they support, such as
  * isolation levels.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * // SqliteTransactionOptions, extended by the driver:
+ * // an immediate transaction locks the database right away.
+ * await using tx = await client.beginTransaction({ behavior: "immediate" });
+ * ```
  */
 export interface TransactionOptions {
   [key: string]: unknown;
@@ -164,6 +274,18 @@ export interface TransactionOptions {
  * PoolOptions
  *
  * Options for the connection pool of a {@linkcode Client}.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * // A pool of four connections that closes connections after a minute idle.
+ * await using client = new SqliteClient(":memory:", {
+ *   poolOptions: { maxSize: 4, idleTimeout: 60_000 },
+ * });
+ * console.log(client.options.poolOptions?.maxSize); // 1
+ * // SQLite supports one connection, so the pool is capped at it.
+ * ```
  */
 export interface PoolOptions {
   /**
@@ -204,6 +326,21 @@ export interface PoolOptions {
  *
  * The options that a {@linkcode Client} is constructed with.
  *
+ * @example
+ * ```ts
+ * import type { ClientOptions } from "@stdext/database/sql";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * const options: ClientOptions = {
+ *   connectionOptions: { connectTimeout: 5000 },
+ *   queryOptions: { statementCacheSize: 10 },
+ *   transactionOptions: {},
+ *   poolOptions: { maxSize: 2 },
+ * };
+ * await using client = new SqliteClient(":memory:", options);
+ * console.log(client.options.poolOptions?.maxSize); // 1
+ * ```
+ *
  * @template IConnectionOptions driver specific connection options
  * @template ITransactionOptions driver specific transaction options
  */
@@ -238,6 +375,18 @@ export interface ClientOptions<
  *
  * Describes the SQL syntax of a database, which tools such as query builders
  * can not discover otherwise.
+ *
+ * @example
+ * ```ts
+ * import type { Dialect } from "@stdext/database/sql";
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ *
+ * // A driver for a database with `?` placeholders.
+ * const dialect: Dialect = new SqliteDriver().dialect;
+ * console.log(dialect.name); // "sqlite"
+ * console.log(dialect.placeholder(0)); // "?"
+ * console.log(dialect.quoteIdentifier("users")); // "\"users\""
+ * ```
  */
 export interface Dialect {
   /**
@@ -259,9 +408,22 @@ export interface Dialect {
 /**
  * Driver
  *
- * A database driver, the entry point of the driver level. Drivers implement
- * the driver level; the client level is implemented on top of it by the
- * standard `SqlClient`.
+ * A database driver, the entry point of the driver level: it opens
+ * connections to a database. Drivers implement the driver level; the client
+ * level is implemented on top of it by the standard `SqlClient`. See the
+ * [specification](../RFC_SQL.md#driver-level) for the details.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ * import { assertIsDriver } from "@stdext/database/sql";
+ *
+ * const driver = new SqliteDriver();
+ * assertIsDriver(driver);
+ * // SQLite supports one connection at a time.
+ * console.log(driver.maxConnections); // 1
+ * await using connection = await driver.connect(":memory:");
+ * ```
  *
  * @template IConnectionOptions driver specific connection options
  * @template ITransactionOptions driver specific transaction options
@@ -298,6 +460,18 @@ export interface Driver<
  * A single connection of a driver. It runs one operation at a time: while
  * rows are being read, the connection is busy, and drivers may reject other
  * operations with a {@linkcode QueryError} rather than buffering the rows.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ * import { assertIsDriverConnection } from "@stdext/database/sql";
+ *
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:");
+ * assertIsDriverConnection(connection);
+ * const result = await connection.execute("CREATE TABLE users (id INTEGER)");
+ * console.log(result.affectedRows); // 0
+ * ```
  *
  * @template ITransactionOptions driver specific transaction options
  */
@@ -358,6 +532,18 @@ export interface DriverConnection<
  * The rows of a query of the driver level. The rows are streamed and can be
  * iterated once; disposing them, or ending the iteration early, stops
  * fetching and frees the connection.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ *
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:");
+ * await using rows = await connection.query("SELECT 1 AS id, 'Alice' AS name");
+ * // The columns are known once the query has run.
+ * console.log(rows.columns); // ["id", "name"]
+ * for await (const values of rows) console.log(values); // [1, "Alice"]
+ * ```
  */
 export interface DriverRows extends AsyncIterable<unknown[]>, AsyncDisposable {
   /**
@@ -370,7 +556,19 @@ export interface DriverRows extends AsyncIterable<unknown[]>, AsyncDisposable {
 /**
  * DriverStatement
  *
- * A native prepared statement of a {@linkcode DriverConnection}.
+ * A native prepared statement of a {@linkcode DriverConnection}, executed and
+ * queried with new parameters each time.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ *
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:");
+ * await using statement = await connection.prepare("SELECT ? AS value");
+ * await using rows = await statement.query(["a"]);
+ * console.log(rows.columns); // ["value"]
+ * ```
  */
 export interface DriverStatement extends AsyncDisposable {
   /**
@@ -404,6 +602,21 @@ export interface DriverStatement extends AsyncDisposable {
  * A transaction begun with {@linkcode DriverConnection.begin}. Its
  * statements run on the connection. Disposing an active transaction rolls it
  * back.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ *
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:");
+ * await connection.execute("CREATE TABLE users (id INTEGER)");
+ * const transaction = await connection.begin();
+ * await connection.execute("INSERT INTO users VALUES (1)");
+ * await using savepoint = await transaction.savepoint("after_insert");
+ * await connection.execute("INSERT INTO users VALUES (2)");
+ * await savepoint.rollback(); // the second insert is undone
+ * await transaction.commit();
+ * ```
  */
 export interface DriverTransaction extends AsyncDisposable {
   /**
@@ -429,6 +642,22 @@ export interface DriverTransaction extends AsyncDisposable {
  *
  * A savepoint created with {@linkcode DriverTransaction.savepoint}. Disposing
  * an active savepoint rolls back to it.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ *
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:");
+ * await connection.execute("CREATE TABLE users (id INTEGER)");
+ * const transaction = await connection.begin();
+ * await connection.execute("INSERT INTO users VALUES (1)");
+ * const savepoint = await transaction.savepoint("after_insert");
+ * await connection.execute("INSERT INTO users VALUES (2)");
+ * // Keeping the changes of the savepoint.
+ * await savepoint.release();
+ * await transaction.commit();
+ * ```
  */
 export interface DriverSavepoint extends AsyncDisposable {
   /**
@@ -451,6 +680,19 @@ export interface DriverSavepoint extends AsyncDisposable {
  * ResultObject
  *
  * A single row of a query result.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * await client.execute("INSERT INTO users VALUES (1, 'Alice')");
+ * for await (const row of client.query("SELECT * FROM users")) {
+ *   console.log(row.values); // [1, "Alice"]
+ *   console.log(row.toRecord()); // { id: 1, name: "Alice" }
+ * }
+ * ```
  *
  * @template V the row values
  * @template R the record representation of the row
@@ -528,6 +770,18 @@ export interface ResultIterableContext<
  * connects eagerly, for example to report connection errors early. Once
  * closed, operations reject with a {@linkcode ConnectionError} until it is
  * connected again. Disposing closes it.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * console.log(client.connected); // false
+ * await client.connect(); // connect eagerly, reporting errors early
+ * console.log(client.connected); // true
+ * await client.close(); // closing is explicit
+ * console.log(client.connected); // false
+ * ```
  */
 export interface Connectable extends AsyncDisposable {
   /**
@@ -554,6 +808,14 @@ export interface Connectable extends AsyncDisposable {
  * Pingable
  *
  * Represents an object that can check that its connection is alive.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.ping(); // rejects with a ConnectionError when not alive
+ * ```
  */
 export interface Pingable {
   /**
@@ -568,6 +830,26 @@ export interface Pingable {
  *
  * Represents an object that exposes the SQL dialect of its database, for
  * tools such as query builders.
+ *
+ * @example
+ * ```ts
+ * import type { Dialectable, Queryable } from "@stdext/database/sql";
+ * import { sql } from "@stdext/database/sql";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * // A tool generating dialect specific SQL, such as RETURNING.
+ * function returning(db: Queryable & Dialectable, id: number) {
+ *   const dialect = db.dialect.name;
+ *   return db.execute(
+ *     dialect === "postgres"
+ *       ? sql`UPDATE users SET name = 'x' WHERE id = ${id} RETURNING id`
+ *       : sql`UPDATE users SET name = 'x' WHERE id = ${id}`,
+ *   );
+ * }
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * await returning(client, 1);
+ * ```
  */
 export interface Dialectable {
   /**
@@ -581,6 +863,23 @@ export interface Dialectable {
  *
  * Represents an object that runs SQL statements, queries and scripts. This is
  * the capability that query builders and migration tools depend on.
+ *
+ * @example
+ * ```ts
+ * import type { Queryable } from "@stdext/database/sql";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * // A migration tool only depends on the Queryable capability, so that it
+ * // works with any implementation.
+ * async function migrate(db: Queryable, script: string): Promise<void> {
+ *   await db.executeScript(script);
+ * }
+ * await using client = new SqliteClient(":memory:");
+ * await migrate(
+ *   client,
+ *   "CREATE TABLE users (id INTEGER); CREATE TABLE posts (id INTEGER);",
+ * );
+ * ```
  */
 export interface Queryable {
   /**
@@ -627,6 +926,24 @@ export interface Queryable {
  * Preparable
  *
  * Represents an object that creates prepared statements.
+ *
+ * @example
+ * ```ts
+ * import type { Preparable, PreparedStatement } from "@stdext/database/sql";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * // A tool depending on the Preparable capability only.
+ * async function countBy(db: Preparable, table: string): Promise<number> {
+ *   await using stmt: PreparedStatement = await db.prepare(
+ *     `SELECT COUNT(*) AS n FROM ${table}`,
+ *   );
+ *   const rows = await stmt.query().toRecords();
+ *   return rows[0].n as number;
+ * }
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER)");
+ * console.log(await countBy(client, "users")); // 0
+ * ```
  */
 export interface Preparable {
   /**
@@ -650,7 +967,20 @@ export interface Preparable {
 /**
  * PreparedStatement
  *
- * A prepared statement of the client level. Disposing deallocates it.
+ * A prepared statement of the client level, executed with new parameters
+ * each time. Disposing deallocates it.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * await using stmt = await client.prepare("SELECT * FROM users WHERE id = ?");
+ * console.log(await stmt.query([1]).toRecords()); // []
+ * // Executed with new parameters each time.
+ * console.log(await stmt.execute([1])); // { affectedRows: 0 }
+ * ```
  */
 export interface PreparedStatement extends AsyncDisposable {
   /**
@@ -686,6 +1016,23 @@ export interface PreparedStatement extends AsyncDisposable {
  * Transactionable
  *
  * Represents an object that creates transactions.
+ *
+ * @example
+ * ```ts
+ * import type { Transactionable } from "@stdext/database/sql";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * // A tool depending on the Transactionable capability only: the callback
+ * // commits on success, and rolls back and rethrows on errors.
+ * async function withUsers(db: Transactionable): Promise<number> {
+ *   return await db.transaction(async (tx) => {
+ *     await tx.execute("CREATE TABLE users (id INTEGER)");
+ *     return 42;
+ *   });
+ * }
+ * await using client = new SqliteClient(":memory:");
+ * console.log(await withUsers(client)); // 42
+ * ```
  */
 export interface Transactionable {
   /**
@@ -722,6 +1069,23 @@ export interface Transactionable {
  * A transaction of the client level. Disposing an active transaction rolls it
  * back. Calling `beginTransaction` or `transaction` on it creates a nested
  * transaction, as a savepoint.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * await using tx = await client.beginTransaction();
+ * await tx.execute("INSERT INTO users VALUES (1, 'Alice')");
+ * // Nested transactions are savepoints.
+ * const nested = await tx.beginTransaction();
+ * await nested.execute("INSERT INTO users VALUES (2, 'Bob')");
+ * await nested.rollback(); // the second insert is undone
+ * await tx.commit();
+ * console.log(await client.query("SELECT * FROM users").toRecords());
+ * // [{ id: 1, name: "Alice" }]
+ * ```
  */
 export interface Transaction
   extends AsyncDisposable, Queryable, Preparable, Transactionable {
@@ -755,6 +1119,21 @@ export interface Transaction
  * Poolable
  *
  * Represents an object with a pool of connections.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER)");
+ * {
+ *   // The connection is held until it is released, which disposing does.
+ *   await using connection = await client.acquire();
+ *   await connection.execute("INSERT INTO users VALUES (1)");
+ * }
+ * console.log(await client.query("SELECT * FROM users").toRecords());
+ * // [{ id: 1 }]
+ * ```
  */
 export interface Poolable {
   /**
@@ -771,6 +1150,20 @@ export interface Poolable {
  * is released. Disposing releases it. Operations run one at a time; an
  * operation started while a result of the connection is being read rejects
  * with a {@linkcode QueryError}.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * // A held connection, with access to the driver level connection.
+ * await using connection = await client.acquire();
+ * console.log(connection.connected, connection.released); // true false
+ * await connection.execute("INSERT INTO users VALUES (1, 'Alice')");
+ * console.log(await connection.query("SELECT * FROM users").toRecords());
+ * // [{ id: 1, name: "Alice" }]
+ * ```
  */
 export interface Connection
   extends
@@ -812,6 +1205,20 @@ export interface Connection
  * The user facing client: a pool of driver connections. Its query methods
  * acquire a connection for the duration of the operation. The standard
  * implementation is `SqlClient`.
+ *
+ * @example
+ * ```ts
+ * import type { Client } from "@stdext/database/sql";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * // Tools can depend on the Client interface, with every implementation.
+ * const client: Client = new SqliteClient(":memory:");
+ * await using _ = client;
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * await client.execute("INSERT INTO users VALUES (1, 'Alice')");
+ * console.log(await client.query("SELECT * FROM users").toRecords());
+ * // [{ id: 1, name: "Alice" }]
+ * ```
  *
  * @template IOptions the client options
  */

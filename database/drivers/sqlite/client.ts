@@ -8,7 +8,22 @@ import {
 /**
  * SqliteClientOptions
  *
- * The options that a {@linkcode SqliteClient} is constructed with.
+ * The options that a {@linkcode SqliteClient} is constructed with. The
+ * `connectionOptions` and `transactionOptions` are the SQLite specific ones.
+ *
+ * @example
+ * ```ts
+ * import type { SqliteClientOptions } from "@stdext/database/drivers/sqlite";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * const options: SqliteClientOptions = {
+ *   connectionOptions: { readOnly: true },
+ *   transactionOptions: { behavior: "deferred" },
+ *   poolOptions: { maxSize: 1 },
+ * };
+ * await using client = new SqliteClient(":memory:", options);
+ * console.log(client.options.poolOptions?.maxSize); // 1
+ * ```
  */
 export interface SqliteClientOptions
   extends ClientOptions<SqliteConnectionOptions, SqliteTransactionOptions> {}

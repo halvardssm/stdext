@@ -8,7 +8,27 @@ import {
 /**
  * PostgresClientOptions
  *
- * The options that a {@linkcode PostgresClient} is constructed with.
+ * The options that a {@linkcode PostgresClient} is constructed with. The
+ * `connectionOptions` and `transactionOptions` are the Postgres specific
+ * ones.
+ *
+ * @example
+ * ```ts
+ * import type { PostgresClientOptions } from "@stdext/database/drivers/postgres";
+ * import { PostgresClient } from "@stdext/database/drivers/postgres";
+ *
+ * const options: PostgresClientOptions = {
+ *   connectionOptions: {
+ *     password: "secret",
+ *     tls: { mode: "require" },
+ *   },
+ *   transactionOptions: { isolationLevel: "read committed" },
+ *   poolOptions: { maxSize: 4 },
+ * };
+ * // Constructing does not connect; the first operation does.
+ * await using client = new PostgresClient("postgres://user@localhost/db", options);
+ * console.log(client.options.poolOptions?.maxSize); // 4
+ * ```
  */
 export interface PostgresClientOptions
   extends

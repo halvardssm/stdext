@@ -243,6 +243,20 @@ interface PreparedStatementCalls {
 /**
  * The prepared statement of the standard client, created by
  * {@linkcode SqlConnection.prepare} or {@linkcode SqlClient.prepare}.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * await client.execute("INSERT INTO users VALUES (1, 'Alice')");
+ * await using statement = await client.prepare(
+ *   "SELECT name FROM users WHERE id = ?",
+ * );
+ * console.log(await statement.query([1]).toRecords());
+ * // [{ name: "Alice" }]
+ * ```
  */
 export class SqlPreparedStatement implements PreparedStatement {
   readonly #sql: string;
@@ -332,6 +346,20 @@ interface TransactionContext {
  * The transaction of the standard client, created by
  * {@linkcode SqlConnection.beginTransaction} or
  * {@linkcode SqlClient.beginTransaction}. Nested transactions are savepoints.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * const transaction = await client.beginTransaction();
+ * await transaction.execute("INSERT INTO users VALUES (1, 'Alice')");
+ * console.log(transaction.inTransaction); // true
+ * await transaction.commit();
+ * console.log(transaction.inTransaction); // false
+ * // Disposing an active transaction rolls it back instead.
+ * ```
  */
 export class SqlTransaction implements Transaction {
   readonly #context: TransactionContext;
@@ -512,6 +540,19 @@ export class SqlTransaction implements Transaction {
  * {@linkcode SqlClient.acquire}. Operations run one at a time; an operation
  * started while a query result of the connection is being read rejects with
  * a {@linkcode QueryError}.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * // The connection is held until it is released, which disposing does.
+ * await using connection = await client.acquire();
+ * await connection.execute("INSERT INTO users VALUES (1, 'Alice')");
+ * console.log(await connection.query("SELECT * FROM users").toRecords());
+ * // [{ id: 1, name: "Alice" }]
+ * ```
  */
 export class SqlConnection implements Connection {
   readonly #context: ConnectionContext;

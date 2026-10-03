@@ -1,11 +1,30 @@
 /**
- * Parses a value received from Postgres in text format.
+ * Parses a value received from Postgres in text format. Values of types
+ * without a parser are returned as strings.
+ *
+ * @example
+ * ```ts
+ * import type { Parser } from "@stdext/database/drivers/postgres";
+ *
+ * // Parse a boolean column, received as `t` or `f`.
+ * const parseBool: Parser = (value) => value === "t";
+ * console.log(parseBool("t")); // true
+ * ```
  */
 export type Parser = (value: string) => unknown;
 
 /**
  * The object identifiers (OID) of the built-in Postgres types that are parsed
  * by default.
+ *
+ * @example
+ * ```ts
+ * import { Oid } from "@stdext/database/drivers/postgres";
+ *
+ * // Override the parser of int8, to parse it as a number.
+ * const parsers = { [Oid.int8]: (value: string) => Number(value) };
+ * console.log(parsers[Oid.int8]); // [Function]
+ * ```
  */
 export const Oid = {
   bool: 16,

@@ -4,7 +4,23 @@ import type { BodyReader } from "./_wire.ts";
 /**
  * PostgresErrorFields
  *
- * The fields of an error reported by the Postgres server.
+ * The fields of an error reported by the Postgres server, carried by
+ * {@linkcode PostgresQueryError} and {@linkcode PostgresConnectionError} as
+ * their `fields`.
+ *
+ * @example
+ * ```ts ignore
+ * import { PostgresQueryError } from "@stdext/database/drivers/postgres";
+ *
+ * try {
+ *   await client.execute("SELECT * FROM missing_table");
+ * } catch (error) {
+ *   if (error instanceof PostgresQueryError) {
+ *     console.log(error.fields.code); // "42P01": undefined table
+ *     console.log(error.fields.severity); // "ERROR"
+ *   }
+ * }
+ * ```
  *
  * @see https://www.postgresql.org/docs/current/protocol-error-fields.html
  */
@@ -68,7 +84,22 @@ const FIELDS: Record<string, keyof PostgresErrorFields> = {
 /**
  * PostgresQueryError
  *
- * A query error reported by the Postgres server.
+ * A query error reported by the Postgres server, such as a syntax error or a
+ * constraint violation. The fields reported by the server, such as the
+ * SQLSTATE code, are available as {@linkcode PostgresQueryError.fields}.
+ *
+ * @example
+ * ```ts
+ * import { PostgresQueryError } from "@stdext/database/drivers/postgres";
+ *
+ * const error = new PostgresQueryError({
+ *   severity: "ERROR",
+ *   code: "42P01",
+ *   message: 'relation "missing_table" does not exist',
+ * });
+ * console.log(error.message); // relation "missing_table" does not exist
+ * console.log(error.code); // "42P01"
+ * ```
  */
 export class PostgresQueryError extends QueryError {
   /** The error fields reported by the server */
@@ -89,7 +120,21 @@ export class PostgresQueryError extends QueryError {
  * PostgresConnectionError
  *
  * A connection error reported by the Postgres server, such as an
- * authentication failure.
+ * authentication failure. The fields reported by the server, such as the
+ * SQLSTATE code, are available as
+ * {@linkcode PostgresConnectionError.fields}.
+ *
+ * @example
+ * ```ts
+ * import { PostgresConnectionError } from "@stdext/database/drivers/postgres";
+ *
+ * const error = new PostgresConnectionError({
+ *   severity: "FATAL",
+ *   code: "28P01",
+ *   message: 'password authentication failed for user "user"',
+ * });
+ * console.log(error.code); // "28P01": invalid password
+ * ```
  */
 export class PostgresConnectionError extends ConnectionError {
   /** The error fields reported by the server */
@@ -106,7 +151,13 @@ export class PostgresConnectionError extends ConnectionError {
   }
 }
 
-/** Parse the fields of an ErrorResponse or NoticeResponse body */
+/**
+ * Parse the fields of an ErrorResponse or NoticeResponse body into a
+ * {@linkcode PostgresErrorFields}. Used by the driver to create
+ * {@linkcode createError} instances.
+ *
+ * @param body the body of the response, positioned at the first field
+ */
 export function parseErrorFields(body: BodyReader): PostgresErrorFields {
   const fields: Partial<PostgresErrorFields> = {};
   let localizedSeverity = "";

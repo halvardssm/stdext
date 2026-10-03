@@ -7,6 +7,19 @@ import { QueryError } from "./errors.ts";
  * A single row as returned by a database driver, before it is mapped to a
  * record. This is the low-level row protocol that drivers use to construct a
  * {@linkcode ResultIterableContext} with {@linkcode createResultIterableContext}.
+ *
+ * @example
+ * ```ts
+ * import type { Row } from "@stdext/database/sql";
+ *
+ * const row: Row = {
+ *   columns: ["id", "name"],
+ *   values: [1, "Alice"],
+ *   // Column types, when the driver reports them.
+ *   meta: { types: ["INTEGER", "TEXT"] },
+ * };
+ * console.log(row.values[1]); // "Alice"
+ * ```
  */
 export interface Row {
   /**
@@ -58,6 +71,21 @@ export function getObjectFromRow(row: Row): Record<string, unknown> {
  * The result of a query as produced by a driver, from which
  * {@linkcode createResultIterableContext} creates a
  * {@linkcode ResultIterableContext}.
+ *
+ * @example
+ * ```ts
+ * import type { ResultSource } from "@stdext/database/sql";
+ *
+ * const source: ResultSource = {
+ *   // The columns are known before the first row.
+ *   columns: ["id", "name"],
+ *   // The rows are read lazily.
+ *   rows: (async function* () {
+ *     yield [1, "Alice"];
+ *   })(),
+ * };
+ * console.log(source.columns); // ["id", "name"]
+ * ```
  */
 export interface ResultSource {
   /**

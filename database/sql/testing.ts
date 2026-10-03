@@ -41,6 +41,15 @@ import type { ClientEventTarget, Eventable } from "./events.ts";
  * the instances they are given, so a fresh instance must be created per step.
  *
  * @template T the instance type
+ *
+ * @example
+ * ```ts
+ * import type { Factory } from "@stdext/database/sql/testing";
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * // A fresh client for every test step.
+ * const create: Factory<SqliteClient> = () => new SqliteClient(":memory:");
+ * ```
  */
 export type Factory<T> = () => T | Promise<T>;
 
@@ -49,6 +58,24 @@ export type Factory<T> = () => T | Promise<T>;
  *
  * The SQL statements used by the conformance test suite. The statements are
  * dialect specific and must be provided by the driver author.
+ *
+ * @example
+ * ```ts
+ * import { sql } from "@stdext/database/sql";
+ * import type { TestSql } from "@stdext/database/sql/testing";
+ *
+ * // The statements of the database dialect under test.
+ * const sqlite: TestSql = {
+ *   execute: "CREATE TABLE IF NOT EXISTS users (id INTEGER, name TEXT)",
+ *   query:
+ *     "SELECT 1 AS id, 'Alice' AS name UNION ALL SELECT 2, 'Bob'",
+ *   columns: ["id", "name"],
+ *   count: 2,
+ *   parameterQuery: "SELECT ? AS value",
+ *   emptyQuery: "SELECT 1 AS id, 'Alice' AS name WHERE 1 = 0",
+ *   parameterTemplate: (value) => sql`SELECT ${value} AS value`,
+ * };
+ * ```
  */
 export interface TestSql {
   /**
@@ -120,6 +147,16 @@ async function assertWaitsFor(
  *
  * @param t the test context
  * @param create a factory creating a fresh instance
+ *
+ * @example
+ * ```ts ignore
+ * import { testConnectable } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient connectable", async (t) => {
+ *   await testConnectable(t, () => new MyClient(url));
+ * });
+ * ```
  */
 export async function testConnectable(
   t: Deno.TestContext,
@@ -171,6 +208,16 @@ export async function testConnectable(
  *
  * @param t the test context
  * @param create a factory creating a fresh, connectable instance
+ *
+ * @example
+ * ```ts ignore
+ * import { testPingable } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient pingable", async (t) => {
+ *   await testPingable(t, () => new MyClient(url));
+ * });
+ * ```
  */
 export async function testPingable(
   t: Deno.TestContext,
@@ -206,6 +253,16 @@ export async function testPingable(
  * @param t the test context
  * @param create a factory creating a fresh, connectable instance
  * @param sql the SQL statements to test with
+ *
+ * @example
+ * ```ts ignore
+ * import { testQueryable } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient queryable", async (t) => {
+ *   await testQueryable(t, () => new MyClient(url), sql);
+ * });
+ * ```
  */
 export async function testQueryable(
   t: Deno.TestContext,
@@ -432,6 +489,16 @@ export async function testQueryable(
  * @param t the test context
  * @param create a factory creating a fresh, connectable instance
  * @param sql the SQL statements to test with
+ *
+ * @example
+ * ```ts ignore
+ * import { testPreparable } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient preparable", async (t) => {
+ *   await testPreparable(t, () => new MyClient(url), sql);
+ * });
+ * ```
  */
 export async function testPreparable(
   t: Deno.TestContext,
@@ -521,6 +588,16 @@ export async function testPreparable(
  * @param t the test context
  * @param create a factory creating a fresh, connectable instance
  * @param sql the SQL statements to test with
+ *
+ * @example
+ * ```ts ignore
+ * import { testTransactionable } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient transactionable", async (t) => {
+ *   await testTransactionable(t, () => new MyClient(url), sql);
+ * });
+ * ```
  */
 export async function testTransactionable(
   t: Deno.TestContext,
@@ -698,6 +775,16 @@ export async function testTransactionable(
  *
  * @param t the test context
  * @param create a factory creating a fresh, connectable instance
+ *
+ * @example
+ * ```ts ignore
+ * import { testEventable } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient eventable", async (t) => {
+ *   await testEventable(t, () => new MyClient(url));
+ * });
+ * ```
  */
 export async function testEventable(
   t: Deno.TestContext,
@@ -731,6 +818,16 @@ export async function testEventable(
  *
  * @param t the test context
  * @param create a factory creating a fresh, connectable instance
+ *
+ * @example
+ * ```ts ignore
+ * import { testPoolable } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient poolable", async (t) => {
+ *   await testPoolable(t, () => new MyClient(url));
+ * });
+ * ```
  */
 export async function testPoolable(
   t: Deno.TestContext,
@@ -802,6 +899,16 @@ export async function testPoolable(
  * @param t the test context
  * @param create a factory creating a fresh client
  * @param sql the SQL statements to test with
+ *
+ * @example
+ * ```ts ignore
+ * import { testPool } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient pool", async (t) => {
+ *   await testPool(t, () => new MyClient(url), sql);
+ * });
+ * ```
  */
 export async function testPool(
   t: Deno.TestContext,
@@ -918,6 +1025,16 @@ export async function testPool(
  * @param t the test context
  * @param create a factory creating a fresh client
  * @param sql the SQL statements to test with
+ *
+ * @example
+ * ```ts ignore
+ * import { testConnection } from "@stdext/database/sql/testing";
+ * import { MyClient } from "./my_client.ts";
+ *
+ * Deno.test("MyClient connection", async (t) => {
+ *   await testConnection(t, () => new MyClient(url), sql);
+ * });
+ * ```
  */
 export async function testConnection(
   t: Deno.TestContext,

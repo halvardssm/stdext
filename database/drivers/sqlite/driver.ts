@@ -26,6 +26,18 @@ import {
  * SqliteConnectionOptions
  *
  * Options used when opening the database.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ *
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:", {
+ *   // Opened read-only, with foreign keys enforced.
+ *   readOnly: true,
+ *   enableForeignKeyConstraints: true,
+ * });
+ * ```
  */
 export interface SqliteConnectionOptions extends ConnectionOptions {
   /**
@@ -50,6 +62,17 @@ export interface SqliteConnectionOptions extends ConnectionOptions {
 
 /**
  * SqliteTransactionOptions
+ *
+ * The options of a transaction of the SQLite driver.
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * // An immediate transaction takes its write lock right away.
+ * await using tx = await client.beginTransaction({ behavior: "immediate" });
+ * ```
  */
 export interface SqliteTransactionOptions extends TransactionOptions {
   /**
@@ -113,6 +136,15 @@ function wrapError(
 
 /**
  * The SQL dialect of SQLite: `?` placeholders and double quoted identifiers.
+ *
+ * @example
+ * ```ts
+ * import { sqliteDialect } from "@stdext/database/drivers/sqlite";
+ *
+ * console.log(sqliteDialect.name); // "sqlite"
+ * console.log(sqliteDialect.placeholder(0)); // "?"
+ * console.log(sqliteDialect.quoteIdentifier("users")); // "\"users\""
+ * ```
  */
 export const sqliteDialect: Dialect = {
   name: "sqlite",
@@ -179,7 +211,23 @@ export class SqliteDriver
 /**
  * SqliteConnection
  *
- * A connection of the {@linkcode SqliteDriver}.
+ * A connection of the {@linkcode SqliteDriver}. It also exposes the
+ * underlying `node:sqlite` database as {@linkcode SqliteConnection.database},
+ * for SQLite features outside of the standard interface.
+ *
+ * @example
+ * ```ts
+ * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
+ *
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:");
+ * await connection.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * const result = await connection.execute(
+ *   "INSERT INTO users VALUES (?, ?)",
+ *   [1, "Alice"],
+ * );
+ * console.log(result.lastInsertId); // 1
+ * ```
  */
 export class SqliteConnection
   implements DriverConnection<SqliteTransactionOptions> {

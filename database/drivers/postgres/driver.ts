@@ -26,6 +26,21 @@ import { defaultParsers, encodeParameter, type Parser } from "./_types.ts";
 
 /**
  * PostgresTlsOptions
+ *
+ * The TLS settings of a connection, such as for a server with a
+ * self-signed certificate.
+ *
+ * @example
+ * ```ts
+ * import { PostgresClient } from "@stdext/database/drivers/postgres";
+ *
+ * await using client = new PostgresClient("postgres://user@localhost/db", {
+ *   connectionOptions: {
+ *     // Require TLS, trusting a self-signed certificate.
+ *     tls: { mode: "require", caCerts: ["-----BEGIN CERTIFICATE-----..."] },
+ *   },
+ * });
+ * ```
  */
 export interface PostgresTlsOptions {
   /**
@@ -53,6 +68,21 @@ export interface PostgresTlsOptions {
  * password and database, and the `sslmode` and `application_name`
  * parameters, are read from the connection URL; these options take
  * precedence.
+ *
+ * @example
+ * ```ts
+ * import { PostgresClient } from "@stdext/database/drivers/postgres";
+ *
+ * await using client = new PostgresClient("postgres://user@localhost/db", {
+ *   connectionOptions: {
+ *     // Not in the URL, or overriding it.
+ *     password: "secret",
+ *     applicationName: "my-app",
+ *     // Run-time parameters sent to the server on connect.
+ *     runtimeParameters: { search_path: "app", TimeZone: "UTC" },
+ *   },
+ * });
+ * ```
  */
 export interface PostgresConnectionOptions extends ConnectionOptions {
   /**
@@ -88,6 +118,21 @@ export interface PostgresConnectionOptions extends ConnectionOptions {
 
 /**
  * PostgresTransactionOptions
+ *
+ * The options of a transaction of the Postgres driver, such as the
+ * isolation level.
+ *
+ * @example
+ * ```ts ignore
+ * import { PostgresClient } from "@stdext/database/drivers/postgres";
+ *
+ * await using client = new PostgresClient("postgres://user@localhost/db");
+ * const transaction = await client.beginTransaction({
+ *   isolationLevel: "serializable",
+ *   readOnly: true,
+ * });
+ * await transaction.rollback();
+ * ```
  *
  * @see https://www.postgresql.org/docs/current/sql-set-transaction.html
  */
@@ -195,6 +240,15 @@ function parseCommandTag(tag: string | undefined): ExecuteResult {
 /**
  * The SQL dialect of Postgres: `$1`, `$2`, ... placeholders and double quoted
  * identifiers.
+ *
+ * @example
+ * ```ts
+ * import { postgresDialect } from "@stdext/database/drivers/postgres";
+ *
+ * console.log(postgresDialect.name); // "postgres"
+ * console.log(postgresDialect.placeholder(0)); // "$1"
+ * console.log(postgresDialect.quoteIdentifier("users")); // "\"users\""
+ * ```
  */
 export const postgresDialect: Dialect = {
   name: "postgres",
@@ -295,6 +349,23 @@ export class PostgresDriver
  * A connection of the {@linkcode PostgresDriver}. While a query result is
  * being read, other operations are rejected with a `QueryError`, rather than
  * buffering the rest of the result in memory.
+ *
+ * It also exposes the run-time parameters reported by the server as
+ * {@linkcode PostgresConnection.serverParameters}, such as `server_version`,
+ * and driver specific features such as `LISTEN` through the underlying
+ * connection.
+ *
+ * @example
+ * ```ts ignore
+ * import { PostgresDriver } from "@stdext/database/drivers/postgres";
+ *
+ * const driver = new PostgresDriver();
+ * await using connection = await driver.connect("postgres://user@localhost/db");
+ * // The run-time parameters reported by the server.
+ * console.log(connection.serverParameters.get("server_version"));
+ * await using rows = await connection.query("SELECT $1::text AS value", ["a"]);
+ * for await (const values of rows) console.log(values); // ["a"]
+ * ```
  */
 export class PostgresConnection
   implements DriverConnection<PostgresTransactionOptions> {
