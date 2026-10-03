@@ -56,8 +56,10 @@ export type CacheOptions = CacheFileOptions & {
  * @returns a promise that resolves to a {@link DynamicLibrary} object
  *
  * @example
- * ```ts
- * const dylib = dlopen(
+ * ```ts ignore
+ * import { dlopen } from "@stdext/ffi/dlopen";
+ *
+ * const dylib = await dlopen(
  *   {
  *     "add": { parameters: ["isize", "isize"], result: "isize" },
  *   },
@@ -73,15 +75,15 @@ export type CacheOptions = CacheFileOptions & {
  *         aarch64: {
  *           url: "https://example.com/some_archive.zip",
  *           type: "zip",
- *           path: "path/to/lib/in/zip"
+ *           archivePath: "path/to/lib/in/zip",
  *         },
  *       },
  *     },
  *     cacheOptions: {
  *       cacheControl: "reload",
- *       path: "./custom/cache/path"
- *     }
- *   }
+ *       path: "./custom/cache/path",
+ *     },
+ *   },
  * );
  * ```
  */
@@ -122,10 +124,15 @@ export function getFileOptions(options: FilenameOptions): FileOptions {
 /**
  * Caches a remote file locally
  *
- * @param fileOptions {@link FileOptions} file options
- * @param cacheOptions {@link CacheOptions} cache options
+ * Archives (`type: "zip"`) are extracted, and the file at
+ * {@linkcode FileOptions.archivePath} within the extraction is returned. The
+ * archive is extracted once and reused, and extracted again on `"reload"`.
+ *
+ * @param fileOptions {@linkcode FileOptions} file options
+ * @param cacheOptions {@linkcode CacheOptions} cache options
  * @returns the absolute path to the cached file
- * @throws {TypeError} when zip file path is not provided or library not found in archive
+ * @throws {TypeError} when `archivePath` is not provided for an archive, or
+ * the file is not found within the extracted archive
  */
 export async function cacheRemoteFile(
   fileOptions: FileOptions,
@@ -139,28 +146,38 @@ export async function cacheRemoteFile(
 
   let absoluteFilePath = join(cachePath, filePathSegments);
 
+  // Validate the archive path before downloading anything.
+  if (fileOptions.type === "zip" && !fileOptions.archivePath) {
+    throw new TypeError(
+      `When using file type zip, path needs to be provided`,
+    );
+  }
+
   await ensureDir(dirname(absoluteFilePath));
 
   await cacheFile(fileUrl, absoluteFilePath, cacheOptions);
 
-  if (cacheOptions?.cacheControl === "reload") {
-    if (fileOptions.type === "zip") {
-      if (!fileOptions.archivePath) {
-        throw new TypeError(
-          `When using file type zip, path needs to be provided`,
-        );
+  if (fileOptions.type === "zip") {
+    const unarchivedPath = withoutExt(absoluteFilePath);
+    // A reload refetches the archive, so a previous extraction is stale and
+    // is removed; otherwise the archive is only extracted when it has not
+    // been extracted yet.
+    const extractAgain = cacheOptions?.cacheControl === "reload";
+    if (extractAgain || !(await exists(unarchivedPath))) {
+      if (extractAgain) {
+        await Deno.remove(unarchivedPath, { recursive: true })
+          .catch((e: Error) =>
+            e.name !== "NotFound" && console.warn(e.message)
+          );
       }
-      const unarchivedPath = withoutExt(absoluteFilePath);
-      await Deno.remove(unarchivedPath, { recursive: true })
-        .catch((e: Error) => e.name !== "NotFound" && console.warn(e.message));
       await unzip(absoluteFilePath, unarchivedPath);
-      absoluteFilePath = join(unarchivedPath, fileOptions.archivePath);
-      const fileExistsInArchive = await exists(absoluteFilePath);
-      if (!fileExistsInArchive) {
-        throw new TypeError(
-          `Library not found in archive at ${absoluteFilePath}`,
-        );
-      }
+    }
+    absoluteFilePath = join(unarchivedPath, fileOptions.archivePath!);
+    const fileExistsInArchive = await exists(absoluteFilePath);
+    if (!fileExistsInArchive) {
+      throw new TypeError(
+        `Library not found in archive at ${absoluteFilePath}`,
+      );
     }
   }
 
@@ -185,6 +202,10 @@ export async function getCachePath(path?: string): Promise<string> {
 
 /**
  * Converts a URL to path segments
+ *
+ * The scheme, hostname and path of the URL become directories of the cache
+ * path. The port, query and fragment are not part of it, so URLs that differ
+ * only in those share the same cache entry.
  *
  * @param url the URL to convert
  * @returns path segments as a string

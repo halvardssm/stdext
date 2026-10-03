@@ -91,6 +91,54 @@ Deno.test("cacheRemoteFile", async (t) => {
     );
   });
 
+  await t.step("extracts archives with the default cache control", async () => {
+    const testCacheDir = await Deno.makeTempDir();
+
+    const result = await cacheRemoteFile({
+      url: TEST_ZIP_URL,
+      type: "zip",
+      archivePath: "stdext-0.0.1/README.md",
+    }, {
+      path: testCacheDir,
+    });
+
+    const content = await Deno.readTextFile(result);
+    assert(
+      content.startsWith("# Deno Standard Library Extended"),
+      "The file within the extracted archive should be returned",
+    );
+
+    await Deno.remove(testCacheDir, { recursive: true });
+  });
+
+  await t.step("reuses the extracted archive on later calls", async () => {
+    const testCacheDir = await Deno.makeTempDir();
+
+    const first = await cacheRemoteFile({
+      url: TEST_ZIP_URL,
+      type: "zip",
+      archivePath: "stdext-0.0.1/README.md",
+    }, {
+      path: testCacheDir,
+    });
+    const second = await cacheRemoteFile({
+      url: TEST_ZIP_URL,
+      type: "zip",
+      archivePath: "stdext-0.0.1/README.md",
+    }, {
+      path: testCacheDir,
+    });
+
+    assertEquals(first, second);
+    const content = await Deno.readTextFile(second);
+    assert(
+      content.startsWith("# Deno Standard Library Extended"),
+      "The file within the extracted archive should be returned",
+    );
+
+    await Deno.remove(testCacheDir, { recursive: true });
+  });
+
   await t.step("throws error when zip file missing path", async () => {
     await assertRejects(
       async () => {
