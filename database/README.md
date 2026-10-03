@@ -22,64 +22,27 @@ console.log(await client.query("SELECT * FROM users").toRecords());
 ### Sql
 
 The SQL entrypoint contains the standard interface for SQL databases, as
-specified in [RFC_SQL.md](./RFC_SQL.md): the types, helpers for driver authors,
-and a conformance test suite. It is meant for driver authors; applications use a
-driver. See [database/sql](./sql/README.md) for more details.
+specified in [RFC_SQL.md](./RFC_SQL.md): the types, the standard client level
+implementation (`SqlClient`), helper utilities for driver authors, and a
+conformance test suite. It is meant for driver authors and alternative client
+implementations; applications use a driver. See [database/sql](./sql/README.md)
+for more details.
 
 ### Drivers
 
-Drivers implementing the [database/sql](./sql/README.md) interfaces. Each driver
-exports a `Driver` (a single connection) and a `Client` (a connection pool).
+Drivers implementing the [database/sql](./sql/README.md) specification, which
+has two levels: a minimal **driver level**, implemented by the drivers, and a
+user facing **client level**, implemented once by the standard `SqlClient` on
+top of any driver. Each driver exports its `Driver` and a preconfigured client
+bound to it, such as `SqliteClient`, which behaves the same for every database.
 
-#### Core
-
-`@stdext/database/drivers/core` contains the base classes the drivers are built
-on, for implementing new drivers. `BaseDriver` implements option merging, value
-transforms, abort checks, error wrapping, events, prepared statements and
-savepoint based nested transactions, and `BaseClient` implements the connection
-pool. A driver only implements the database specific primitives:
-
-```ts ignore
-import {
-  BaseClient,
-  BaseDriver,
-  type DriverParameters,
-  type DriverResult,
-  type StatementHandle,
-} from "@stdext/database/drivers/core";
-import type { ExecuteResult, QueryOptions } from "@stdext/database/sql";
-
-class MyDriver extends BaseDriver {
-  get connected(): boolean {/* ... */}
-  protected connectDriver(signal: AbortSignal): Promise<void> {/* ... */}
-  protected closeDriver(): Promise<void> {/* ... */}
-  protected pingDriver(): Promise<void> {/* ... */}
-  protected executeDriver(
-    sql: string,
-    params: DriverParameters | undefined,
-    options: QueryOptions,
-  ): Promise<ExecuteResult> {/* ... */}
-  protected queryDriver(
-    sql: string,
-    params: DriverParameters | undefined,
-    options: QueryOptions,
-  ): Promise<DriverResult> {/* ... */}
-  protected executeScriptDriver(
-    sql: string,
-    options: QueryOptions,
-  ): Promise<void> {/* ... */}
-  protected prepareDriver(
-    sql: string,
-    options: QueryOptions,
-  ): Promise<StatementHandle> {/* ... */}
-}
-
-class MyClient extends BaseClient<MyDriver> {
-  protected createDriver(): MyDriver {
-    return new MyDriver(this.connectionUrl, this.options);
-  }
-}
-```
+A driver implements a `Dialect`, and connects and runs statements on a single
+connection: `DriverConnection`, with its `DriverRows`, `DriverStatement` and
+`DriverTransaction`. The client level adds pooling, nested transactions, SQL
+templates, lazy results, prepared statement caching, events and options. Driver
+authors verify their implementation with the conformance suites of
+[`@stdext/database/sql/testing`](./sql/README.md#testing); no base classes are
+required.
 
 #### SQLite
 

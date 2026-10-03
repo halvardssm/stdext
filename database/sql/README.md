@@ -7,36 +7,48 @@ Inspired by [rust sqlx](https://docs.rs/sqlx/latest/sqlx/index.html) and
 in [RFC_SQL.md](../RFC_SQL.md).
 
 The goal for this package is to have a standard interface for SQL-like database
-clients that can be used in Deno, Node and other JS runtimes. The entrypoint is
-not intended to be directly used in applications, but is meant to be implemented
-by database drivers.
+clients that can be used in Deno, Node and other JS runtimes. Applications use a
+driver with its preconfigured client, such as
+[`@stdext/database/drivers/sqlite`](../README.md); this entrypoint is meant for
+driver authors and for applications that wire up a driver with the standard
+client themselves.
 
 ## Design
 
-The package defines three layers, see
-[the specification](../RFC_SQL.md#specification) for the details:
+The specification has two levels, as in Go's `database/sql/driver` and
+`database/sql`; see [the specification](../RFC_SQL.md#specification) for the
+details:
 
-- **Core types**: `QueryParameters`, `Row` and the `ResultIterableContext`
-  result model
-- **Capability interfaces**: small, independent interfaces such as
-  `Connectable`, `Queryable`, `Preparable`, `Transactionable` and `Poolable`
+- **Driver level**: the minimal interface a database driver implements:
+  connecting, and executing, querying, preparing and transactions on a single
+  connection. Its types are `Driver` and `DriverConnection`, with their
+  `DriverRows`, `DriverStatement` and `DriverTransaction`, and the `Dialect`
   (see [core.ts](./core.ts))
-- **Profiles**: the classes users interact with, composed from the capabilities:
-  `Driver` (a single connection), `Client` (a pooled client), `PoolClient`,
-  `Transaction` and `PreparedStatement`
+- **Client level**: the user facing interface: pooling, nested transactions, SQL
+  templates, lazy results, prepared statement caching, events and options. It is
+  implemented once, generically on top of any driver, by the standard
+  `SqlClient` ([client.ts](./client.ts)), so that its behavior is the same for
+  every database. Drivers do not implement it, but export a preconfigured client
+  bound to their driver, such as `SqliteClient`
+
+The client level is composed of small capability interfaces, such as
+`Connectable`, `Queryable`, `Preparable`, `Transactionable`, `Poolable`,
+`Eventable` and `Dialectable`, so that tools can depend only on the capabilities
+they need (see [core.ts](./core.ts)).
 
 Key properties of the design:
 
-- All methods are async
+- All methods are async, except the client level `query`, which returns a lazy
+  result whose consuming methods resolve to promises
 - Pooling is implicit: a `Client` always manages a connection pool, tuned with
   the `poolOptions` in its constructor options. It defaults to a single
   connection (`maxSize` of `1`) and becomes a connection pool when `maxSize` is
   raised
 - The query surface is minimal: `execute` for statements and `query` for queries
-  returning a `ResultIterableContext`
-- Everything holding a resource (`Client`, `PoolClient`, `Transaction`,
-  `PreparedStatement`, and the query result context) is `AsyncDisposable` and
-  works with `await using`
+  returning a lazy `ResultIterableContext`
+- Everything holding a resource (the `Client`, a `Connection` acquired from the
+  pool, a `Transaction`, a `PreparedStatement`, and the query result context) is
+  `AsyncDisposable` and works with `await using`
 
 ## Usage
 
@@ -162,11 +174,11 @@ A `Client` always manages a pool of connections, tuned with `poolOptions`:
   milliseconds
 - `maxLifetime`: the maximum age of a connection, in milliseconds
 
-Query methods automatically acquire a pool client and release it when the
+Query methods automatically acquire a connection and release it when the
 operation completes. A `query` result acquires its connection when the query
 runs, and holds it until the result is fully read or disposed.
 `beginTransaction` and `prepare` hold a pooled connection until the transaction
-is finished or the prepared statement is deallocated. A pool client can also be
+is finished or the prepared statement is deallocated. A connection can also be
 held manually:
 
 ```ts
@@ -174,8 +186,8 @@ import { SqliteClient } from "@stdext/database/drivers/sqlite";
 
 await using client = new SqliteClient(":memory:");
 await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
-await using poolClient = await client.acquire();
-await poolClient.execute("INSERT INTO users VALUES (2, 'Bob')");
+await using connection = await client.acquire();
+await connection.execute("INSERT INTO users VALUES (2, 'Bob')");
 // released back to the pool at the end of the scope
 ```
 
@@ -194,55 +206,63 @@ All events carry a `client` detail with the object that dispatched the event;
 
 ## Implementation
 
-> This section is for implementing the interface for database drivers.
+> This section is for implementing the driver level for a database.
 
-To be fully compliant with the specs, you will need to implement the following
-classes for your database driver, see the
-[compliance matrix](../RFC_SQL.md#profiles-and-compliance-matrix):
+A driver implements the [driver level](../RFC_SQL.md#driver-level): a `Driver`
+with a `Dialect`, and its `DriverConnection`, `DriverRows`, `DriverStatement`
+and `DriverTransaction` (see [core.ts](./core.ts)). The client level does not
+need to be implemented: the standard `SqlClient` works on top of any driver, and
+a driver usually exports a preconfigured client bound to it:
 
-- `Driver` ([core.ts](./core.ts)): a single connection to the database
-- `PreparedStatement` ([core.ts](./core.ts))
-- `Transaction` ([core.ts](./core.ts))
-- `Client` ([core.ts](./core.ts)): the pooled client
-- `PoolClient` ([core.ts](./core.ts))
+```ts ignore
+import type { ClientOptions } from "@stdext/database/sql";
+import { SqlClient } from "@stdext/database/sql";
 
-The constructors follow the standard signature
-`(connectionUrl: string | URL, options?: Options)`.
+export class MyDriver implements Driver {
+  /* connect, and run statements on a single connection */
+}
 
-Helper utilities for driver authors are available in [utils.ts](./utils.ts):
+export class MyClient extends SqlClient<MyDriver> {
+  constructor(url: string | URL, options?: ClientOptions) {
+    super(new MyDriver(), url, options);
+  }
+}
+```
 
-- `createResultIterableContext(start)`: builds a lazy, single-pass
-  `ResultIterableContext` from a function starting the query
+Helper utilities for driver authors are available in [utils.ts](./utils.ts) and
+[template.ts](./template.ts):
+
+- `createResultIterableContext(source)`: builds a lazy, single-pass
+  `ResultIterableContext` from the columns and rows of a started query
 - `renderStatement(statement, params, placeholder)`: renders SQL text or a
   `SqlTemplate` with the placeholders of the database
 - `getObjectFromRow(row)`: maps a row to a record
 
-The base classes in [`@stdext/database/drivers/core`](../drivers/core/mod.ts)
-implement the interfaces on top of the database specific primitives.
-
 ### Testing
 
-The `@stdext/database/sql/testing` entrypoint contains a conformance test suite.
-A driver that passes the suite is compliant with the specification:
+The `@stdext/database/sql/testing` entrypoint contains two conformance suites. A
+driver that passes the driver suite, and whose client passes the client suite,
+is compliant with the specification:
 
 ```ts ignore
-import { testClientIntegration } from "@stdext/database/sql/testing";
+import { testClient, testDriver } from "@stdext/database/sql/testing";
+
+Deno.test("MyDriver conformance", async (t) => {
+  await testDriver(t, new MyDriver(), url, sql);
+});
 
 Deno.test("MyClient conformance", async (t) => {
-  await testClientIntegration(t, MyClient, [connectionUrl, options], {
-    execute: "CREATE TABLE IF NOT EXISTS users (id INTEGER, name TEXT)",
-    query: "SELECT 1 AS id, 'Alice' AS name UNION ALL SELECT 2, 'Bob'",
-    columns: ["id", "name"],
-    count: 2,
-    parameterQuery: "SELECT ? AS value",
-    emptyQuery: "SELECT 1 AS id, 'Alice' AS name WHERE 1 = 0",
-  });
+  await testClient(t, (options) => new MyClient(url, options), sql);
 });
 ```
 
-The suite also checks parameter binding, value transforms, aborting with an
-`AbortSignal`, error types, nested transactions and the pooling behavior.
+Both suites take the `TestSql` statements of the database dialect, such as a
+query selecting a string parameter. `testDriver` tests the driver level against
+a URL, so that a library that only implements a driver can verify it;
+`testClient` tests the client level with a factory creating a client, so that
+the standard implementation over a driver, and alternative implementations, can
+be verified.
 
-Drivers can be built on the base classes in
-[`@stdext/database/drivers/core`](../drivers/core/mod.ts), which implement
-everything except the database specific primitives.
+The suites also check parameter binding, SQL templates, value transforms,
+aborting with an `AbortSignal`, error types, nested transactions, events and the
+pooling behavior.

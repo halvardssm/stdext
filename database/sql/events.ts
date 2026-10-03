@@ -1,35 +1,33 @@
-import type { Client, Driver } from "./core.ts";
+import type { Client } from "./core.ts";
 import { CustomEvent, CustomEventTarget } from "@stdext/event";
-import type { CustomEventListenerOrEventListenerObject } from "@stdext/event";
 import type { DatabaseError } from "./errors.ts";
-/**
- * Driver event types
- */
-export type DriverEventType =
-  | "connect"
-  | "close"
-  | "error";
 
 /**
- * Pool connection event types
+ * Client event types
+ *
+ * - `connect`: a connection of the pool is established
+ * - `close`: a connection of the pool is about to be closed
+ * - `error`: an error is thrown by an operation
+ * - `acquire`: a connection is acquired from the pool
+ * - `release`: a connection is released back to the pool
  */
 export type ClientEventType =
-  | DriverEventType
+  | "connect"
+  | "close"
+  | "error"
   | "acquire"
   | "release";
 
 /**
  * EventDetail
  *
- * The detail of an event. The `client` is the object that dispatched the
- * event: a {@linkcode Driver} for driver events and a {@linkcode Client} for
- * client events.
+ * The detail of an event, with the client that dispatched it.
  *
- * @template IClient the dispatching object
+ * @template IClient the dispatching client
  */
 export interface EventDetail<IClient = Client> {
   /**
-   * The object that dispatched the event
+   * The client that dispatched the event
    */
   client: IClient;
 }
@@ -39,7 +37,7 @@ export interface EventDetail<IClient = Client> {
  *
  * The detail of an `error` event.
  *
- * @template IClient the dispatching object
+ * @template IClient the dispatching client
  */
 export interface ErrorEventDetail<IClient = Client>
   extends EventDetail<IClient> {
@@ -49,43 +47,32 @@ export interface ErrorEventDetail<IClient = Client>
   error: DatabaseError;
 }
 
-export class DriverEvent<
-  T extends DriverEventType = DriverEventType,
-  D extends EventDetail<Driver> = T extends "error" ? ErrorEventDetail<Driver>
-    : EventDetail<Driver>,
-> extends CustomEvent<T, D> {}
-
+/**
+ * An event dispatched by a client.
+ */
 export class ClientEvent<
   T extends ClientEventType = ClientEventType,
   D extends EventDetail = T extends "error" ? ErrorEventDetail : EventDetail,
 > extends CustomEvent<T, D> {}
 
-export class DriverEventTarget<
-  T extends DriverEventType = DriverEventType,
-  E extends CustomEvent<T> = CustomEvent<T>,
-  L extends CustomEventListenerOrEventListenerObject<E> =
-    CustomEventListenerOrEventListenerObject<E>,
-  AO extends AddEventListenerOptions = AddEventListenerOptions,
-  RO extends EventListenerOptions = EventListenerOptions,
-> extends CustomEventTarget<T, E, L, AO, RO> {}
-
+/**
+ * The event target of a client.
+ */
 export class ClientEventTarget<
   T extends ClientEventType = ClientEventType,
   E extends ClientEvent<T> = ClientEvent<T>,
-  L extends CustomEventListenerOrEventListenerObject<E> =
-    CustomEventListenerOrEventListenerObject<E>,
-  AO extends AddEventListenerOptions = AddEventListenerOptions,
-  RO extends EventListenerOptions = EventListenerOptions,
-> extends CustomEventTarget<T, E, L, AO, RO> {}
+> extends CustomEventTarget<T, E> {}
 
 /**
  * Eventable
+ *
+ * Represents an object that dispatches events.
  */
 export interface Eventable<
-  IEventTarget extends DriverEventTarget = DriverEventTarget,
+  IEventTarget extends ClientEventTarget = ClientEventTarget,
 > {
   /**
-   * The EventTarget to reduce inheritance
+   * The target the events are dispatched on
    */
   eventTarget: IEventTarget;
 }

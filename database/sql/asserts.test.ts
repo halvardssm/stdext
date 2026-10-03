@@ -2,12 +2,14 @@ import { assertThrows } from "@std/assert";
 import {
   assertIsClient,
   assertIsConnectable,
+  assertIsConnection,
+  assertIsDialect,
+  assertIsDialectable,
   assertIsDriver,
-  assertIsDriverable,
+  assertIsDriverConnection,
   assertIsEventable,
   assertIsPingable,
   assertIsPoolable,
-  assertIsPoolClient,
   assertIsPreparable,
   assertIsPreparedStatement,
   assertIsQueryable,
@@ -16,108 +18,122 @@ import {
 } from "./asserts.ts";
 
 const asyncDispose = () => ({ [Symbol.asyncDispose]: () => {} });
+const fn = () => {};
 
-const connectable = {
-  ...asyncDispose(),
-  connectionUrl: "test",
-  connected: false,
-  connect: () => {},
-  close: () => {},
+const dialect = {
+  name: "test",
+  placeholder: () => "?",
+  quoteIdentifier: (name: string) => `"${name}"`,
 };
+
+const driver = { dialect, connect: fn };
+
+const driverConnection = {
+  ...asyncDispose(),
+  closed: false,
+  close: fn,
+  execute: fn,
+  query: fn,
+  executeScript: fn,
+  begin: fn,
+  ping: fn,
+};
+
+const queryable = { execute: fn, query: fn, executeScript: fn };
 
 const preparedStatement = {
   ...asyncDispose(),
   sql: "SELECT 1",
   deallocated: false,
-  deallocate: () => {},
-  execute: () => {},
-  query: () => {},
+  deallocate: fn,
+  execute: fn,
+  query: fn,
 };
 
 const transaction = {
   ...asyncDispose(),
-  ...preparedStatement,
-  executeScript: () => {},
-  prepare: () => {},
-  beginTransaction: () => {},
-  transaction: () => {},
+  ...queryable,
+  prepare: fn,
+  beginTransaction: fn,
+  transaction: fn,
   inTransaction: true,
-  commit: () => {},
-  rollback: () => {},
-  createSavepoint: () => {},
-  releaseSavepoint: () => {},
+  commit: fn,
+  rollback: fn,
+  createSavepoint: fn,
+  releaseSavepoint: fn,
 };
 
-const driver = {
-  options: {},
-  eventTarget: new EventTarget(),
-  ...connectable,
-  ping: () => {},
-  ...preparedStatement,
-  executeScript: () => {},
-  prepare: () => {},
-  beginTransaction: () => {},
-  transaction: () => {},
-};
-
-const poolClient = {
+const connection = {
   ...asyncDispose(),
-  driver,
+  ...queryable,
+  dialect,
   connected: true,
-  disposed: false,
-  release: () => {},
-  remove: () => {},
-  ping: () => {},
-  ...preparedStatement,
-  executeScript: () => {},
-  prepare: () => {},
-  beginTransaction: () => {},
-  transaction: () => {},
+  released: false,
+  release: fn,
+  remove: fn,
+  ping: fn,
+  prepare: fn,
+  beginTransaction: fn,
+  transaction: fn,
 };
 
 const client = {
+  ...asyncDispose(),
+  ...queryable,
   options: {},
+  dialect,
   eventTarget: new EventTarget(),
-  ...connectable,
-  ping: () => {},
-  ...preparedStatement,
-  executeScript: () => {},
-  prepare: () => {},
-  beginTransaction: () => {},
-  transaction: () => {},
-  acquire: () => {},
+  connectionUrl: "test://",
+  connected: false,
+  connect: fn,
+  close: fn,
+  ping: fn,
+  prepare: fn,
+  beginTransaction: fn,
+  transaction: fn,
+  acquire: fn,
 };
 
 Deno.test("asserts", async (t) => {
   await t.step("positive", () => {
-    assertIsConnectable(connectable);
-    assertIsPingable(driver);
-    assertIsQueryable(driver);
-    assertIsPreparable(driver);
-    assertIsTransactionable(driver);
+    assertIsDialect(dialect);
+    assertIsDriver(driver);
+    assertIsDriver({ ...driver, maxConnections: 1 });
+    assertIsDriverConnection(driverConnection);
+    assertIsDriverConnection({ ...driverConnection, prepare: fn });
+    assertIsConnectable(client);
+    assertIsPingable(client);
+    assertIsQueryable(queryable);
+    assertIsPreparable(client);
+    assertIsTransactionable(client);
+    assertIsDialectable(client);
+    assertIsEventable(client);
+    assertIsPoolable(client);
     assertIsTransaction(transaction);
     assertIsPreparedStatement(preparedStatement);
-    assertIsPoolable(client);
-    assertIsPoolClient(poolClient);
-    assertIsDriverable(poolClient);
-    assertIsEventable(driver);
-    assertIsDriver(driver);
+    assertIsConnection(connection);
     assertIsClient(client);
   });
 
   await t.step("negative", () => {
+    assertThrows(() => assertIsDialect({ name: "test" }));
+    assertThrows(() => assertIsDriver({ connect: fn }));
+    assertThrows(() => assertIsDriver({ ...driver, maxConnections: "1" }));
+    assertThrows(() => assertIsDriverConnection(queryable));
+    assertThrows(() =>
+      assertIsDriverConnection({ ...driverConnection, prepare: 1 })
+    );
     assertThrows(() => assertIsConnectable({}));
     assertThrows(() => assertIsPingable({}));
-    assertThrows(() => assertIsQueryable({}));
+    assertThrows(() => assertIsQueryable({ execute: fn, query: fn }));
     assertThrows(() => assertIsPreparable({}));
     assertThrows(() => assertIsTransactionable({}));
-    assertThrows(() => assertIsTransaction({}));
-    assertThrows(() => assertIsPreparedStatement({}));
-    assertThrows(() => assertIsPoolable({}));
-    assertThrows(() => assertIsPoolClient({}));
-    assertThrows(() => assertIsDriverable({}));
+    assertThrows(() => assertIsDialectable({}));
     assertThrows(() => assertIsEventable({}));
-    assertThrows(() => assertIsDriver(connectable));
-    assertThrows(() => assertIsClient(driver));
+    assertThrows(() => assertIsPoolable({}));
+    assertThrows(() => assertIsTransaction(queryable));
+    assertThrows(() => assertIsPreparedStatement({}));
+    assertThrows(() => assertIsConnection(client));
+    assertThrows(() => assertIsClient(connection));
   });
 });

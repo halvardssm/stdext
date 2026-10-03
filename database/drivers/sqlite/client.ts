@@ -1,9 +1,4 @@
-import type {
-  ClientOptions,
-  PoolOptions,
-  QueryOptions,
-} from "../../sql/mod.ts";
-import { BaseClient } from "../core/client.ts";
+import { type ClientOptions, SqlClient } from "../../sql/mod.ts";
 import {
   type SqliteConnectionOptions,
   SqliteDriver,
@@ -15,24 +10,20 @@ import {
  *
  * The options that a {@linkcode SqliteClient} is constructed with.
  */
-export interface SqliteClientOptions extends
-  ClientOptions<
-    SqliteConnectionOptions,
-    QueryOptions,
-    SqliteTransactionOptions,
-    PoolOptions
-  > {}
+export interface SqliteClientOptions
+  extends ClientOptions<SqliteConnectionOptions, SqliteTransactionOptions> {}
 
 /**
  * SqliteClient
  *
- * A SQLite client, backed by the built-in `node:sqlite` module. See
- * {@linkcode SqliteDriver} for the connection URL and placeholder formats.
+ * The standard client with the {@linkcode SqliteDriver}, backed by the
+ * built-in `node:sqlite` module. See {@linkcode SqliteDriver} for the
+ * connection URL and placeholder formats.
  *
  * SQLite has no connection pool, so the pool is emulated with a single
- * connection: {@linkcode PoolOptions.maxSize} is always `1`, and acquiring
- * waits until the connection is released. This keeps transactions isolated,
- * and makes `:memory:` databases behave like a single database.
+ * connection: `maxSize` is always `1`, and acquiring waits until the
+ * connection is released. This keeps transactions isolated, and makes
+ * `:memory:` databases behave like a single database.
  *
  * @example
  * ```ts
@@ -46,22 +37,14 @@ export interface SqliteClientOptions extends
  * console.log(await client.query("SELECT * FROM users").toRecords());
  * ```
  */
-export class SqliteClient
-  extends BaseClient<SqliteDriver, SqliteClientOptions> {
+export class SqliteClient extends SqlClient<SqliteDriver, SqliteClientOptions> {
+  /**
+   * Create a SQLite client.
+   *
+   * @param connectionUrl a file path, a `file:` URL, or `:memory:`
+   * @param options the client options
+   */
   constructor(connectionUrl: string | URL, options?: SqliteClientOptions) {
-    super(connectionUrl, {
-      ...options,
-      poolOptions: { ...options?.poolOptions, maxSize: 1 },
-    });
-  }
-
-  protected override createDriver(): SqliteDriver {
-    const { connectionOptions, queryOptions, transactionOptions } =
-      this.options;
-    return new SqliteDriver(this.connectionUrl, {
-      connectionOptions,
-      queryOptions,
-      transactionOptions,
-    });
+    super(new SqliteDriver(), connectionUrl, options);
   }
 }

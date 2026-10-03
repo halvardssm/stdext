@@ -1,5 +1,5 @@
 import { ensureDir, exists } from "@std/fs";
-import { cacheFile, CacheFileOptions, denoCacheDir } from "@stdext/fs";
+import { cacheFile, type CacheFileOptions, denoCacheDir } from "@stdext/fs";
 import { dirname, join, resolve } from "@std/path";
 
 /**

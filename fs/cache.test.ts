@@ -3,9 +3,9 @@ import {
   assertEquals,
   assertNotEquals,
   assertRejects,
-  assertThrows,
+  type assertThrows,
 } from "@std/assert";
-import { cacheFile, denoCacheDir, homeDir } from "./cache.ts";
+import { cacheFile, denoCacheDir, type homeDir } from "./cache.ts";
 import { exists } from "@std/fs";
 import { join } from "@std/path";
 

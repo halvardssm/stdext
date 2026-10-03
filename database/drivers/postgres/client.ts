@@ -1,9 +1,4 @@
-import type {
-  ClientOptions,
-  PoolOptions,
-  QueryOptions,
-} from "../../sql/mod.ts";
-import { BaseClient } from "../core/client.ts";
+import { type ClientOptions, SqlClient } from "../../sql/mod.ts";
 import {
   type PostgresConnectionOptions,
   PostgresDriver,
@@ -15,18 +10,14 @@ import {
  *
  * The options that a {@linkcode PostgresClient} is constructed with.
  */
-export interface PostgresClientOptions extends
-  ClientOptions<
-    PostgresConnectionOptions,
-    QueryOptions,
-    PostgresTransactionOptions,
-    PoolOptions
-  > {}
+export interface PostgresClientOptions
+  extends
+    ClientOptions<PostgresConnectionOptions, PostgresTransactionOptions> {}
 
 /**
  * PostgresClient
  *
- * A Postgres client with an implicit connection pool. See
+ * The standard client with the {@linkcode PostgresDriver}. See
  * {@linkcode PostgresDriver} for the connection URL, authentication and
  * placeholder formats. Requires the `net` permission.
  *
@@ -45,14 +36,14 @@ export interface PostgresClientOptions extends
  * ```
  */
 export class PostgresClient
-  extends BaseClient<PostgresDriver, PostgresClientOptions> {
-  protected override createDriver(): PostgresDriver {
-    const { connectionOptions, queryOptions, transactionOptions } =
-      this.options;
-    return new PostgresDriver(this.connectionUrl, {
-      connectionOptions,
-      queryOptions,
-      transactionOptions,
-    });
+  extends SqlClient<PostgresDriver, PostgresClientOptions> {
+  /**
+   * Create a Postgres client.
+   *
+   * @param connectionUrl the libpq connection URI
+   * @param options the client options
+   */
+  constructor(connectionUrl: string | URL, options?: PostgresClientOptions) {
+    super(new PostgresDriver(), connectionUrl, options);
   }
 }

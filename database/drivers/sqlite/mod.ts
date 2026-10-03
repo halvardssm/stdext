@@ -1,7 +1,13 @@
 /**
  * A SQLite driver implementing the
  * {@link https://jsr.io/@stdext/database/doc/sql | @stdext/database/sql}
- * interfaces, backed by the built-in `node:sqlite` module.
+ * specification, backed by the built-in `node:sqlite` module.
+ *
+ * The {@linkcode SqliteDriver} implements the driver level: a `Dialect` and
+ * statements run on a single connection. The {@linkcode SqliteClient} is the
+ * standard client level bound to the driver: pooling, nested transactions,
+ * SQL templates, lazy results and events, behaving the same for every
+ * database.
  *
  * @example
  * ```ts

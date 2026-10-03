@@ -1,19 +1,21 @@
 import {
   ConnectionError,
   type ConnectionOptions,
+  DatabaseError,
+  type Dialect,
+  type Driver,
+  type DriverConnection,
+  type DriverQueryOptions,
+  type DriverRows,
+  type DriverSavepoint,
+  type DriverStatement,
+  type DriverTransaction,
   type ExecuteResult,
-  type Options,
   QueryError,
-  type QueryOptions,
+  type QueryParameters,
   TransactionError,
   type TransactionOptions,
 } from "../../sql/mod.ts";
-import {
-  BaseDriver,
-  type DriverParameters,
-  type DriverResult,
-  type StatementHandle,
-} from "../core/driver.ts";
 import {
   Connection,
   type ConnectionConfig,
@@ -102,18 +104,6 @@ export interface PostgresTransactionOptions extends TransactionOptions {
   deferrable?: boolean;
 }
 
-/**
- * PostgresOptions
- *
- * The options that a {@linkcode PostgresDriver} is constructed with.
- */
-export interface PostgresOptions extends
-  Options<
-    PostgresConnectionOptions,
-    QueryOptions,
-    PostgresTransactionOptions
-  > {}
-
 // libpq `sslmode` values. Deno can not encrypt without verifying the server
 // certificate, so the certificate is verified in every mode with TLS.
 const SSL_MODES: Record<string, ConnectionConfig["tls"]> = {
@@ -124,6 +114,8 @@ const SSL_MODES: Record<string, ConnectionConfig["tls"]> = {
   "verify-ca": "require",
   "verify-full": "require",
 };
+
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const ISOLATION_LEVELS = new Set([
   "serializable",
@@ -174,7 +166,7 @@ function parseConfig(
 }
 
 function encodeParameters(
-  params: DriverParameters | undefined,
+  params: QueryParameters | undefined,
 ): (string | null)[] {
   if (params === undefined) return [];
   if (!Array.isArray(params)) {
@@ -201,18 +193,58 @@ function parseCommandTag(tag: string | undefined): ExecuteResult {
 }
 
 /**
+ * The SQL dialect of Postgres: `$1`, `$2`, ... placeholders and double quoted
+ * identifiers.
+ */
+export const postgresDialect: Dialect = {
+  name: "postgres",
+  placeholder: (index) => `$${index + 1}`,
+  quoteIdentifier: (name) => `"${name.replaceAll('"', '""')}"`,
+};
+
+function beginStatement(options: PostgresTransactionOptions = {}): string {
+  const modes: string[] = [];
+  if (options.isolationLevel !== undefined) {
+    if (!ISOLATION_LEVELS.has(options.isolationLevel)) {
+      throw new TransactionError(
+        `Invalid isolation level: ${options.isolationLevel}`,
+      );
+    }
+    modes.push(`ISOLATION LEVEL ${options.isolationLevel.toUpperCase()}`);
+  }
+  if (options.readOnly !== undefined) {
+    modes.push(options.readOnly ? "READ ONLY" : "READ WRITE");
+  }
+  if (options.deferrable !== undefined) {
+    modes.push(options.deferrable ? "DEFERRABLE" : "NOT DEFERRABLE");
+  }
+  return ["BEGIN", modes.join(", ")].filter(Boolean).join(" ");
+}
+
+function wrapError(
+  error: unknown,
+  ErrorClass: new (message: string) => DatabaseError,
+): DatabaseError {
+  if (error instanceof DatabaseError) return error;
+  const wrapped = new ErrorClass(
+    error instanceof Error ? error.message : String(error),
+  );
+  wrapped.cause = error;
+  return wrapped;
+}
+
+/**
  * PostgresDriver
  *
- * A single connection to a Postgres database, implemented in TypeScript on
- * top of the Postgres frontend/backend protocol. Requires the `net`
- * permission.
+ * The Postgres driver, implemented in TypeScript on top of the Postgres
+ * frontend/backend protocol. Requires the `net` permission.
  *
  * The connection URL has the format
  * `postgres://user:password@host:port/database`, following the libpq
  * connection URI format, with the `sslmode` and `application_name`
  * parameters; other options are passed through the
- * {@linkcode PostgresConnectionOptions}, which take precedence. Supported authentication
- * methods are SCRAM-SHA-256, MD5 and cleartext passwords.
+ * {@linkcode PostgresConnectionOptions}, which take precedence. Supported
+ * authentication methods are SCRAM-SHA-256, MD5 and cleartext passwords.
  *
  * Parameters use the positional `$1`, `$2`, ... placeholders and are sent in
  * text format, with the types inferred by the server.
@@ -223,41 +255,88 @@ function parseCommandTag(tag: string | undefined): ExecuteResult {
  * ```ts ignore
  * import { PostgresDriver } from "@stdext/database/drivers/postgres";
  *
- * await using driver = new PostgresDriver("postgres://user@localhost/db", {
- *   connectionOptions: { password: "secret" },
+ * const driver = new PostgresDriver();
+ * await using connection = await driver.connect("postgres://user@localhost/db", {
+ *   password: "secret",
  * });
- * console.log(await driver.query("SELECT $1::int + 1 AS solution", [1]).toRecords());
+ * await using rows = await connection.query("SELECT $1::int + 1 AS a", [1]);
+ * for await (const values of rows) console.log(values);
  * ```
  */
-export class PostgresDriver extends BaseDriver<PostgresOptions> {
-  #connection?: Connection;
+export class PostgresDriver
+  implements Driver<PostgresConnectionOptions, PostgresTransactionOptions> {
+  readonly dialect: Dialect = postgresDialect;
+
+  async connect(
+    url: string | URL,
+    options?: PostgresConnectionOptions & { signal?: AbortSignal },
+  ): Promise<PostgresConnection> {
+    const signal = options?.signal;
+    try {
+      signal?.throwIfAborted();
+      const connection = await Connection.connect(
+        parseConfig(url, options ?? {}),
+        signal,
+      );
+      const parsers = options?.parsers
+        ? { ...defaultParsers, ...options.parsers }
+        : defaultParsers;
+      return new PostgresConnection(connection, parsers);
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason;
+      throw wrapError(error, ConnectionError);
+    }
+  }
+}
+
+/**
+ * PostgresConnection
+ *
+ * A connection of the {@linkcode PostgresDriver}. While a query result is
+ * being read, other operations are rejected with a `QueryError`, rather than
+ * buffering the rest of the result in memory.
+ */
+export class PostgresConnection
+  implements DriverConnection<PostgresTransactionOptions> {
+  readonly #connection: Connection;
+  readonly #parsers: Record<number, Parser>;
   #statementId = 0;
 
-  get connected(): boolean {
-    return this.#connection?.connected ?? false;
+  /**
+   * Connections are opened with {@linkcode PostgresDriver.connect}.
+   *
+   * @ignore
+   */
+  constructor(connection: Connection, parsers: Record<number, Parser>) {
+    this.#connection = connection;
+    this.#parsers = parsers;
+  }
+
+  get closed(): boolean {
+    return !this.#connection.connected;
   }
 
   /**
    * The run-time parameters reported by the server, such as
-   * `server_version`. Only available while connected.
+   * `server_version`.
    */
-  get serverParameters(): ReadonlyMap<string, string> | undefined {
-    return this.#connection?.parameters;
+  get serverParameters(): ReadonlyMap<string, string> {
+    return this.#connection.parameters;
   }
 
-  #parsers(): Record<number, Parser> {
-    const parsers = this.options.connectionOptions?.parsers;
-    return parsers ? { ...defaultParsers, ...parsers } : defaultParsers;
+  #assertOpen(signal?: AbortSignal): void {
+    signal?.throwIfAborted();
+    if (this.closed) throw new ConnectionError("Connection is closed");
   }
 
   async #execute(
-    connection: Connection,
     target: Target,
-    params: DriverParameters | undefined,
+    params: QueryParameters | undefined,
     signal: AbortSignal | undefined,
   ): Promise<ExecuteResult> {
     try {
-      const cursor = await connection.execute(
+      this.#assertOpen(signal);
+      const cursor = await this.#connection.execute(
         target,
         encodeParameters(params),
         signal,
@@ -265,20 +344,19 @@ export class PostgresDriver extends BaseDriver<PostgresOptions> {
       return parseCommandTag(await cursor.complete());
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
-      throw error;
+      throw wrapError(error, QueryError);
     }
   }
 
   async #query(
-    connection: Connection,
     target: Target,
-    params: DriverParameters | undefined,
+    params: QueryParameters | undefined,
     signal: AbortSignal | undefined,
-  ): Promise<DriverResult> {
-    const parsers = this.#parsers();
-    let cursor;
+  ): Promise<DriverRows> {
+    let cursor: Cursor;
     try {
-      cursor = await connection.execute(
+      this.#assertOpen(signal);
+      cursor = await this.#connection.execute(
         target,
         encodeParameters(params),
         signal,
@@ -286,127 +364,171 @@ export class PostgresDriver extends BaseDriver<PostgresOptions> {
       );
     } catch (error) {
       if (signal?.aborted) throw signal.reason;
-      throw error;
+      throw wrapError(error, QueryError);
     }
+    const parse = cursor.fields.map((field) => this.#parsers[field.typeOid]);
+    let consumed = false;
     return {
       columns: cursor.fields.map((field) => field.name),
-      rows: this.#rows(
-        cursor,
-        cursor.fields.map((field) => parsers[field.typeOid]),
-        signal,
-      ),
+      async *[Symbol.asyncIterator]() {
+        if (consumed) return;
+        consumed = true;
+        try {
+          while (true) {
+            const raw = await cursor.next();
+            if (raw === null) return;
+            yield raw.map((value, i) =>
+              value === null || parse[i] === undefined ? value : parse[i](value)
+            );
+          }
+        } catch (error) {
+          if (signal?.aborted) throw signal.reason;
+          throw wrapError(error, QueryError);
+        } finally {
+          await cursor.discard();
+        }
+      },
+      [Symbol.asyncDispose]: () => cursor.discard(),
     };
   }
 
-  async *#rows(
-    cursor: Cursor,
-    parse: (Parser | undefined)[],
-    signal: AbortSignal | undefined,
-  ): AsyncGenerator<unknown[]> {
-    try {
-      while (true) {
-        const raw = await cursor.next();
-        if (raw === null) return;
-        yield raw.map((value, i) =>
-          value === null || parse[i] === undefined ? value : parse[i](value)
-        );
-      }
-    } catch (error) {
-      if (signal?.aborted) throw signal.reason;
-      throw error;
-    } finally {
-      await cursor.discard();
-    }
+  close(): Promise<void> {
+    return this.#connection.close();
   }
 
-  get #active(): Connection {
-    if (!this.#connection?.connected) {
-      throw new ConnectionError("Driver is not connected");
-    }
-    return this.#connection;
-  }
-
-  protected override async connectDriver(signal: AbortSignal): Promise<void> {
-    this.#connection = await Connection.connect(
-      parseConfig(this.connectionUrl, this.options.connectionOptions ?? {}),
-      signal,
-    );
-  }
-
-  protected override async closeDriver(): Promise<void> {
-    const connection = this.#connection;
-    this.#connection = undefined;
-    await connection?.close();
-  }
-
-  protected override async pingDriver(): Promise<void> {
-    await this.#active.simpleQuery("SELECT 1");
-  }
-
-  protected override executeDriver(
+  execute(
     sql: string,
-    params: DriverParameters | undefined,
-    options: QueryOptions,
+    params?: QueryParameters,
+    options?: DriverQueryOptions,
   ): Promise<ExecuteResult> {
-    return this.#execute(this.#active, { sql }, params, options.signal);
+    return this.#execute({ sql }, params, options?.signal);
   }
 
-  protected override async executeScriptDriver(
+  query(
     sql: string,
-    _options: QueryOptions,
+    params?: QueryParameters,
+    options?: DriverQueryOptions,
+  ): Promise<DriverRows> {
+    return this.#query({ sql }, params, options?.signal);
+  }
+
+  async executeScript(
+    sql: string,
+    options?: DriverQueryOptions,
   ): Promise<void> {
-    // The simple query protocol runs several statements without parameters.
-    await this.#active.simpleQuery(sql);
+    try {
+      this.#assertOpen(options?.signal);
+      // The simple query protocol runs several statements without parameters.
+      await this.#connection.simpleQuery(sql);
+    } catch (error) {
+      if (options?.signal?.aborted) throw options.signal.reason;
+      throw wrapError(error, QueryError);
+    }
   }
 
-  protected override placeholder(index: number): string {
-    return `$${index + 1}`;
+  async ping(): Promise<void> {
+    try {
+      this.#assertOpen();
+      await this.#connection.simpleQuery("SELECT 1");
+    } catch (error) {
+      throw wrapError(error, ConnectionError);
+    }
   }
 
-  protected override queryDriver(
-    sql: string,
-    params: DriverParameters | undefined,
-    options: QueryOptions,
-  ): Promise<DriverResult> {
-    return this.#query(this.#active, { sql }, params, options.signal);
+  /** Run a transaction control statement */
+  async #control(sql: string): Promise<void> {
+    try {
+      await this.#execute({ sql }, undefined, undefined);
+    } catch (error) {
+      throw wrapError(error, TransactionError);
+    }
   }
 
-  protected override async prepareDriver(
-    sql: string,
-    _options: QueryOptions,
-  ): Promise<StatementHandle> {
-    const connection = this.#active;
-    const name = `stdext_${++this.#statementId}`;
-    await connection.prepare(name, sql);
+  async begin(
+    options?: PostgresTransactionOptions,
+  ): Promise<DriverTransaction> {
+    this.#assertOpen();
+    await this.#control(beginStatement(options));
+    let active = true;
+    const end = async (sql: string) => {
+      if (!active) throw new TransactionError("Transaction is not active");
+      await this.#control(sql);
+      active = false;
+    };
     return {
-      execute: (params, options) =>
-        this.#execute(connection, { name }, params, options.signal),
-      query: (params, options) =>
-        this.#query(connection, { name }, params, options.signal),
-      deallocate: async () => {
-        if (connection.connected) await connection.closeStatement(name);
+      commit: () => end("COMMIT"),
+      rollback: () => end("ROLLBACK"),
+      savepoint: async (name: string): Promise<DriverSavepoint> => {
+        if (!active) throw new TransactionError("Transaction is not active");
+        if (!IDENTIFIER.test(name)) {
+          throw new TransactionError(`Invalid savepoint name: ${name}`);
+        }
+        await this.#control(`SAVEPOINT ${name}`);
+        return this.#savepoint(name, () => active);
+      },
+      [Symbol.asyncDispose]: async (): Promise<void> => {
+        if (active && !this.closed) await end("ROLLBACK");
       },
     };
   }
 
-  protected override beginStatement(
-    options: PostgresTransactionOptions,
-  ): string {
-    const modes: string[] = [];
-    if (options.isolationLevel !== undefined) {
-      if (!ISOLATION_LEVELS.has(options.isolationLevel)) {
-        throw new TransactionError(
-          `Invalid isolation level: ${options.isolationLevel}`,
-        );
+  #savepoint(name: string, transactionActive: () => boolean): DriverSavepoint {
+    let active = true;
+    const end = async (...statements: string[]) => {
+      if (!active || !transactionActive()) {
+        throw new TransactionError("Savepoint is not active");
       }
-      modes.push(`ISOLATION LEVEL ${options.isolationLevel.toUpperCase()}`);
+      for (const sql of statements) await this.#control(sql);
+      active = false;
+    };
+    const rollback = () =>
+      end(`ROLLBACK TO SAVEPOINT ${name}`, `RELEASE SAVEPOINT ${name}`);
+    return {
+      release: () => end(`RELEASE SAVEPOINT ${name}`),
+      rollback,
+      async [Symbol.asyncDispose]() {
+        if (active && transactionActive()) await rollback();
+      },
+    };
+  }
+
+  async prepare(sql: string): Promise<DriverStatement> {
+    const name = `stdext_${++this.#statementId}`;
+    try {
+      this.#assertOpen();
+      await this.#connection.prepare(name, sql);
+    } catch (error) {
+      throw wrapError(error, QueryError);
     }
-    if (options.readOnly !== undefined) {
-      modes.push(options.readOnly ? "READ ONLY" : "READ WRITE");
-    }
-    if (options.deferrable !== undefined) {
-      modes.push(options.deferrable ? "DEFERRABLE" : "NOT DEFERRABLE");
-    }
-    return ["BEGIN", modes.join(", ")].filter(Boolean).join(" ");
+    let deallocated = false;
+    const assertUsable = () => {
+      if (deallocated) {
+        throw new QueryError("Prepared statement is deallocated");
+      }
+    };
+    const statement: DriverStatement = {
+      sql,
+      execute: async (params, options): Promise<ExecuteResult> => {
+        assertUsable();
+        return await this.#execute({ name }, params, options?.signal);
+      },
+      query: async (params, options): Promise<DriverRows> => {
+        assertUsable();
+        return await this.#query({ name }, params, options?.signal);
+      },
+      deallocate: async (): Promise<void> => {
+        if (deallocated) return;
+        deallocated = true;
+        if (!this.closed) {
+          await this.#connection.closeStatement(name);
+        }
+      },
+      [Symbol.asyncDispose]: () => statement.deallocate(),
+    };
+    return statement;
+  }
+
+  [Symbol.asyncDispose](): Promise<void> {
+    return this.close();
   }
 }

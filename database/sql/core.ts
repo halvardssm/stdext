@@ -1,5 +1,9 @@
 import type { ClientEventTarget, Eventable } from "./events.ts";
 
+// =============================================================================
+// Common types
+// =============================================================================
+
 /**
  * ParameterType
  *
@@ -31,12 +35,33 @@ export type QueryParameters =
   | Record<string, ParameterType>;
 
 /**
+ * ExecuteResult
+ *
+ * The result of executing a statement.
+ */
+export interface ExecuteResult {
+  /**
+   * The number of rows inserted, updated or deleted by the statement. It is
+   * `0` for statements that modify no rows, such as `SELECT` or
+   * `CREATE TABLE`, and `undefined` only if the database does not report it.
+   */
+  affectedRows: number | undefined;
+  /**
+   * The id of the last inserted row, if the database reports it, such as the
+   * `rowid` in SQLite or the auto increment id in MySQL. Databases without
+   * insert ids, such as Postgres, return the ids with `RETURNING` instead.
+   */
+  lastInsertId?: number | bigint | string;
+}
+
+/**
  * SqlTemplate
  *
- * A SQL statement written as a tagged template, created with the `sql` tag. The statement is kept as the text between the
- * interpolated values, and the values, so that it is independent of the
- * placeholder style of the database: the driver renders its own placeholders
- * and binds the values as parameters. Values are never inserted into the SQL
+ * A SQL statement written as a tagged template, created with the `sql` tag.
+ * The statement is kept as the text between the interpolated values, and the
+ * values, so that it is independent of the placeholder style of the database:
+ * the client renders the placeholders of the driver's {@linkcode Dialect} and
+ * binds the values as parameters. Values are never inserted into the SQL
  * text.
  *
  * @example
@@ -71,105 +96,6 @@ export interface SqlTemplate {
 export type Statement = string | SqlTemplate;
 
 /**
- * ExecuteResult
- *
- * The result of executing a statement.
- */
-export interface ExecuteResult {
-  /**
-   * The number of rows inserted, updated or deleted by the statement. It is
-   * `0` for statements that modify no rows, such as `SELECT` or
-   * `CREATE TABLE`, and `undefined` only if the database does not report it.
-   */
-  affectedRows: number | undefined;
-  /**
-   * The id of the last inserted row, if the database reports it, such as the
-   * `rowid` in SQLite or the auto increment id in MySQL. Databases without
-   * insert ids, such as Postgres, return the ids with `RETURNING` instead.
-   */
-  lastInsertId?: number | bigint | string;
-}
-
-/**
- * ResultObject
- *
- * A single row of a query result, as returned when iterating a
- * {@linkcode ResultIterableContext}.
- *
- * @template V the row values
- * @template R the record representation of the row
- */
-export interface ResultObject<
-  V = Array<unknown>,
-  R = Record<string, V[keyof V]>,
-> {
-  /**
-   * The values of the row, in the same order as the columns of the
-   * {@linkcode ResultIterableContext}
-   */
-  values: V;
-  /**
-   * Returns the row as a record mapping column names to values
-   */
-  toRecord: () => R;
-}
-
-/**
- * ResultIterableContext
- *
- * The result of a query. It is both an async iterable of rows and provides
- * convenience methods for collecting the rows as values or records.
- *
- * The result is lazy: the query runs when the result is first consumed, so
- * errors, such as invalid SQL, are thrown by the iteration or collect
- * methods. Rows are streamed and not kept in memory, so the result can be
- * consumed once: either iterated, or collected with
- * {@linkcode ResultIterableContext.toValues} or
- * {@linkcode ResultIterableContext.toRecords}. Consuming it again rejects
- * with a {@linkcode QueryError}.
- *
- * The result holds its connection from when the query runs until all rows
- * are read or the result is disposed. Disposing stops fetching and releases
- * the connection; disposing a result that was never consumed does not run
- * the query.
- *
- * @template V the row values
- * @template R the record representation of a row
- *
- * @example
- * FENCEts
- * import { SqliteClient } from "@stdext/database/drivers/sqlite";
- *
- * await using client = new SqliteClient(":memory:");
- * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
- *
- * for await (const row of client.query("SELECT id, name FROM users")) {
- *   console.log(row.toRecord());
- * }
- * console.log(await client.query("SELECT id, name FROM users").toRecords());
- * FENCE
- */
-export interface ResultIterableContext<
-  V extends unknown[] = unknown[],
-  R = Record<string, V[number]>,
-> extends AsyncDisposable, AsyncIterable<ResultObject<V, R>> {
-  /**
-   * The column names of the result. Runs the query if it has not run yet,
-   * without consuming the rows. The columns are also known when there are no
-   * rows, unless the database does not report them without rows.
-   */
-  columns(): Promise<string[]>;
-  /**
-   * Collect all rows as an array of values
-   */
-  toValues(): Promise<V[]>;
-  /**
-   * Collect all rows as an array of records
-   */
-  toRecords(): Promise<R[]>;
-}
-
-/**
  * ConnectionOptions
  *
  * Options used when connecting to the database. Drivers extend this with
@@ -186,34 +112,49 @@ export interface ConnectionOptions {
 }
 
 /**
- * QueryOptions
+ * DriverQueryOptions
  *
- * Options to pass to the query methods. Merged with the global query options
- * given in the constructor options.
+ * The options of the query methods of the driver level.
  */
-export interface QueryOptions {
+export interface DriverQueryOptions {
   /**
-   * A signal to abort the query. When aborted, the implementation must stop
-   * the current query as soon as the database allows (for synchronous
-   * databases, before the statement runs and between rows), release the
-   * connection, and reject with the abort reason.
+   * A signal to abort the query. When aborted, the query must stop as soon as
+   * the database allows (for synchronous databases, before the statement runs
+   * and between rows), and reject with the abort reason.
    */
   signal?: AbortSignal;
+}
+
+/**
+ * QueryOptions
+ *
+ * Options to pass to the query methods of the client level. Merged with the
+ * query options given to the client.
+ */
+export interface QueryOptions extends DriverQueryOptions {
   /**
-   * Transforms a value before it is sent to the database
+   * Transforms every parameter before it is sent to the database
    */
   transformInput?: (value: unknown) => unknown;
   /**
-   * Transforms a value received from the database
+   * Transforms every value received from the database
    */
   transformOutput?: (value: unknown) => unknown;
+  /**
+   * The size of the prepared statement cache of each connection. Statements
+   * run with `execute` and `query` are prepared once and cached by their SQL
+   * text, when the driver supports prepared statements. `0` disables the
+   * cache. Defaults to `100`.
+   */
+  statementCacheSize?: number;
 }
 
 /**
  * TransactionOptions
  *
- * Placeholder for driver specific transaction options. There are no standard
- * transaction options; drivers extend this with the options they support.
+ * Options for beginning a transaction. There are no standard transaction
+ * options; drivers extend this with the options they support, such as
+ * isolation levels.
  */
 export interface TransactionOptions {
   [key: string]: unknown;
@@ -222,38 +163,32 @@ export interface TransactionOptions {
 /**
  * PoolOptions
  *
- * Options for the connection pool of a {@linkcode Client}. The pool is always
- * enabled; these options only tune its behavior.
+ * Options for the connection pool of a {@linkcode Client}.
  */
 export interface PoolOptions {
   /**
    * Whether to lazily initialize connections. Defaults to `false`.
    *
-   * When enabled, connections are only created when a connection is acquired
-   * and no idle connection is available while the pool is below
-   * {@linkcode PoolOptions.maxSize}.
+   * When enabled, connections are only opened when a connection is acquired
+   * and no idle connection is available. Otherwise, connecting opens
+   * {@linkcode PoolOptions.maxSize} connections up front.
    */
   lazyInitialization?: boolean;
   /**
-   * The maximum amount of connections in the pool. Defaults to `1`, which
-   * makes the client behave like a single connection. The client becomes a
-   * connection pool when this is raised.
+   * The maximum number of connections in the pool. Defaults to `1`, which
+   * makes the client behave like a single connection. It is capped at the
+   * {@linkcode Driver.maxConnections} of the driver.
    */
   maxSize?: number;
   /**
    * How long {@linkcode Poolable.acquire} waits for a connection when the
    * pool is exhausted, in milliseconds. When it passes, `acquire` rejects
    * with a {@linkcode ConnectionError}. Defaults to waiting indefinitely.
-   *
-   * Because query results hold their connection until they are fully read
-   * or disposed, this also turns a leaked result into an error instead of a
-   * hang.
    */
   acquireTimeout?: number;
   /**
    * How long a connection may be idle in the pool before it is closed, in
-   * milliseconds. A new connection is opened when one is needed again.
-   * Defaults to keeping idle connections open.
+   * milliseconds. Defaults to keeping idle connections open.
    */
   idleTimeout?: number;
   /**
@@ -265,102 +200,352 @@ export interface PoolOptions {
 }
 
 /**
- * Optionable
- *
- * Represents an object that carries its configuration.
- *
- * @template IOptions the options type
- */
-export interface Optionable<IOptions> {
-  /**
-   * The options the object was constructed with
-   */
-  get options(): IOptions;
-}
-
-/**
- * Options
- *
- * The options that a {@linkcode Driver} is constructed with.
- *
- * @template IConnectionOptions driver specific connection options
- * @template IQueryOptions driver specific query options
- * @template ITransactionOptions driver specific transaction options
- */
-export interface Options<
-  IConnectionOptions extends ConnectionOptions = ConnectionOptions,
-  IQueryOptions extends QueryOptions = QueryOptions,
-  ITransactionOptions extends TransactionOptions = TransactionOptions,
-> {
-  /**
-   * Options used when connecting to the database
-   */
-  connectionOptions?: IConnectionOptions;
-  /**
-   * Base options merged into every query
-   */
-  queryOptions?: IQueryOptions;
-  /**
-   * Base options merged into every transaction method
-   */
-  transactionOptions?: ITransactionOptions;
-}
-
-/**
  * ClientOptions
  *
  * The options that a {@linkcode Client} is constructed with.
  *
  * @template IConnectionOptions driver specific connection options
- * @template IQueryOptions driver specific query options
  * @template ITransactionOptions driver specific transaction options
- * @template IPoolOptions driver specific pool options
  */
 export interface ClientOptions<
   IConnectionOptions extends ConnectionOptions = ConnectionOptions,
-  IQueryOptions extends QueryOptions = QueryOptions,
   ITransactionOptions extends TransactionOptions = TransactionOptions,
-  IPoolOptions extends PoolOptions = PoolOptions,
-> extends Options<IConnectionOptions, IQueryOptions, ITransactionOptions> {
+> {
   /**
-   * Options for the connection pool. The pool is always enabled; this only
-   * tunes its behavior.
+   * Options passed to the driver when connecting
    */
-  poolOptions?: IPoolOptions;
+  connectionOptions?: IConnectionOptions;
+  /**
+   * Options merged into every query
+   */
+  queryOptions?: QueryOptions;
+  /**
+   * Options merged into every transaction
+   */
+  transactionOptions?: ITransactionOptions;
+  /**
+   * Options for the connection pool
+   */
+  poolOptions?: PoolOptions;
+}
+
+// =============================================================================
+// Driver level
+// =============================================================================
+
+/**
+ * Dialect
+ *
+ * Describes the SQL syntax of a database, which tools such as query builders
+ * can not discover otherwise.
+ */
+export interface Dialect {
+  /**
+   * The name of the dialect, such as `"sqlite"` or `"postgres"`, for tools
+   * that generate dialect specific SQL
+   */
+  readonly name: string;
+  /**
+   * Render the placeholder of the parameter at the zero-based index, such as
+   * `?` in SQLite or `$1` in Postgres
+   */
+  placeholder(index: number): string;
+  /**
+   * Quote and escape an identifier, such as a table or column name
+   */
+  quoteIdentifier(name: string): string;
+}
+
+/**
+ * Driver
+ *
+ * A database driver, the entry point of the driver level. Drivers implement
+ * the driver level; the client level is implemented on top of it by the
+ * standard `SqlClient`.
+ *
+ * @template IConnectionOptions driver specific connection options
+ * @template ITransactionOptions driver specific transaction options
+ */
+export interface Driver<
+  IConnectionOptions extends ConnectionOptions = ConnectionOptions,
+  ITransactionOptions extends TransactionOptions = TransactionOptions,
+> {
+  /**
+   * The SQL dialect of the database
+   */
+  readonly dialect: Dialect;
+  /**
+   * The maximum number of connections the driver supports at the same time,
+   * such as `1` for SQLite. Defaults to no maximum.
+   */
+  readonly maxConnections?: number;
+  /**
+   * Open a connection to the database. The URL is interpreted according to
+   * the connection URI format of the database; options take precedence over
+   * parameters in the URL. When the signal aborts, connecting stops and
+   * rejects with the abort reason. A failed connect rejects with a
+   * {@linkcode ConnectionError}.
+   */
+  connect(
+    url: string | URL,
+    options?: IConnectionOptions & { signal?: AbortSignal },
+  ): Promise<DriverConnection<ITransactionOptions>>;
+}
+
+/**
+ * DriverConnection
+ *
+ * A single connection of a driver. It runs one operation at a time: while
+ * rows are being read, the connection is busy, and drivers may reject other
+ * operations with a {@linkcode QueryError} rather than buffering the rows.
+ *
+ * @template ITransactionOptions driver specific transaction options
+ */
+export interface DriverConnection<
+  ITransactionOptions extends TransactionOptions = TransactionOptions,
+> extends AsyncDisposable {
+  /**
+   * Whether the connection is closed, by `close()` or because it was lost
+   */
+  readonly closed: boolean;
+  /**
+   * Close the connection. Calling it on a closed connection is a no-op.
+   * Disposing the connection closes it.
+   */
+  close(): Promise<void>;
+  /**
+   * Execute exactly one statement.
+   */
+  execute(
+    sql: string,
+    params?: QueryParameters,
+    options?: DriverQueryOptions,
+  ): Promise<ExecuteResult>;
+  /**
+   * Query exactly one statement, resolving to its rows once the statement
+   * runs, so that errors, such as invalid SQL, reject the promise.
+   */
+  query(
+    sql: string,
+    params?: QueryParameters,
+    options?: DriverQueryOptions,
+  ): Promise<DriverRows>;
+  /**
+   * Execute a script of one or more statements without parameters, resolving
+   * when all have run.
+   */
+  executeScript(sql: string, options?: DriverQueryOptions): Promise<void>;
+  /**
+   * Begin a transaction, with database specific options such as the
+   * isolation level.
+   */
+  begin(options?: ITransactionOptions): Promise<DriverTransaction>;
+  /**
+   * Check that the connection is alive, rejecting with a
+   * {@linkcode ConnectionError} if not.
+   */
+  ping(): Promise<void>;
+  /**
+   * Create a native prepared statement. Optional: without it, the client
+   * level runs the SQL of a prepared statement each time.
+   */
+  prepare?(sql: string): Promise<DriverStatement>;
+}
+
+/**
+ * DriverRows
+ *
+ * The rows of a query of the driver level. The rows are streamed and can be
+ * iterated once; disposing them, or ending the iteration early, stops
+ * fetching and frees the connection.
+ */
+export interface DriverRows extends AsyncIterable<unknown[]>, AsyncDisposable {
+  /**
+   * The column names, known also when there are no rows, unless the
+   * database does not report them without rows
+   */
+  readonly columns: string[];
+}
+
+/**
+ * DriverStatement
+ *
+ * A native prepared statement of a {@linkcode DriverConnection}.
+ */
+export interface DriverStatement extends AsyncDisposable {
+  /**
+   * The SQL of the statement
+   */
+  readonly sql: string;
+  /**
+   * Execute the statement
+   */
+  execute(
+    params?: QueryParameters,
+    options?: DriverQueryOptions,
+  ): Promise<ExecuteResult>;
+  /**
+   * Query the statement
+   */
+  query(
+    params?: QueryParameters,
+    options?: DriverQueryOptions,
+  ): Promise<DriverRows>;
+  /**
+   * Release the statement. Idempotent; disposing deallocates. Using a
+   * deallocated statement rejects with a {@linkcode QueryError}.
+   */
+  deallocate(): Promise<void>;
+}
+
+/**
+ * DriverTransaction
+ *
+ * A transaction begun with {@linkcode DriverConnection.begin}. Its
+ * statements run on the connection. Disposing an active transaction rolls it
+ * back.
+ */
+export interface DriverTransaction extends AsyncDisposable {
+  /**
+   * Commit the transaction. Rejects with a {@linkcode TransactionError} if
+   * the transaction ended.
+   */
+  commit(): Promise<void>;
+  /**
+   * Roll back the transaction. Rejects with a {@linkcode TransactionError} if
+   * the transaction ended.
+   */
+  rollback(): Promise<void>;
+  /**
+   * Create a savepoint, in the syntax of the database.
+   *
+   * @param name a plain unquoted identifier
+   */
+  savepoint(name: string): Promise<DriverSavepoint>;
+}
+
+/**
+ * DriverSavepoint
+ *
+ * A savepoint created with {@linkcode DriverTransaction.savepoint}. Disposing
+ * an active savepoint rolls back to it.
+ */
+export interface DriverSavepoint extends AsyncDisposable {
+  /**
+   * Release the savepoint, keeping its changes. Rejects with a
+   * {@linkcode TransactionError} if the savepoint or its transaction ended.
+   */
+  release(): Promise<void>;
+  /**
+   * Roll back to the savepoint, and release it. Rejects with a
+   * {@linkcode TransactionError} if the savepoint or its transaction ended.
+   */
+  rollback(): Promise<void>;
+}
+
+// =============================================================================
+// Client level
+// =============================================================================
+
+/**
+ * ResultObject
+ *
+ * A single row of a query result.
+ *
+ * @template V the row values
+ * @template R the record representation of the row
+ */
+export interface ResultObject<
+  V = Array<unknown>,
+  R = Record<string, V[keyof V]>,
+> {
+  /**
+   * The values of the row, in the order of the columns
+   */
+  values: V;
+  /**
+   * Returns the row as a record mapping column names to values
+   */
+  toRecord: () => R;
+}
+
+/**
+ * ResultIterableContext
+ *
+ * The result of a query of the client level. It is both an async iterable of
+ * rows and provides convenience methods for collecting the rows.
+ *
+ * The result is lazy: the query runs when the result is first consumed, so
+ * errors, such as invalid SQL, are thrown by the consuming methods. Rows are
+ * streamed and not kept in memory, so the result can be consumed once:
+ * either iterated, or collected. Consuming it again rejects with a
+ * {@linkcode QueryError}.
+ *
+ * A started result holds its connection until all rows are read or the
+ * result is disposed. Disposing a result that was never started does not
+ * run the query.
+ *
+ * @template V the row values
+ * @template R the record representation of a row
+ *
+ * @example
+ * ```ts
+ * import { SqliteClient } from "@stdext/database/drivers/sqlite";
+ *
+ * await using client = new SqliteClient(":memory:");
+ * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ *
+ * for await (const row of client.query("SELECT id, name FROM users")) {
+ *   console.log(row.toRecord());
+ * }
+ * console.log(await client.query("SELECT id, name FROM users").toRecords());
+ * ```
+ */
+export interface ResultIterableContext<
+  V extends unknown[] = unknown[],
+  R = Record<string, V[number]>,
+> extends AsyncDisposable, AsyncIterable<ResultObject<V, R>> {
+  /**
+   * The column names of the result. Runs the query if it has not run yet,
+   * without consuming the rows.
+   */
+  columns(): Promise<string[]>;
+  /**
+   * Collect all rows as an array of values
+   */
+  toValues(): Promise<V[]>;
+  /**
+   * Collect all rows as an array of records
+   */
+  toRecords(): Promise<R[]>;
 }
 
 /**
  * Connectable
  *
- * Represents an object with a connection lifecycle to a database. A connectable
- * is also asynchronously disposable; disposing closes the connection.
- *
- * The connection is opened implicitly by the first operation, so calling
- * {@linkcode Connectable.connect} is optional: it connects eagerly, for
- * example to report connection errors early. Once closed, operations reject
- * with a {@linkcode ConnectionError} until it is connected again.
+ * Represents an object with a connection lifecycle. The connection is opened
+ * implicitly by the first operation, so calling `connect` is optional: it
+ * connects eagerly, for example to report connection errors early. Once
+ * closed, operations reject with a {@linkcode ConnectionError} until it is
+ * connected again. Disposing closes it.
  */
 export interface Connectable extends AsyncDisposable {
   /**
-   * The connection URL the object connects to
+   * The connection URL
    */
   get connectionUrl(): string | URL;
   /**
-   * Whether the object is connected to the database
+   * Whether it is connected
    */
   get connected(): boolean;
   /**
-   * Create the connection to the database. Calling this method on an already
-   * connected object is a no-op.
-   *
-   * If the connection can not be established, the method must reject with a
-   * {@linkcode ConnectionError}, leave `connected` as `false`, and may be
-   * called again to retry.
+   * Connect. Calling it when connected is a no-op, and concurrent calls share
+   * one attempt. If connecting fails, it rejects with a
+   * {@linkcode ConnectionError} and may be called again to retry.
    */
   connect(): Promise<void>;
   /**
-   * Close the connection to the database. Calling this method on an already
-   * closed object is a no-op.
+   * Close. Calling it when closed is a no-op.
    */
   close(): Promise<void>;
 }
@@ -368,33 +553,43 @@ export interface Connectable extends AsyncDisposable {
 /**
  * Pingable
  *
- * Represents an object that can ping its connection to check that it is alive.
+ * Represents an object that can check that its connection is alive.
  */
 export interface Pingable {
   /**
-   * Pings the database connection to check that it is alive.
-   *
-   * Throws a {@linkcode ConnectionError} if the connection is not alive.
+   * Check that the connection is alive. Rejects with a
+   * {@linkcode ConnectionError} if not.
    */
   ping(): Promise<void>;
 }
 
 /**
+ * Dialectable
+ *
+ * Represents an object that exposes the SQL dialect of its database, for
+ * tools such as query builders.
+ */
+export interface Dialectable {
+  /**
+   * The SQL dialect of the database
+   */
+  get dialect(): Dialect;
+}
+
+/**
  * Queryable
  *
- * Represents an object that can execute SQL statements and queries. This is
- * the minimal query surface: `execute` for statements, `query` for queries
- * returning rows.
+ * Represents an object that runs SQL statements, queries and scripts. This is
+ * the capability that query builders and migration tools depend on.
  */
 export interface Queryable {
   /**
-   * Execute a single SQL statement.
+   * Execute exactly one SQL statement.
    *
    * @param sql the SQL statement, as text or a {@linkcode SqlTemplate}
-   * @param params the parameters to bind to the SQL statement. Not allowed
-   * with a {@linkcode SqlTemplate}, which carries its own values.
-   * @param options the options to pass to the method, will be merged with the
-   * global options
+   * @param params the parameters to bind. Not allowed with a
+   * {@linkcode SqlTemplate}, which carries its own values.
+   * @param options the query options, merged with the client's
    * @returns the number of affected rows and the last inserted id
    */
   execute(
@@ -403,17 +598,14 @@ export interface Queryable {
     options?: QueryOptions,
   ): Promise<ExecuteResult>;
   /**
-   * Query the database with a single SQL statement, and return the rows as a
-   * {@linkcode ResultIterableContext}.
-   *
-   * The result is lazy: the query runs when the result is consumed. It holds
-   * its connection until all rows are read or the result is disposed.
+   * Query exactly one SQL statement, returning a lazy
+   * {@linkcode ResultIterableContext}. The query runs when the result is
+   * consumed.
    *
    * @param sql the SQL statement, as text or a {@linkcode SqlTemplate}
-   * @param params the parameters to bind to the SQL statement. Not allowed
-   * with a {@linkcode SqlTemplate}, which carries its own values.
-   * @param options the options to pass to the method, will be merged with the
-   * global options
+   * @param params the parameters to bind. Not allowed with a
+   * {@linkcode SqlTemplate}, which carries its own values.
+   * @param options the query options, merged with the client's
    * @returns the result of the query
    */
   query(
@@ -422,13 +614,11 @@ export interface Queryable {
     options?: QueryOptions,
   ): ResultIterableContext;
   /**
-   * Execute a script of one or more SQL statements, such as a migration. The
-   * statements run in order, and the method resolves once all have run.
-   * Scripts take no parameters.
+   * Execute a script of one or more SQL statements without parameters, such
+   * as a migration.
    *
    * @param sql the SQL statements
-   * @param options the options to pass to the method, will be merged with the
-   * global options
+   * @param options the query options, merged with the client's
    */
   executeScript(sql: string, options?: QueryOptions): Promise<void>;
 }
@@ -436,19 +626,13 @@ export interface Queryable {
 /**
  * Preparable
  *
- * Represents an object that can create prepared statements. Databases without
- * native prepared statements should fall back to preparing the statement on
- * each execution, so that they remain compliant.
+ * Represents an object that creates prepared statements.
  */
 export interface Preparable {
   /**
-   * Create a prepared statement that can be executed multiple times with
-   * different parameters.
-   *
-   * @param sql the SQL statement
-   * @param options the options to pass to the method, will be merged with the
-   * global options
-   * @returns a prepared statement
+   * Create a prepared statement, executed with new parameters each time. It
+   * uses the native prepared statement of the driver when available, and
+   * otherwise runs the SQL each time.
    *
    * @example
    * ```ts
@@ -456,9 +640,8 @@ export interface Preparable {
    *
    * await using client = new SqliteClient(":memory:");
    * await client.execute("CREATE TABLE users (id INTEGER, name TEXT)");
-   * const stmt = await client.prepare("SELECT * FROM users WHERE id = ?");
+   * await using stmt = await client.prepare("SELECT * FROM users WHERE id = ?");
    * console.log(await stmt.query([1]).toRecords());
-   * await stmt.deallocate();
    * ```
    */
   prepare(sql: string, options?: QueryOptions): Promise<PreparedStatement>;
@@ -467,45 +650,31 @@ export interface Preparable {
 /**
  * PreparedStatement
  *
- * Represents a prepared statement, created with
- * {@linkcode Preparable.prepare}. A prepared statement is asynchronously
- * disposable; disposing deallocates the statement.
+ * A prepared statement of the client level. Disposing deallocates it.
  */
 export interface PreparedStatement extends AsyncDisposable {
   /**
-   * The SQL statement of the prepared statement
+   * The SQL of the statement
    */
   get sql(): string;
   /**
-   * Whether the prepared statement has been deallocated
+   * Whether the statement is deallocated
    */
   get deallocated(): boolean;
   /**
-   * Deallocate the prepared statement. Calling this method on an already
-   * deallocated statement is a no-op. A deallocated statement can no longer
-   * be used.
+   * Deallocate the statement. Idempotent. Using a deallocated statement
+   * rejects with a {@linkcode QueryError}.
    */
   deallocate(): Promise<void>;
   /**
-   * Execute the prepared statement.
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the method, will be merged with the
-   * global options
-   * @returns the number of affected rows and the last inserted id
+   * Execute the statement
    */
   execute(
     params?: QueryParameters,
     options?: QueryOptions,
   ): Promise<ExecuteResult>;
   /**
-   * Query the database and return the rows as a lazy
-   * {@linkcode ResultIterableContext}.
-   *
-   * @param params the parameters to bind to the SQL statement
-   * @param options the options to pass to the method, will be merged with the
-   * global options
-   * @returns the result of the query
+   * Query the statement, returning a lazy result
    */
   query(
     params?: QueryParameters,
@@ -516,31 +685,18 @@ export interface PreparedStatement extends AsyncDisposable {
 /**
  * Transactionable
  *
- * Represents an object that can create transactions.
+ * Represents an object that creates transactions.
  */
 export interface Transactionable {
   /**
-   * Start a transaction. When called while a transaction is already active
-   * on the same connection, a savepoint is created instead of a new
-   * transaction, and the returned transaction commits by releasing the
-   * savepoint and rolls back by rolling back to it.
-   *
-   * @param options the options to pass to the method, will be merged with the
-   * global options
-   * @returns a transaction
+   * Begin a transaction. On an active transaction, a savepoint is created
+   * instead, and the returned transaction commits by releasing it and rolls
+   * back by rolling back to it.
    */
   beginTransaction(options?: TransactionOptions): Promise<Transaction>;
   /**
-   * Transaction wrapper.
-   *
-   * Automatically begins a transaction, executes the callback function and
-   * commits the transaction. If the callback function throws an error, the
-   * transaction is rolled back and the error is rethrown.
-   *
-   * @param fn callback function to be executed within a transaction
-   * @param options the options to pass to the method, will be merged with the
-   * global options
-   * @returns the result of the callback function
+   * Run the callback in a transaction, committing on success, and rolling
+   * back and rethrowing on errors.
    *
    * @example
    * ```ts
@@ -563,195 +719,114 @@ export interface Transactionable {
 /**
  * Transaction
  *
- * Represents a transaction, created with
- * {@linkcode Transactionable.beginTransaction} or
- * {@linkcode Transactionable.transaction}. A transaction is asynchronously
- * disposable; disposing rolls back the transaction if it is still active.
- *
- * A transaction is itself transactionable: calling `beginTransaction` or
- * `transaction` while it is active creates a savepoint instead of a new
- * transaction, which is the portable way to nest transactions across SQL
- * databases.
+ * A transaction of the client level. Disposing an active transaction rolls it
+ * back. Calling `beginTransaction` or `transaction` on it creates a nested
+ * transaction, as a savepoint.
  */
 export interface Transaction
   extends AsyncDisposable, Queryable, Preparable, Transactionable {
   /**
-   * Whether the object is in an active transaction
+   * Whether the transaction is active
    */
   get inTransaction(): boolean;
   /**
-   * Commit the transaction. After committing, the transaction can no longer
-   * be used.
-   *
-   * @param options the options to pass to the method, will be merged with the
-   * global options
+   * Commit the transaction. It can no longer be used afterwards.
    */
   commit(options?: TransactionOptions): Promise<void>;
   /**
-   * Rollback the transaction. After rolling back, the transaction can no
-   * longer be used.
-   *
-   * @param options the options to pass to the method, will be merged with the
-   * global options
+   * Roll back the transaction. It can no longer be used afterwards.
    */
   rollback(options?: TransactionOptions): Promise<void>;
   /**
    * Create a savepoint within the transaction.
    *
-   * @param name the name of the savepoint. Implementations generate a name if
-   * omitted.
-   * @param options the options to pass to the method, will be merged with the
-   * global options
+   * @param name a plain identifier; generated when omitted
    */
   createSavepoint(name?: string, options?: TransactionOptions): Promise<void>;
   /**
-   * Release a savepoint within the transaction.
+   * Release a savepoint, and the savepoints created after it.
    *
-   * @param name the name of the savepoint
-   * @param options the options to pass to the method, will be merged with the
-   * global options
+   * @param name the savepoint; the last one when omitted
    */
   releaseSavepoint(name?: string, options?: TransactionOptions): Promise<void>;
 }
 
 /**
- * Driverable
- *
- * Represents an object that wraps a {@linkcode Driver}.
- *
- * @template IDriver the driver type
- */
-export interface Driverable<IDriver extends Driver = Driver> {
-  /**
-   * The wrapped driver
-   */
-  get driver(): IDriver;
-}
-
-/**
  * Poolable
  *
- * Represents an object with a pool of connections that can be acquired, such
- * as a {@linkcode Client}.
+ * Represents an object with a pool of connections.
  */
 export interface Poolable {
   /**
-   * Acquire a {@linkcode PoolClient} from the pool.
-   *
-   * The returned pool client is connected. It must be released back to the
-   * pool with {@linkcode PoolClient.release} when no longer needed, either
-   * manually or by disposing it. Failing to release a pool client will leak
-   * the connection.
+   * Acquire a connection from the pool, waiting when the pool is exhausted.
+   * The connection must be released, which disposing it does.
    */
-  acquire(): Promise<PoolClient>;
+  acquire(): Promise<Connection>;
 }
 
 /**
- * PoolClient
+ * Connection
  *
- * Represents a single connection acquired from a pool, created with
- * {@linkcode Poolable.acquire}. A pool client is asynchronously disposable;
- * disposing releases the connection back to the pool.
+ * A connection acquired from the pool of a {@linkcode Client}, held until it
+ * is released. Disposing releases it. Operations run one at a time; an
+ * operation started while a result of the connection is being read rejects
+ * with a {@linkcode QueryError}.
  */
-export interface PoolClient
+export interface Connection
   extends
     AsyncDisposable,
-    Driverable,
     Pingable,
     Queryable,
     Preparable,
-    Transactionable {
+    Transactionable,
+    Dialectable {
   /**
-   * Whether the underlying driver is connected to the database
+   * Whether the underlying driver connection is open
    */
   get connected(): boolean;
   /**
-   * Whether the pool client is released or removed, and can no longer be used
+   * Whether the connection is released or removed, and can no longer be used
    */
-  get disposed(): boolean;
+  get released(): boolean;
   /**
-   * Release the connection back to the pool. Calling this method on an
-   * already disposed pool client is a no-op.
+   * The driver connection, for driver specific features, while the
+   * connection is acquired. Throws a {@linkcode ConnectionError} once
+   * released.
+   */
+  get driverConnection(): DriverConnection;
+  /**
+   * Release the connection back to the pool, rolling back a transaction left
+   * open. Idempotent.
    */
   release(): Promise<void>;
   /**
-   * Close the connection and remove it from the pool. Use this instead of
-   * {@linkcode PoolClient.release} when the connection is in a broken state,
-   * so it is not reused. Calling this method on an already disposed pool
-   * client is a no-op.
+   * Close the connection and remove it from the pool, for a broken
+   * connection. Idempotent.
    */
   remove(): Promise<void>;
 }
 
 /**
- * Driver
- *
- * Represents a single connection to a database, implementing all standard
- * capabilities. Users should in most cases use a {@linkcode Client}, which
- * pools and hands out drivers.
- *
- * Drivers are written by database driver authors; applications should use a
- * client or pool client.
- *
- * @template IOptions the driver options
- */
-export interface Driver<IOptions extends Options = Options>
-  extends
-    Optionable<IOptions>,
-    Connectable,
-    Pingable,
-    Queryable,
-    Preparable,
-    Transactionable,
-    Eventable {
-}
-
-/**
- * The signature of a {@linkcode Driver} constructor.
- *
- * @template IDriver the driver type
- */
-export interface DriverConstructor<IDriver extends Driver = Driver> {
-  new (
-    connectionUrl: string | URL,
-    options?: IDriver["options"],
-  ): IDriver;
-}
-
-/**
  * Client
  *
- * Represents a database client with an implicit connection pool. The pool is
- * always enabled and is tuned with the `poolOptions` in the constructor
- * options. It defaults to a single connection (`maxSize` of `1`) and becomes
- * a connection pool when `maxSize` is raised.
- *
- * Query methods automatically acquire a pool client for the duration of the
- * operation and release it after. Connections acquired through
- * {@linkcode Client.acquire} are held until released or disposed.
+ * The user facing client: a pool of driver connections. Its query methods
+ * acquire a connection for the duration of the operation. The standard
+ * implementation is `SqlClient`.
  *
  * @template IOptions the client options
  */
 export interface Client<IOptions extends ClientOptions = ClientOptions>
   extends
-    Optionable<IOptions>,
     Connectable,
     Pingable,
     Queryable,
     Preparable,
     Transactionable,
     Poolable,
+    Dialectable,
     Eventable<ClientEventTarget> {
-}
-
-/**
- * The signature of a {@linkcode Client} constructor.
- *
- * @template IClient the client type
- */
-export interface ClientConstructor<IClient extends Client = Client> {
-  new (
-    connectionUrl: string | URL,
-    options?: IClient["options"],
-  ): IClient;
+  /**
+   * The options, reflecting the actual pool size
+   */
+  get options(): IOptions;
 }

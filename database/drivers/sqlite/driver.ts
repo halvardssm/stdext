@@ -4,20 +4,23 @@ import {
   type StatementSync,
 } from "node:sqlite";
 import {
+  ConnectionError,
   type ConnectionOptions,
+  DatabaseError,
+  type Dialect,
+  type Driver,
+  type DriverConnection,
+  type DriverQueryOptions,
+  type DriverRows,
+  type DriverSavepoint,
+  type DriverStatement,
+  type DriverTransaction,
   type ExecuteResult,
-  type Options,
   QueryError,
-  type QueryOptions,
+  type QueryParameters,
   TransactionError,
   type TransactionOptions,
 } from "../../sql/mod.ts";
-import {
-  BaseDriver,
-  type DriverParameters,
-  type DriverResult,
-  type StatementHandle,
-} from "../core/driver.ts";
 
 /**
  * SqliteConnectionOptions
@@ -57,16 +60,8 @@ export interface SqliteTransactionOptions extends TransactionOptions {
   behavior?: "deferred" | "immediate" | "exclusive";
 }
 
-/**
- * SqliteOptions
- *
- * The options that a {@linkcode SqliteDriver} is constructed with.
- */
-export interface SqliteOptions
-  extends
-    Options<SqliteConnectionOptions, QueryOptions, SqliteTransactionOptions> {}
-
 const BEHAVIORS = new Set(["deferred", "immediate", "exclusive"]);
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 // Whitespace and comments, which may follow the statement
 const TRAILING = /^(?:\s|--[^\n]*(?:\n|$)|\/\*[\s\S]*?(?:\*\/|$))*$/;
@@ -93,7 +88,7 @@ function toSqliteValue(value: unknown): SqliteValue {
 
 // `node:sqlite` takes named parameters as the first argument, which the typings
 // only express through overloads.
-function toSqliteArgs(params: DriverParameters | undefined): SQLInputValue[] {
+function toSqliteArgs(params: QueryParameters | undefined): SQLInputValue[] {
   if (params === undefined) return [];
   if (Array.isArray(params)) return params.map(toSqliteValue);
   return [
@@ -103,15 +98,37 @@ function toSqliteArgs(params: DriverParameters | undefined): SQLInputValue[] {
   ] as unknown as SQLInputValue[];
 }
 
+/** Report errors of `node:sqlite` as spec errors */
+function wrapError(
+  error: unknown,
+  ErrorClass: new (message: string) => DatabaseError = QueryError,
+): DatabaseError {
+  if (error instanceof DatabaseError) return error;
+  const wrapped = new ErrorClass(
+    error instanceof Error ? error.message : String(error),
+  );
+  wrapped.cause = error;
+  return wrapped;
+}
+
+/**
+ * The SQL dialect of SQLite: `?` placeholders and double quoted identifiers.
+ */
+export const sqliteDialect: Dialect = {
+  name: "sqlite",
+  placeholder: () => "?",
+  quoteIdentifier: (name) => `"${name.replaceAll('"', '""')}"`,
+};
+
 /**
  * SqliteDriver
  *
- * A single connection to a SQLite database, backed by the built-in
- * `node:sqlite` module.
+ * The SQLite driver, backed by the built-in `node:sqlite` module.
  *
  * The connection URL is a file path, a `file:` URL, or `:memory:` for an
  * in-memory database. Positional parameters use `?` placeholders, and named
- * parameters use `:name`, `@name` or `$name` placeholders.
+ * parameters use `:name`, `@name` or `$name` placeholders. SQLite has no
+ * connection pool, so the driver supports one connection at a time.
  *
  * Applications should in most cases use a {@linkcode SqliteClient}.
  *
@@ -119,33 +136,104 @@ function toSqliteArgs(params: DriverParameters | undefined): SQLInputValue[] {
  * ```ts
  * import { SqliteDriver } from "@stdext/database/drivers/sqlite";
  *
- * await using driver = new SqliteDriver(":memory:");
- * await driver.execute("CREATE TABLE users (id INTEGER, name TEXT)");
- * await driver.execute("INSERT INTO users VALUES (?, ?)", [1, "Alice"]);
- * console.log(await driver.query("SELECT * FROM users").toRecords());
+ * const driver = new SqliteDriver();
+ * await using connection = await driver.connect(":memory:");
+ * await connection.execute("CREATE TABLE users (id INTEGER, name TEXT)");
+ * await connection.execute("INSERT INTO users VALUES (?, ?)", [1, "Alice"]);
+ * await using rows = await connection.query("SELECT * FROM users");
+ * for await (const values of rows) console.log(values);
  * ```
  */
-export class SqliteDriver extends BaseDriver<SqliteOptions> {
-  #db?: DatabaseSync;
+export class SqliteDriver
+  implements Driver<SqliteConnectionOptions, SqliteTransactionOptions> {
+  readonly dialect: Dialect = sqliteDialect;
+  readonly maxConnections = 1;
+
+  connect(
+    url: string | URL,
+    options?: SqliteConnectionOptions & { signal?: AbortSignal },
+  ): Promise<SqliteConnection> {
+    try {
+      options?.signal?.throwIfAborted();
+      const {
+        readOnly,
+        enableForeignKeyConstraints,
+        timeout = 5000,
+      } = options ?? {};
+      const db = new DatabaseSync(url instanceof URL ? url : url.toString(), {
+        ...(readOnly !== undefined && { readOnly }),
+        ...(enableForeignKeyConstraints !== undefined &&
+          { enableForeignKeyConstraints }),
+        timeout,
+      });
+      return Promise.resolve(
+        new SqliteConnection(db, options?.readBigInts ?? false),
+      );
+    } catch (error) {
+      if (options?.signal?.aborted) return Promise.reject(error);
+      return Promise.reject(wrapError(error, ConnectionError));
+    }
+  }
+}
+
+/**
+ * SqliteConnection
+ *
+ * A connection of the {@linkcode SqliteDriver}.
+ */
+export class SqliteConnection
+  implements DriverConnection<SqliteTransactionOptions> {
+  readonly #db: DatabaseSync;
+  readonly #readBigInts: boolean;
   #totalChanges?: StatementSync;
   // Running a statement resets its running iteration, so while a prepared
   // statement is iterated, it is prepared again for other runs.
   readonly #iterating = new WeakSet<StatementSync>();
 
-  get connected(): boolean {
-    return this.#db?.isOpen ?? false;
+  /**
+   * Connections are opened with {@linkcode SqliteDriver.connect}.
+   *
+   * @ignore
+   */
+  constructor(db: DatabaseSync, readBigInts: boolean) {
+    this.#db = db;
+    this.#readBigInts = readBigInts;
+  }
+
+  get closed(): boolean {
+    return !this.#db.isOpen;
   }
 
   /**
    * The underlying `node:sqlite` database, for functionality outside of the
-   * standard interface. Only available while connected.
+   * standard interface.
    */
-  get database(): DatabaseSync | undefined {
+  get database(): DatabaseSync {
     return this.#db;
   }
 
+  #assertOpen(signal?: AbortSignal): void {
+    signal?.throwIfAborted();
+    if (this.closed) throw new ConnectionError("Connection is closed");
+  }
+
+  /** Run a synchronous operation, reporting errors as spec errors */
+  #run<T>(
+    fn: () => T,
+    options?: DriverQueryOptions,
+    ErrorClass?: new (message: string) => DatabaseError,
+  ): Promise<T> {
+    try {
+      this.#assertOpen(options?.signal);
+      return Promise.resolve(fn());
+    } catch (error) {
+      if (options?.signal?.aborted) return Promise.reject(error);
+      return Promise.reject(wrapError(error, ErrorClass));
+    }
+  }
+
   #statement(sql: string): StatementSync {
-    const stmt = this.#db!.prepare(sql);
+    const stmt = this.#db.prepare(sql);
     // SQLite only prepares the first statement and ignores the rest.
     const index = sql.indexOf(stmt.sourceSQL);
     if (
@@ -153,15 +241,13 @@ export class SqliteDriver extends BaseDriver<SqliteOptions> {
       !TRAILING.test(sql.slice(index + stmt.sourceSQL.length))
     ) {
       throw new QueryError(
-        "Cannot run multiple statements at once, run them one by one",
+        "Cannot run multiple statements at once, use executeScript",
       );
     }
     // `setReturnArrays` is missing from the `node:sqlite` typings.
     (stmt as StatementSync & { setReturnArrays(enabled: boolean): void })
       .setReturnArrays(true);
-    stmt.setReadBigInts(
-      this.options.connectionOptions?.readBigInts ?? false,
-    );
+    stmt.setReadBigInts(this.#readBigInts);
     return stmt;
   }
 
@@ -171,128 +257,231 @@ export class SqliteDriver extends BaseDriver<SqliteOptions> {
    * INSERT, UPDATE and DELETE statements, so they are stale after other
    * statements: those affect no rows, and report no inserted id.
    */
-  #run(
+  #execute(
     stmt: StatementSync,
-    params: DriverParameters | undefined,
+    params: QueryParameters | undefined,
   ): ExecuteResult {
-    this.#totalChanges ??= this.#db!.prepare("SELECT total_changes() AS n");
+    this.#totalChanges ??= this.#db.prepare("SELECT total_changes() AS n");
     const before = this.#totalChanges.get()!.n;
     const { changes, lastInsertRowid } = stmt.run(...toSqliteArgs(params));
     if (this.#totalChanges.get()!.n === before) return { affectedRows: 0 };
     return { affectedRows: Number(changes), lastInsertId: lastInsertRowid };
   }
 
-  async *#rows(
+  /**
+   * Query a statement. The first row is read up front, so that errors reject
+   * the query.
+   */
+  #query(
     stmt: StatementSync,
-    params: DriverParameters | undefined,
+    params: QueryParameters | undefined,
+    signal: AbortSignal | undefined,
     done?: () => void,
-  ): AsyncGenerator<unknown[]> {
+  ): DriverRows {
+    const columns = stmt.columns().map((column) => column.name);
+    const iterator = stmt.iterate(...toSqliteArgs(params));
+    let first: IteratorResult<unknown>;
     try {
-      for (const values of stmt.iterate(...toSqliteArgs(params))) {
-        yield values as unknown as unknown[];
-      }
-    } finally {
+      first = iterator.next();
+    } catch (error) {
       done?.();
+      throw error;
     }
-  }
-
-  #result(
-    stmt: StatementSync,
-    params: DriverParameters | undefined,
-    done?: () => void,
-  ): DriverResult {
+    let finished = false;
+    let consumed = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      iterator.return?.();
+      done?.();
+    };
     return {
-      columns: stmt.columns().map((column) => column.name),
-      rows: this.#rows(stmt, params, done),
+      columns,
+      async *[Symbol.asyncIterator]() {
+        if (consumed) return;
+        consumed = true;
+        try {
+          let result = first;
+          while (!result.done && !finished) {
+            yield result.value as unknown[];
+            signal?.throwIfAborted();
+            result = iterator.next();
+          }
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          throw wrapError(error);
+        } finally {
+          finish();
+        }
+      },
+      [Symbol.asyncDispose]() {
+        finish();
+        return Promise.resolve();
+      },
     };
   }
 
-  protected override connectDriver(): Promise<void> {
-    const { readOnly, enableForeignKeyConstraints, timeout = 5000 } =
-      this.options.connectionOptions ?? {};
-    const url = this.connectionUrl;
-    this.#db = new DatabaseSync(
-      url instanceof URL ? url : url.toString(),
-      {
-        ...(readOnly !== undefined && { readOnly }),
-        ...(enableForeignKeyConstraints !== undefined &&
-          { enableForeignKeyConstraints }),
-        timeout,
-      },
-    );
-    return Promise.resolve();
-  }
-
-  protected override closeDriver(): Promise<void> {
-    const db = this.#db;
-    this.#db = undefined;
+  close(): Promise<void> {
+    if (!this.closed) this.#db.close();
     this.#totalChanges = undefined;
-    db?.close();
     return Promise.resolve();
   }
 
-  protected override pingDriver(): Promise<void> {
-    this.#db!.prepare("SELECT 1").get();
-    return Promise.resolve();
-  }
-
-  protected override executeDriver(
+  execute(
     sql: string,
-    params: DriverParameters | undefined,
-    _options: QueryOptions,
+    params?: QueryParameters,
+    options?: DriverQueryOptions,
   ): Promise<ExecuteResult> {
-    return Promise.resolve(this.#run(this.#statement(sql), params));
+    return this.#run(
+      () => this.#execute(this.#statement(sql), params),
+      options,
+    );
   }
 
-  protected override executeScriptDriver(
+  query(
     sql: string,
-    _options: QueryOptions,
-  ): Promise<void> {
-    this.#db!.exec(sql);
-    return Promise.resolve();
+    params?: QueryParameters,
+    options?: DriverQueryOptions,
+  ): Promise<DriverRows> {
+    return this.#run(
+      () => this.#query(this.#statement(sql), params, options?.signal),
+      options,
+    );
   }
 
-  protected override queryDriver(
-    sql: string,
-    params: DriverParameters | undefined,
-    _options: QueryOptions,
-  ): Promise<DriverResult> {
-    return Promise.resolve(this.#result(this.#statement(sql), params));
+  executeScript(sql: string, options?: DriverQueryOptions): Promise<void> {
+    return this.#run(() => this.#db.exec(sql), options);
   }
 
-  protected override prepareDriver(
-    sql: string,
-    _options: QueryOptions,
-  ): Promise<StatementHandle> {
-    const stmt = this.#statement(sql);
-    return Promise.resolve({
-      execute: (params) =>
-        Promise.resolve(
-          this.#run(
-            this.#iterating.has(stmt) ? this.#statement(sql) : stmt,
-            params,
-          ),
-        ),
-      query: (params) => {
-        if (this.#iterating.has(stmt)) {
-          return Promise.resolve(this.#result(this.#statement(sql), params));
-        }
-        this.#iterating.add(stmt);
-        return Promise.resolve(
-          this.#result(stmt, params, () => this.#iterating.delete(stmt)),
-        );
+  ping(): Promise<void> {
+    return this.#run(
+      () => {
+        this.#db.prepare("SELECT 1").get();
       },
-      // Statements are finalized by `node:sqlite` when garbage collected or
-      // when the database is closed.
-      deallocate: () => Promise.resolve(),
+      undefined,
+      ConnectionError,
+    );
+  }
+
+  begin(options?: SqliteTransactionOptions): Promise<DriverTransaction> {
+    return this.#run(
+      () => {
+        const behavior = options?.behavior ?? "deferred";
+        if (!BEHAVIORS.has(behavior)) {
+          throw new TransactionError(
+            `Invalid transaction behavior: ${behavior}`,
+          );
+        }
+        this.#db.exec(`BEGIN ${behavior.toUpperCase()}`);
+        return this.#transaction();
+      },
+      undefined,
+      TransactionError,
+    );
+  }
+
+  #transaction(): DriverTransaction {
+    let active = true;
+    const control = (sql: string, end = false) =>
+      this.#run(
+        () => {
+          if (!active) throw new TransactionError("Transaction is not active");
+          this.#db.exec(sql);
+          if (end) active = false;
+        },
+        undefined,
+        TransactionError,
+      );
+    return {
+      commit: () => control("COMMIT", true),
+      rollback: () => control("ROLLBACK", true),
+      savepoint: async (name: string): Promise<DriverSavepoint> => {
+        if (!IDENTIFIER.test(name)) {
+          throw new TransactionError(`Invalid savepoint name: ${name}`);
+        }
+        await control(`SAVEPOINT ${name}`);
+        return this.#savepoint(name, () => active);
+      },
+      [Symbol.asyncDispose]: async (): Promise<void> => {
+        if (active && !this.closed) await control("ROLLBACK", true);
+      },
+    };
+  }
+
+  #savepoint(name: string, transactionActive: () => boolean): DriverSavepoint {
+    let active = true;
+    const end = (sql: string) =>
+      this.#run(
+        () => {
+          if (!active || !transactionActive()) {
+            throw new TransactionError("Savepoint is not active");
+          }
+          this.#db.exec(sql);
+          active = false;
+        },
+        undefined,
+        TransactionError,
+      );
+    return {
+      release: () => end(`RELEASE SAVEPOINT ${name}`),
+      rollback: () =>
+        end(`ROLLBACK TO SAVEPOINT ${name}; RELEASE SAVEPOINT ${name}`),
+      async [Symbol.asyncDispose]() {
+        if (active && transactionActive()) {
+          await end(`ROLLBACK TO SAVEPOINT ${name}; RELEASE SAVEPOINT ${name}`);
+        }
+      },
+    };
+  }
+
+  prepare(sql: string): Promise<DriverStatement> {
+    return this.#run(() => {
+      const stmt = this.#statement(sql);
+      let deallocated = false;
+      const assertUsable = () => {
+        if (deallocated) {
+          throw new QueryError("Prepared statement is deallocated");
+        }
+      };
+      // A statement that is being iterated is prepared again for other runs.
+      const current = () =>
+        this.#iterating.has(stmt) ? this.#statement(sql) : stmt;
+      return {
+        sql,
+        execute: (params, options) =>
+          this.#run(() => {
+            assertUsable();
+            return this.#execute(current(), params);
+          }, options),
+        query: (params, options) =>
+          this.#run(() => {
+            assertUsable();
+            const target = current();
+            if (target !== stmt) {
+              return this.#query(target, params, options?.signal);
+            }
+            this.#iterating.add(stmt);
+            return this.#query(
+              stmt,
+              params,
+              options?.signal,
+              () => this.#iterating.delete(stmt),
+            );
+          }, options),
+        // Statements are finalized by `node:sqlite` when garbage collected or
+        // when the database is closed.
+        deallocate: () => {
+          deallocated = true;
+          return Promise.resolve();
+        },
+        [Symbol.asyncDispose]() {
+          return this.deallocate();
+        },
+      };
     });
   }
 
-  protected override beginStatement(options: SqliteTransactionOptions): string {
-    const behavior = options.behavior ?? "deferred";
-    if (!BEHAVIORS.has(behavior)) {
-      throw new TransactionError(`Invalid transaction behavior: ${behavior}`);
-    }
-    return `BEGIN ${behavior.toUpperCase()}`;
+  [Symbol.asyncDispose](): Promise<void> {
+    return this.close();
   }
 }

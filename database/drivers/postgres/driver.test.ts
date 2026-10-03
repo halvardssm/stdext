@@ -5,14 +5,12 @@ import {
   sql as tag,
   TransactionError,
 } from "../../sql/mod.ts";
-import {
-  testClientIntegration,
-  testDriverIntegration,
-  type TestSql,
-} from "../../sql/testing.ts";
+import { testClient, testDriver, type TestSql } from "../../sql/testing.ts";
 import {
   Oid,
   PostgresClient,
+  type PostgresClientOptions,
+  type PostgresConnection,
   PostgresConnectionError,
   PostgresDriver,
   PostgresQueryError,
@@ -41,18 +39,29 @@ const sql: TestSql = {
   parameterTemplate: (value) => tag`SELECT ${value}::text AS value`,
 };
 
-function connect(
-  options?: ConstructorParameters<typeof PostgresDriver>[1],
-): Promise<PostgresDriver> {
-  const driver = new PostgresDriver(url!, options);
-  return driver.connect().then(() => driver);
+/** A client with a single connection */
+async function connect(
+  options?: PostgresClientOptions,
+  connectionUrl: string | URL = url!,
+): Promise<PostgresClient> {
+  const client = new PostgresClient(connectionUrl, options);
+  await client.connect();
+  return client;
+}
+
+/** The run-time parameters reported by the server */
+async function serverParameters(
+  client: PostgresClient,
+): Promise<ReadonlyMap<string, string>> {
+  await using connection = await client.acquire();
+  return (connection.driverConnection as PostgresConnection).serverParameters;
 }
 
 Deno.test({
   name: "PostgresDriver conformance",
   ignore,
   async fn(t) {
-    await testDriverIntegration(t, PostgresDriver, [url!], sql);
+    await testDriver(t, new PostgresDriver(), url!, sql);
   },
 });
 
@@ -60,12 +69,7 @@ Deno.test({
   name: "PostgresClient conformance",
   ignore,
   async fn(t) {
-    await testClientIntegration(
-      t,
-      PostgresClient,
-      [url!, { poolOptions: { maxSize: 2 } }],
-      sql,
-    );
+    await testClient(t, (options) => new PostgresClient(url!, options), sql);
   },
 });
 
@@ -238,14 +242,15 @@ Deno.test({
     });
 
     await t.step("rejects commands while a result is read", async () => {
-      await using driver = await connect();
+      await using client = await connect();
+      await using driver = await client.acquire();
       const ctx = driver.query("SELECT generate_series(1, 1000) AS a");
       await ctx.columns();
       // The rest of the result is not buffered, as it may not fit in memory.
       await assertRejects(
         () => driver.query("SELECT 'other' AS b").toValues(),
         QueryError,
-        "result is being read",
+        "being read",
       );
       await assertRejects(() => driver.execute("SELECT 1"), QueryError);
       assertEquals((await ctx.toValues()).length, 1000);
@@ -255,7 +260,8 @@ Deno.test({
     });
 
     await t.step("rejects commands waiting for a result", async () => {
-      await using driver = await connect();
+      await using client = await connect();
+      await using driver = await client.acquire();
       // The second query waits for the first one, which then holds the
       // connection until it is read: it is rejected instead of waiting.
       const first = driver.query("SELECT generate_series(1, 3) AS a");
@@ -289,7 +295,9 @@ Deno.test({
     });
 
     await t.step("prepared statements", async () => {
-      await using driver = await connect();
+      await using client = await connect();
+      // Temporary tables and statements belong to one connection.
+      await using driver = await client.acquire();
       await driver.execute("CREATE TEMP TABLE p (a int)");
       const insert = await driver.prepare("INSERT INTO p VALUES ($1)");
       for (let i = 0; i < 3; i++) {
@@ -396,7 +404,10 @@ Deno.test({
           tls: { mode: "prefer" },
         },
       });
-      assertEquals(driver.serverParameters?.get("application_name"), "stdext");
+      assertEquals(
+        (await serverParameters(driver)).get("application_name"),
+        "stdext",
+      );
       const ctx = driver.query("SHOW TimeZone");
       assertEquals(await ctx.toValues(), [["Asia/Tokyo"]]);
     });
@@ -404,8 +415,7 @@ Deno.test({
     await t.step("detects a terminated connection", async () => {
       await using driver = await connect();
       await using killer = await connect();
-      const pid = await (await driver.query("SELECT pg_backend_pid()"))
-        .toValues();
+      const pid = await driver.query("SELECT pg_backend_pid()").toValues();
       await killer.execute("SELECT pg_terminate_backend($1)", [
         pid[0][0] as number,
       ]);
@@ -413,8 +423,7 @@ Deno.test({
         () => driver.query("SELECT 1").toValues(),
         ConnectionError,
       );
-      assertFalse(driver.connected);
-      // The driver reconnects implicitly, as it was not closed.
+      // The pool replaces the lost connection.
       await driver.ping();
       assert(driver.connected);
     });
@@ -422,7 +431,7 @@ Deno.test({
     await t.step("rejects invalid credentials", async () => {
       const wrong = new URL(url!);
       wrong.password = "wrong";
-      const driver = new PostgresDriver(wrong);
+      const driver = new PostgresClient(wrong);
       const error = await assertRejects(
         () => driver.connect(),
         PostgresConnectionError,
@@ -432,16 +441,15 @@ Deno.test({
 
       wrong.password = "";
       await assertRejects(
-        () => new PostgresDriver(wrong).connect(),
+        () => new PostgresClient(wrong).connect(),
         ConnectionError,
         "requires a password",
       );
 
       // The password can be given as an option.
-      await using driver2 = new PostgresDriver(wrong, {
+      await using _ = await connect({
         connectionOptions: { password: new URL(url!).password },
-      });
-      await driver2.connect();
+      }, wrong);
     });
 
     await t.step("reads libpq parameters from the URL", async () => {
@@ -449,20 +457,18 @@ Deno.test({
       base.searchParams.set("sslmode", "disable");
       base.searchParams.set("application_name", "from-url");
       {
-        await using driver = new PostgresDriver(base);
-        await driver.connect();
+        await using driver = await connect(undefined, base);
         assertEquals(
-          driver.serverParameters?.get("application_name"),
+          (await serverParameters(driver)).get("application_name"),
           "from-url",
         );
       }
       // The options take precedence over the URL.
-      await using driver = new PostgresDriver(base, {
+      await using driver = await connect({
         connectionOptions: { applicationName: "from-options" },
-      });
-      await driver.connect();
+      }, base);
       assertEquals(
-        driver.serverParameters?.get("application_name"),
+        (await serverParameters(driver)).get("application_name"),
         "from-options",
       );
 
@@ -470,19 +476,18 @@ Deno.test({
       for (const sslmode of ["require", "verify-ca", "verify-full"]) {
         base.searchParams.set("sslmode", sslmode);
         await assertRejects(
-          () => new PostgresDriver(base).connect(),
+          () => new PostgresDriver().connect(base),
           ConnectionError,
           "TLS",
         );
       }
       for (const sslmode of ["allow", "prefer"]) {
         base.searchParams.set("sslmode", sslmode);
-        await using driver = new PostgresDriver(base);
-        await driver.connect();
+        await using _ = await new PostgresDriver().connect(base);
       }
       base.searchParams.set("sslmode", "bogus");
       await assertRejects(
-        () => new PostgresDriver(base).connect(),
+        () => new PostgresDriver().connect(base),
         ConnectionError,
         "Invalid sslmode",
       );
@@ -490,10 +495,11 @@ Deno.test({
 
     await t.step("requires TLS when configured", async () => {
       // The test server does not support TLS.
-      const driver = new PostgresDriver(url!, {
-        connectionOptions: { tls: { mode: "require" } },
-      });
-      await assertRejects(() => driver.connect(), ConnectionError, "TLS");
+      await assertRejects(
+        () => new PostgresDriver().connect(url!, { tls: { mode: "require" } }),
+        ConnectionError,
+        "TLS",
+      );
     });
   },
 });
@@ -518,12 +524,12 @@ Deno.test({
 
 Deno.test("PostgresDriver rejects invalid connection URLs", async () => {
   await assertRejects(
-    () => new PostgresDriver("not a url").connect(),
+    () => new PostgresDriver().connect("not a url"),
     ConnectionError,
     "Invalid connection URL",
   );
   await assertRejects(
-    () => new PostgresDriver("mysql://localhost").connect(),
+    () => new PostgresDriver().connect("mysql://localhost"),
     ConnectionError,
     "protocol",
   );
