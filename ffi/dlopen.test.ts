@@ -13,6 +13,12 @@ const TEST_FILE_URL =
 const TEST_ZIP_URL =
   "https://github.com/halvardssm/stdext/archive/refs/tags/0.0.1.zip";
 
+// `Deno.build` is read-only in the typings, and the tests mock the os
+// detection by replacing it.
+const denoWithWritableBuild = Deno as unknown as {
+  build: typeof Deno.build;
+};
+
 Deno.test("getFileOptions", async (t) => {
   await t.step("returns correct file options for current os/arch", () => {
     const result = getFileOptions({
@@ -140,7 +146,7 @@ Deno.test("getCachePath", async (t) => {
       Deno.env.set("HOME", tempDir);
 
       // Override os detection
-      (Deno as any).build = { ...originalBuild, os: "linux" };
+      denoWithWritableBuild.build = { ...originalBuild, os: "linux" };
 
       const result = await getCachePath();
       assertEquals(result, join(tempDir, ".cache/deno/stdext_dlopen_cache"));
@@ -152,7 +158,7 @@ Deno.test("getCachePath", async (t) => {
       if (originalHome) {
         Deno.env.set("HOME", originalHome);
       }
-      (Deno as any).build = originalBuild;
+      denoWithWritableBuild.build = originalBuild;
     }
   });
 });

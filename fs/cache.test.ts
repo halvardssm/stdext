@@ -3,14 +3,19 @@ import {
   assertEquals,
   assertNotEquals,
   assertRejects,
-  type assertThrows,
 } from "@std/assert";
-import { cacheFile, denoCacheDir, type homeDir } from "./cache.ts";
+import { cacheFile, denoCacheDir } from "./cache.ts";
 import { exists } from "@std/fs";
 import { join } from "@std/path";
 
 const TEST_FILE_URL =
   "https://raw.githubusercontent.com/halvardssm/stdext/refs/tags/0.0.1/README.md";
+
+// `Deno.build` is read-only in the typings, and the tests mock the os
+// detection by replacing it.
+const denoWithWritableBuild = Deno as unknown as {
+  build: typeof Deno.build;
+};
 
 Deno.test("denoCacheDir", async (t) => {
   await t.step(
@@ -50,7 +55,7 @@ Deno.test("denoCacheDir", async (t) => {
         Deno.env.delete("XDG_CACHE_HOME");
 
         // Override os detection
-        (Deno as any).build = { ...originalBuild, os: "linux" };
+        denoWithWritableBuild.build = { ...originalBuild, os: "linux" };
 
         const result = await denoCacheDir();
         assertEquals(result, "/home/test/.cache/deno");
@@ -65,7 +70,7 @@ Deno.test("denoCacheDir", async (t) => {
         if (originalXdgCache) {
           Deno.env.set("XDG_CACHE_HOME", originalXdgCache);
         }
-        (Deno as any).build = originalBuild;
+        denoWithWritableBuild.build = originalBuild;
       }
     },
   );
@@ -87,7 +92,7 @@ Deno.test("denoCacheDir", async (t) => {
         Deno.env.set("HOME", absoluteTestCacheDir);
 
         // Override os detection to use default path
-        (Deno as any).build = { ...originalBuild, os: "linux" };
+        denoWithWritableBuild.build = { ...originalBuild, os: "linux" };
 
         const result = await denoCacheDir({ ensure: true });
         const expectedPath = `${absoluteTestCacheDir}/.cache/deno`;
@@ -110,7 +115,7 @@ Deno.test("denoCacheDir", async (t) => {
         if (originalHome) {
           Deno.env.set("HOME", originalHome);
         }
-        (Deno as any).build = originalBuild;
+        denoWithWritableBuild.build = originalBuild;
       }
     },
   );
@@ -128,7 +133,7 @@ Deno.test("denoCacheDir", async (t) => {
         Deno.env.set("HOME", "/nonexistent");
 
         // Override os detection
-        (Deno as any).build = { ...originalBuild, os: "linux" };
+        denoWithWritableBuild.build = { ...originalBuild, os: "linux" };
 
         await assertRejects(
           async () => {
@@ -145,7 +150,7 @@ Deno.test("denoCacheDir", async (t) => {
         if (originalHome) {
           Deno.env.set("HOME", originalHome);
         }
-        (Deno as any).build = originalBuild;
+        denoWithWritableBuild.build = originalBuild;
       }
     },
   );
