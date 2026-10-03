@@ -6,7 +6,9 @@
     "./hash/argon2": "./hash/argon2.ts",
     "./hash/bcrypt": "./hash/bcrypt.ts",
     "./hash/scrypt": "./hash/scrypt.ts",
+    "./hmac": "./hmac.ts",
     "./hotp": "./hotp.ts",
+    "./scram": "./scram.ts",
     "./totp": "./totp.ts",
     "./utils": "./utils.ts"
   }

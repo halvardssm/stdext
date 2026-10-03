@@ -21,7 +21,6 @@ jobs:
           - canary
         os:
           - ubuntu-latest
-          - windows-latest
           - macOS-latest
 
     # Deno comes from setup-deno (the matrix includes canary, which mise

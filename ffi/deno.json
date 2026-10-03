@@ -1,0 +1,8 @@
+{
+  "version": "0.0.1",
+  "name": "@stdext/ffi",
+  "exports": {
+    ".": "./mod.ts",
+    "./dlopen": "./dlopen.ts"
+  }
+}

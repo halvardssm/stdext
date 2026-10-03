@@ -46,10 +46,21 @@ console.log(dump(buffer));
 
 - [assert](https://jsr.io/@stdext/assert): The assert package, contains
   validators and assertions
+- [collections](https://jsr.io/@stdext/collections): The collections package
+  contains commonly used utilities and structures
 - [crypto](https://jsr.io/@stdext/crypto): The crypto package contains utility
-  for crypto and hashing
+  for crypto, hashing, HMAC and SCRAM authentication
+- [database](https://jsr.io/@stdext/database): The database package contains
+  interfaces and helpers for interacting with databases, and SQLite and Postgres
+  drivers
 - [encoding](https://jsr.io/@stdext/encoding): The encoding package contains
-  utility for text encoding.
+  utility for text and binary encoding.
+- [event](https://jsr.io/@stdext/event): The event package contains extensions
+  for events
+- [ffi](https://jsr.io/@stdext/ffi): The FFI package contains helpers when using
+  FFI
+- [fs](https://jsr.io/@stdext/fs): The fs package contains helpers for the file
+  system
 - [http](https://jsr.io/@stdext/http): The http package contains utility for
   fetching and http servers
 - [json](https://jsr.io/@stdext/json): The json package, contains helpers for
@@ -60,6 +71,15 @@ console.log(dump(buffer));
   purpose type helpers
 - [validation](https://jsr.io/@stdext/validation): The validation package,
   contains a Standard Schema compatible validator and schemas
+- [xml](https://jsr.io/@stdext/xml): The xml package provides XML parsing,
+  serialization, and XSD validation, backed by a WebAssembly implementation
+
+## Platform support
+
+The packages are primarily developed and tested on macOS and Linux. Windows
+support is not guaranteed, and packages may not work as expected on Windows. If
+you encounter an issue on Windows, please
+[report it](https://github.com/halvardssm/deno_stdext/issues).
 
 ## Versioning
 

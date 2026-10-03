@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { dump } from "./hex.ts";
 
-Deno.test("dump", async (t) => {
+Deno.test("encoding/hex/dump", async (t) => {
   const data =
     "This is a test string that is longer than 16 bytes and will be split into multiple lines for the hexdump. The quick brown fox jumps over the lazy dog. Foo bar baz.";
   const buffer8Compatible = new TextEncoder().encode(data);

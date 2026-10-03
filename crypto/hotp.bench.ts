@@ -3,7 +3,7 @@ import { generateHotp, verifyHotp } from "./hotp.ts";
 const secret = "OCOMBLGUREYUXFQJIL75FQFCKYFCKLQP";
 
 Deno.bench("generateHotp()", async () => {
-  await generateHotp(secret, 1000000000), "270103";
+  await generateHotp(secret, 1000000000);
 });
 
 Deno.bench("verifyHotp()", async () => {
