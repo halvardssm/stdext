@@ -71,3 +71,13 @@ export const asyncString = createSchema("asyncString", {
     output: () => ({ type: "string" }),
   },
 });
+
+/** The `kind` of every issue of a result, for results of our own schemas. */
+export function kinds(result: StandardSchemaV1.Result<unknown>): string[] {
+  return (result.issues ?? []).map((i) => (i as { kind?: string }).kind ?? "");
+}
+
+/** The messages of every issue of a result. */
+export function messages(result: StandardSchemaV1.Result<unknown>): string[] {
+  return (result.issues ?? []).map((issue) => issue.message);
+}

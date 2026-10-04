@@ -1,5 +1,6 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import { array } from "./composites.ts";
 import { createSchema, type Schema } from "./core.ts";
 import {
   type AnyFunction,
@@ -23,9 +24,12 @@ import {
 import { toJSONSchema, validate, validateAsync } from "./utils.ts";
 import {
   assertType,
+  asyncString,
   type Equals,
   type Input,
   issue,
+  kinds,
+  messages,
   type Output,
   typeIssue,
   valid,
@@ -67,6 +71,136 @@ Deno.test("string", async (t) => {
     assertType<Equals<typeof schema, Schema<string, string, "string">>>();
     assertEquals(schema.kind, "string");
   });
+});
+
+Deno.test("string constraints", async (t) => {
+  await t.step("minLength and maxLength count code points", () => {
+    const schema = string({ minLength: 2, maxLength: 3 });
+    assertEquals(validate(schema, "ab"), { value: "ab" });
+    assertEquals(validate(schema, "a🙂"), { value: "a🙂" }); // 2 code points
+    assertEquals(validate(schema, "a🙂b"), { value: "a🙂b" });
+    assertEquals(messages(validate(schema, "a")), [
+      "Expected a string of at least 2 characters, received 1",
+    ]);
+    assertEquals(messages(validate(schema, "abcd")), [
+      "Expected a string of at most 3 characters, received 4",
+    ]);
+    assert(!valid(string({ minLength: 2 }), "🙂"));
+    assertEquals(
+      messages(validate(string({ minLength: 1 }), "")),
+      ["Expected a string of at least 1 character, received 0"],
+    );
+    assert(valid(string({ minLength: 0, maxLength: 0 }), ""));
+  });
+
+  await t.step("pattern, as a string or a RegExp", () => {
+    for (const pattern of ["^[a-z]+$", /^[a-z]+$/]) {
+      const schema = string({ pattern });
+      assert(valid(schema, "abc"));
+      assertEquals(messages(validate(schema, "ABC")), [
+        'Expected a string matching the pattern ^[a-z]+$, received "ABC"',
+      ]);
+    }
+    // not anchored: it matches anywhere in the string
+    assert(valid(string({ pattern: "b" }), "abc"));
+    assert(!valid(string({ pattern: "^b" }), "abc"));
+    // a regular expression can be reused: it keeps no state between calls
+    const sticky = string({ pattern: /a/ });
+    assert(valid(sticky, "a") && valid(sticky, "a") && valid(sticky, "a"));
+  });
+
+  await t.step("format", () => {
+    assert(valid(string({ format: "email" }), "a@b.co"));
+    assertEquals(messages(validate(string({ format: "email" }), "nope")), [
+      'Expected a string of format email, received "nope"',
+    ]);
+    assert(
+      valid(string({ format: "uuid" }), "123e4567-e89b-12d3-a456-426614174000"),
+    );
+    assert(!valid(string({ format: "date" }), "2023-02-29"));
+    assert(valid(string({ format: "date-time" }), "2024-02-29T12:00:00Z"));
+    assert(valid(string({ format: "ipv4" }), "192.168.1.1"));
+  });
+
+  await t.step("reports every violated constraint", () => {
+    const schema = string({ minLength: 5, pattern: "^a", format: "email" });
+    assertEquals(kinds(validate(schema, "xy")), [
+      "minLength",
+      "format",
+      "pattern",
+    ]);
+    assertEquals(
+      kinds(validate(string({ maxLength: 1, minLength: 0 }), "ab")),
+      ["maxLength"],
+    );
+    // a value of the wrong type has only the type issue
+    assertEquals(kinds(validate(schema, 1)), ["type"]);
+  });
+
+  await t.step("issues carry the limit and what was found", () => {
+    assertEquals(validate(string({ minLength: 3 }), "ab"), {
+      issues: [
+        issue(
+          "minLength",
+          "Expected a string of at least 3 characters, received 2",
+          3,
+          2,
+        ),
+      ],
+    });
+  });
+
+  await t.step("exports the constraints as JSON Schema keywords", () => {
+    const expected = {
+      type: "string",
+      minLength: 1,
+      maxLength: 9,
+      pattern: "^a",
+      format: "email",
+    };
+    const schema = string({
+      minLength: 1,
+      maxLength: 9,
+      pattern: /^a/,
+      format: "email",
+    });
+    assertEquals(toJSONSchema(schema, { io: "input" }), expected);
+    assertEquals(toJSONSchema(schema), expected);
+    assertEquals(toJSONSchema(string({ pattern: "^b" })), {
+      type: "string",
+      pattern: "^b",
+    });
+    assertEquals(toJSONSchema(string()), { type: "string" });
+  });
+
+  await t.step(
+    "rejects options that are not valid when the schema is built",
+    () => {
+      assertThrows(() => string({ minLength: -1 }), TypeError, "minLength");
+      assertThrows(() => string({ maxLength: 1.5 }), TypeError, "maxLength");
+      assertThrows(
+        () => string({ minLength: 3, maxLength: 2 }),
+        TypeError,
+        "minLength (3) must not be greater than maxLength (2)",
+      );
+      assertThrows(
+        () => string({ pattern: "(" }),
+        TypeError,
+        "not a valid regular expression",
+      );
+      assertThrows(
+        () => string({ pattern: /a/i }),
+        TypeError,
+        "cannot have flags",
+      );
+      assertThrows(
+        // deno-lint-ignore no-explicit-any
+        () => string({ format: "nope" as any }),
+        TypeError,
+        "format nope is not supported",
+      );
+    },
+  );
 });
 
 Deno.test("integer", async (t) => {
@@ -154,6 +288,117 @@ Deno.test("number", async (t) => {
     assertEquals(toJSONSchema(number()), { type: "number" });
     const schema = number();
     assertType<Equals<typeof schema, Schema<number, number, "number">>>();
+  });
+});
+
+Deno.test("number constraints", async (t) => {
+  const schemas = { integer, float, number };
+
+  for (const [name, make] of Object.entries(schemas)) {
+    await t.step(`${name}: a range`, () => {
+      const schema = make({ minimum: 1, maximum: 10 });
+      assertEquals(validate(schema, 1), { value: 1 });
+      assertEquals(validate(schema, 10), { value: 10 });
+      assertEquals(messages(validate(schema, 0)), [
+        "Expected a number of at least 1, received 0",
+      ]);
+      assertEquals(messages(validate(schema, 11)), [
+        "Expected a number of at most 10, received 11",
+      ]);
+    });
+
+    await t.step(`${name}: an exclusive range`, () => {
+      const schema = make({ exclusiveMinimum: 0, exclusiveMaximum: 10 });
+      assert(valid(schema, 1) && valid(schema, 9));
+      assertEquals(messages(validate(schema, 0)), [
+        "Expected a number greater than 0, received 0",
+      ]);
+      assertEquals(messages(validate(schema, 10)), [
+        "Expected a number less than 10, received 10",
+      ]);
+    });
+
+    await t.step(`${name}: multipleOf`, () => {
+      const schema = make({ multipleOf: 5 });
+      assert(valid(schema, 10) && valid(schema, 0) && valid(schema, -15));
+      assertEquals(messages(validate(schema, 7)), [
+        "Expected a multiple of 5, received 7",
+      ]);
+    });
+
+    await t.step(`${name}: reports every violated constraint`, () => {
+      const schema = make({ minimum: 10, multipleOf: 3, exclusiveMaximum: 4 });
+      assertEquals(kinds(validate(schema, 4)), [
+        "minimum",
+        "exclusiveMaximum",
+        "multipleOf",
+      ]);
+      assertEquals(kinds(validate(schema, "4")), ["type"]);
+    });
+
+    await t.step(
+      `${name}: exports the constraints as JSON Schema keywords`,
+      () => {
+        const type = name === "integer" ? "integer" : "number";
+        const schema = make({
+          minimum: 1,
+          maximum: 2,
+          exclusiveMinimum: 0,
+          exclusiveMaximum: 3,
+          multipleOf: 1,
+        });
+        const expected = {
+          type,
+          minimum: 1,
+          maximum: 2,
+          exclusiveMinimum: 0,
+          exclusiveMaximum: 3,
+          multipleOf: 1,
+        };
+        assertEquals(toJSONSchema(schema, { io: "input" }), expected);
+        assertEquals(toJSONSchema(schema), expected);
+        assertEquals(toJSONSchema(make()), { type });
+      },
+    );
+
+    await t.step(`${name}: rejects options that are not valid`, () => {
+      assertThrows(() => make({ minimum: NaN }), TypeError, "finite number");
+      assertThrows(
+        () => make({ maximum: Infinity }),
+        TypeError,
+        "finite number",
+      );
+      assertThrows(() => make({ multipleOf: 0 }), TypeError, "greater than 0");
+      assertThrows(() => make({ multipleOf: -2 }), TypeError, "greater than 0");
+      assertThrows(
+        () => make({ minimum: 5, maximum: 1 }),
+        TypeError,
+        "minimum (5) must not be greater than maximum (1)",
+      );
+      assertThrows(
+        () => make({ exclusiveMinimum: 3, exclusiveMaximum: 3 }),
+        TypeError,
+        "exclusiveMinimum",
+      );
+      // equal limits are fine
+      assert(valid(make({ minimum: 2, maximum: 2 }), 2));
+    });
+  }
+
+  await t.step("multipleOf tolerates floating point error", () => {
+    assert(valid(float({ multipleOf: 0.1 }), 0.3));
+    assert(valid(float({ multipleOf: 0.01 }), 1.37));
+    assert(!valid(float({ multipleOf: 0.1 }), 0.35));
+    assert(!valid(number({ multipleOf: 0.5 }), Infinity));
+  });
+
+  await t.step("the type check comes first", () => {
+    assertEquals(messages(validate(integer({ minimum: 1 }), 1.5)), [
+      "Expected an integer, received number",
+    ]);
+    assertEquals(messages(validate(float({ minimum: 1 }), NaN)), [
+      "Expected a finite number, received number",
+    ]);
   });
 });
 
@@ -722,6 +967,126 @@ Deno.test("nullish", async (t) => {
   });
 });
 
+Deno.test("default values", async (t) => {
+  const upper = createSchema("upper", {
+    validate: (value) =>
+      typeof value === "string"
+        ? { value: value.toUpperCase() }
+        : { issues: [{ message: "Expected a string" }] },
+    jsonSchema: {
+      input: () => ({ type: "string" }),
+      output: () => ({ type: "string" }),
+    },
+  });
+
+  await t.step("optional uses the default instead of undefined", () => {
+    const schema = optional(string(), { default: "x" });
+    assertEquals(validate(schema, undefined), { value: "x" });
+    assertEquals(validate(schema, "y"), { value: "y" });
+    // null and other values are not replaced
+    assert(!valid(schema, null));
+    assert(!valid(schema, 1));
+  });
+
+  await t.step("a function makes a fresh default every time", () => {
+    let calls = 0;
+    const schema = optional(array(string()), {
+      default: () => {
+        calls++;
+        return [];
+      },
+    });
+    const first = (validate(schema, undefined) as { value: unknown[] }).value;
+    const second = (validate(schema, undefined) as { value: unknown[] }).value;
+    assertEquals(calls, 2);
+    assert(first !== second);
+    assertEquals(first, []);
+    // a value that is given does not call it
+    validate(schema, ["a"]);
+    assertEquals(calls, 2);
+  });
+
+  await t.step("the default flows through the schema", () => {
+    assertEquals(validate(optional(upper, { default: "abc" }), undefined), {
+      value: "ABC",
+    });
+    // an invalid default is reported by the schema
+    const schema = optional(integer({ minimum: 5 }), { default: 1 });
+    assertEquals(
+      messages(validate(schema, undefined)),
+      ["Expected a number of at least 5, received 1"],
+    );
+  });
+
+  await t.step("works with async schemas", async () => {
+    const schema = optional(asyncString, { default: "x" });
+    assertEquals(await validateAsync(schema, undefined), { value: "x" });
+    assertEquals(await validateAsync(schema, "y"), { value: "y" });
+  });
+
+  await t.step("nullish only replaces undefined", () => {
+    const schema = nullish(string(), { default: "x" });
+    assertEquals(validate(schema, undefined), { value: "x" });
+    assertEquals(validate(schema, null), { value: null });
+    assertEquals(validate(schema, "y"), { value: "y" });
+    assertEquals(
+      validate(nullish(string(), { default: () => "z" }), undefined),
+      { value: "z" },
+    );
+  });
+
+  await t.step("is the default of the JSON Schema", () => {
+    assertEquals(toJSONSchema(optional(string(), { default: "x" })), {
+      type: "string",
+      default: "x",
+    });
+    assertEquals(
+      toJSONSchema(optional(array(string()), { default: () => ["a"] }), {
+        io: "input",
+      }),
+      { type: "array", items: { type: "string" }, default: ["a"] },
+    );
+    assertEquals(toJSONSchema(nullish(integer(), { default: 1 })), {
+      anyOf: [{ type: "integer" }, { type: "null" }],
+      default: 1,
+    });
+    assertEquals(toJSONSchema(optional(string())), { type: "string" });
+    // a falsy default is still a default
+    assertEquals(toJSONSchema(optional(boolean(), { default: false })), {
+      type: "boolean",
+      default: false,
+    });
+  });
+
+  await t.step("removes undefined from the output type", () => {
+    const withDefault = optional(string(), { default: "x" });
+    assertType<
+      Equals<
+        typeof withDefault,
+        Schema<string | undefined, string, "optional">
+      >
+    >();
+    const withFunction = optional(integer(), { default: () => 1 });
+    assertType<Equals<Output<typeof withFunction>, number>>();
+    const without = optional(string());
+    assertType<Equals<Output<typeof without>, string | undefined>>();
+    const nullishDefault = nullish(string(), { default: "x" });
+    assertType<Equals<Output<typeof nullishDefault>, string | null>>();
+    assertType<
+      Equals<Input<typeof nullishDefault>, string | null | undefined>
+    >();
+  });
+
+  await t.step("the default has the input type of the schema", () => {
+    // @ts-expect-error a number is not a string
+    optional(string(), { default: 1 });
+    // @ts-expect-error a function making a number is not a function making a string
+    optional(string(), { default: () => 1 });
+    // @ts-expect-error nullable has no default
+    nullable(string(), { default: "x" });
+  });
+});
+
 Deno.test("nullable and optional compose and nest async schemas", async (t) => {
   await t.step("nullable(optional(x)) and optional(nullable(x))", () => {
     for (
@@ -777,8 +1142,7 @@ Deno.test("nullable and optional compose and nest async schemas", async (t) => {
   });
 });
 
-Deno.test("options are placeholders", () => {
-  // accepted, and without effect for now
+Deno.test("schemas accept empty options", () => {
   assertEquals(validate(string({}), "a"), { value: "a" });
   assertEquals(validate(integer({}), 1), { value: 1 });
   assertEquals(validate(float({}), 1.5), { value: 1.5 });

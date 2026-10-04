@@ -2,10 +2,12 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   acceptsUndefined,
+  annotationsOf,
   chain,
   collect,
   createSchema,
   isRecord,
+  jsonSchemaOf,
   prefixIssues,
   type Schema,
   setOwn,
@@ -389,5 +391,95 @@ Deno.test("acceptsUndefined", async (t) => {
       jsonSchema,
     });
     assert(!acceptsUndefined(throwing));
+  });
+});
+
+Deno.test("annotationsOf", () => {
+  assertEquals(annotationsOf(), {});
+  assertEquals(annotationsOf({}), {});
+  assertEquals(
+    annotationsOf({
+      title: "Name",
+      description: "The name",
+      examples: ["a"],
+      deprecated: false,
+      readOnly: true,
+      writeOnly: false,
+      $comment: "c",
+    }),
+    {
+      title: "Name",
+      description: "The name",
+      examples: ["a"],
+      deprecated: false,
+      readOnly: true,
+      writeOnly: false,
+      $comment: "c",
+    },
+  );
+  // what is not set is left out, and so is everything that is not an annotation
+  assertEquals(annotationsOf({ title: "T", description: undefined }), {
+    title: "T",
+  });
+  const options = { title: "T", message: "m", minLength: 1 };
+  assertEquals(annotationsOf(options), { title: "T" });
+});
+
+Deno.test("typeIssue with a message", () => {
+  assertEquals(typeIssue("a string", 1, "Custom"), {
+    issues: [{
+      kind: "type",
+      message: "Custom",
+      expected: "a string",
+      actual: 1,
+    }],
+  });
+});
+
+Deno.test("jsonSchemaOf", async (t) => {
+  const options = { target: "draft-2020-12" } as const;
+
+  await t.step("gives the same JSON Schema for input and output", () => {
+    const { input, output } = jsonSchemaOf(() => ({ type: "integer" }));
+    assertEquals(input(options), { type: "integer" });
+    assertEquals(output(options), { type: "integer" });
+  });
+
+  await t.step("tells what direction and options it is converting for", () => {
+    const seen: unknown[] = [];
+    const { input, output } = jsonSchemaOf((_convert, context) => {
+      seen.push(context);
+      return {};
+    });
+    input(options);
+    output({ ...options, libraryOptions: { a: 1 } });
+    assertEquals(seen, [
+      { io: "input", options },
+      { io: "output", options: { ...options, libraryOptions: { a: 1 } } },
+    ]);
+  });
+
+  await t.step("converts nested schemas in the direction asked for", () => {
+    const nested = createSchema("nested", {
+      validate: (value) => ({ value }),
+      jsonSchema: {
+        input: () => ({ type: "string" }),
+        output: () => ({ type: "integer" }),
+      },
+    });
+    const { input, output } = jsonSchemaOf((convert) => ({
+      items: convert(nested),
+    }));
+    assertEquals(input(options), { items: { type: "string" } });
+    assertEquals(output(options), { items: { type: "integer" } });
+  });
+
+  await t.step("adds the annotations", () => {
+    const { input, output } = jsonSchemaOf(
+      () => ({ type: "string" }),
+      { title: "T", description: undefined },
+    );
+    assertEquals(input(options), { type: "string", title: "T" });
+    assertEquals(output(options), { type: "string", title: "T" });
   });
 });

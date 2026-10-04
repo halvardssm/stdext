@@ -41,6 +41,7 @@ import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "@standard-schema/spec";
+import type { JSONSchema } from "@stdext/json/json-schema/2020-12";
 import { validateAsync } from "./utils.ts";
 
 /**
@@ -238,6 +239,76 @@ export interface CreateSchemaOptions<
 }
 
 // ---------------------------------------------------------------------------
+// Options shared by every schema
+// ---------------------------------------------------------------------------
+
+/**
+ * The JSON Schema annotations (`title`, `description`, `examples`,
+ * `deprecated`, `readOnly`, `writeOnly` and `$comment`). They describe a schema
+ * in its JSON Schema and have no effect on validation.
+ */
+export type SchemaAnnotations = Pick<
+  JSONSchema,
+  | "title"
+  | "description"
+  | "examples"
+  | "deprecated"
+  | "readOnly"
+  | "writeOnly"
+  | "$comment"
+>;
+
+/**
+ * Options every schema function accepts: the annotations, and a message for
+ * the issues of the schema itself.
+ */
+export interface CommonOptions extends SchemaAnnotations {
+  /**
+   * Replaces the message of the issues the schema itself reports (a wrong
+   * type, a violated constraint). The issues of nested schemas keep their own
+   * messages.
+   */
+  message?: string;
+}
+
+const ANNOTATIONS = [
+  "title",
+  "description",
+  "examples",
+  "deprecated",
+  "readOnly",
+  "writeOnly",
+  "$comment",
+] as const;
+
+/**
+ * The annotations of some options as JSON Schema keywords. Annotations that
+ * are not set are left out.
+ *
+ * @example
+ * ```ts
+ * import { annotationsOf } from "./core.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * assertEquals(annotationsOf({ title: "Name", description: undefined }), {
+ *   title: "Name",
+ * });
+ * ```
+ *
+ * @param options Options that may contain annotations
+ * @returns The annotations that are set
+ */
+export function annotationsOf(
+  options?: SchemaAnnotations,
+): Record<string, unknown> {
+  const annotations: Record<string, unknown> = {};
+  for (const key of ANNOTATIONS) {
+    if (options?.[key] !== undefined) annotations[key] = options[key];
+  }
+  return annotations;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers for schemas that nest other schemas
 // ---------------------------------------------------------------------------
 
@@ -344,16 +415,19 @@ export function typeOf(value: unknown): string {
  *
  * @param expected What was expected, e.g. `"a string"`
  * @param actual The value that was received
+ * @param message A message that replaces the default one
  * @returns A failure result with one issue of kind `"type"`
  */
 export function typeIssue(
   expected: string,
   actual: unknown,
+  message?: string,
 ): { issues: Issue[] } {
-  return failure("type", `Expected ${expected}, received ${typeOf(actual)}`, {
-    expected,
-    actual,
-  });
+  return failure(
+    "type",
+    message ?? `Expected ${expected}, received ${typeOf(actual)}`,
+    { expected, actual },
+  );
 }
 
 /**
@@ -467,6 +541,7 @@ export function acceptsUndefined(schema: StandardSchemaV1): boolean {
  * ```
  *
  * @param build Builds the JSON Schema, converting nested schemas with `convert`
+ * @param annotations Annotations to add to the JSON Schema
  * @returns The `input` and `output` converters
  */
 export function jsonSchemaOf(
@@ -474,12 +549,16 @@ export function jsonSchemaOf(
     convert: (schema: StandardJSONSchemaV1) => Record<string, unknown>,
     context: { io: "input" | "output"; options: StandardJSONSchemaV1.Options },
   ) => Record<string, unknown>,
+  annotations?: SchemaAnnotations,
 ): CreateSchemaOptions["jsonSchema"] {
+  const extra = annotationsOf(annotations);
   const converter =
-    (io: "input" | "output") => (options: StandardJSONSchemaV1.Options) =>
-      build((schema) => schema["~standard"].jsonSchema[io](options), {
+    (io: "input" | "output") => (options: StandardJSONSchemaV1.Options) => ({
+      ...build((schema) => schema["~standard"].jsonSchema[io](options), {
         io,
         options,
-      });
+      }),
+      ...extra,
+    });
   return { input: converter("input"), output: converter("output") };
 }

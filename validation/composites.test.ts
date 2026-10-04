@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   allOf,
   anyOf,
@@ -24,6 +24,7 @@ import {
   number,
   optional,
   string,
+  unknown,
 } from "./schemas.ts";
 import { toJSONSchema, validate, validateAsync } from "./utils.ts";
 import {
@@ -32,6 +33,8 @@ import {
   type Equals,
   type Input,
   issue,
+  kinds,
+  messages,
   type Output,
   typeIssue,
   valid,
@@ -974,6 +977,601 @@ Deno.test("composites nest sync and async schemas", async (t) => {
       (await validateAsync(schema, { names: [1], tuple: ["b", 1], map: {} }))
         .issues?.[0].path,
       ["names", 0],
+    );
+  });
+});
+
+Deno.test("object options", async (t) => {
+  await t.step("additionalProperties: false rejects unknown keys", () => {
+    const schema = object({ a: string() }, { additionalProperties: false });
+    assertEquals(validate(schema, { a: "x" }), { value: { a: "x" } });
+    assertEquals(validate(schema, { a: "x", b: 1, c: 2 }), {
+      issues: [
+        issue("additionalProperties", 'Unexpected key "b"', false, 1, ["b"]),
+        issue("additionalProperties", 'Unexpected key "c"', false, 2, ["c"]),
+      ],
+    });
+    // along with the issues of the properties
+    assertEquals(
+      kinds(validate(schema, { a: 1, b: 2 })),
+      ["type", "additionalProperties"],
+    );
+  });
+
+  await t.step("additionalProperties: true keeps unknown keys", () => {
+    const schema = object({ a: string() }, { additionalProperties: true });
+    assertEquals(validate(schema, { a: "x", b: 1, c: [2] }), {
+      value: { a: "x", b: 1, c: [2] },
+    });
+    // the input is not changed, and the output is a copy
+    const input = { a: "x", b: 1 };
+    const result = validate(schema, input) as { value: object };
+    assert(result.value !== input);
+    // an unknown key can be called __proto__
+    const polluted = validate(
+      schema,
+      JSON.parse('{"a":"x","__proto__":{"p":1}}'),
+    ) as { value: object };
+    assertEquals(Object.getPrototypeOf(polluted.value), Object.prototype);
+    assertEquals(({} as Record<string, unknown>).p, undefined);
+  });
+
+  await t.step("additionalProperties: a schema validates unknown keys", () => {
+    const schema = object({ a: string() }, { additionalProperties: integer() });
+    assertEquals(validate(schema, { a: "x", b: 1, c: 2 }), {
+      value: { a: "x", b: 1, c: 2 },
+    });
+    assertEquals(validate(schema, { a: "x", b: "no", c: 2 }), {
+      issues: [typeIssue("an integer", "no", "string", ["b"])],
+    });
+    // the properties are not validated by it
+    assert(valid(schema, { a: "x" }));
+  });
+
+  await t.step("additionalProperties: a schema that is async", async () => {
+    const schema = object({}, { additionalProperties: asyncString });
+    assertEquals(await validateAsync(schema, { a: "x" }), {
+      value: { a: "x" },
+    });
+    assertEquals(
+      (await validateAsync(schema, { a: 1 })).issues?.[0].path,
+      ["a"],
+    );
+  });
+
+  await t.step("without additionalProperties unknown keys are removed", () => {
+    assertEquals(validate(object({ a: string() }), { a: "x", b: 1 }), {
+      value: { a: "x" },
+    });
+  });
+
+  await t.step("additionalProperties is in the types", () => {
+    const strict = object({ a: string() }, { additionalProperties: false });
+    assertType<Equals<Output<typeof strict>, { a: string }>>();
+    const open = object({ a: string() }, { additionalProperties: true });
+    assertType<
+      Equals<Output<typeof open>, { a: string } & Record<string, unknown>>
+    >();
+    const typed = object({ a: string() }, { additionalProperties: integer() });
+    assertType<
+      Equals<Output<typeof typed>, { a: string } & Record<string, unknown>>
+    >();
+    const plain = object({ a: string() });
+    assertType<Equals<Output<typeof plain>, { a: string }>>();
+  });
+
+  await t.step("additionalProperties is in the JSON Schema", () => {
+    const properties = { a: { type: "string" } };
+    const base = { type: "object", properties, required: ["a"] };
+    assertEquals(
+      toJSONSchema(object({ a: string() }, { additionalProperties: false })),
+      { ...base, additionalProperties: false },
+    );
+    assertEquals(
+      toJSONSchema(object({ a: string() }, { additionalProperties: true })),
+      { ...base, additionalProperties: true },
+    );
+    assertEquals(
+      toJSONSchema(
+        object({ a: string() }, { additionalProperties: integer() }),
+        { io: "input" },
+      ),
+      { ...base, additionalProperties: { type: "integer" } },
+    );
+    assertEquals(toJSONSchema(object({ a: string() })), base);
+  });
+
+  await t.step(
+    "minProperties and maxProperties count the keys of the input",
+    () => {
+      const schema = object({}, { minProperties: 1, maxProperties: 2 });
+      assert(valid(schema, { a: 1 }) && valid(schema, { a: 1, b: 2 }));
+      assertEquals(validate(schema, {}), {
+        issues: [
+          issue(
+            "minProperties",
+            "Expected an object with at least 1 property, received 0",
+            1,
+            0,
+          ),
+        ],
+      });
+      assertEquals(
+        messages(validate(schema, { a: 1, b: 2, c: 3 })),
+        ["Expected an object with at most 2 properties, received 3"],
+      );
+      assertEquals(
+        toJSONSchema(schema),
+        { type: "object", minProperties: 1, maxProperties: 2 },
+      );
+    },
+  );
+
+  await t.step(
+    "minProperties and maxProperties are reported with the other issues",
+    () => {
+      const schema = object({ a: string() }, { minProperties: 2 });
+      assertEquals(kinds(validate(schema, { a: 1 })), [
+        "minProperties",
+        "type",
+      ]);
+    },
+  );
+
+  await t.step("rejects options that are not valid", () => {
+    assertThrows(() => object({}, { minProperties: -1 }), TypeError);
+    assertThrows(
+      () => object({}, { minProperties: 2, maxProperties: 1 }),
+      TypeError,
+      "minProperties (2) must not be greater than maxProperties (1)",
+    );
+  });
+
+  await t.step("exposes its properties", () => {
+    const properties = { a: string(), b: integer() };
+    const schema = object(properties);
+    assert(schema.properties === properties);
+    assertEquals(schema.kind, "object");
+    assert(Object.isFrozen(schema));
+    assertType<Equals<typeof schema.properties, typeof properties>>();
+  });
+});
+
+Deno.test("shape options", async (t) => {
+  await t.step(
+    "minProperties and maxProperties count the keys of the value",
+    () => {
+      const schema = shape({}, { minProperties: 1, maxProperties: 2 });
+      assert(valid(schema, { a: 1 }) && valid(schema, [1, 2]));
+      assertEquals(kinds(validate(schema, {})), ["minProperties"]);
+      assertEquals(kinds(validate(schema, { a: 1, b: 2, c: 3 })), [
+        "maxProperties",
+      ]);
+      assertEquals(
+        toJSONSchema(schema),
+        { type: "object", minProperties: 1, maxProperties: 2 },
+      );
+      assertThrows(
+        () => shape({}, { minProperties: 2, maxProperties: 1 }),
+        TypeError,
+      );
+    },
+  );
+
+  await t.step("exposes its properties and keeps the value", () => {
+    const properties = { a: string() };
+    const schema = shape(properties);
+    assert(schema.properties === properties);
+    assertEquals(schema.kind, "shape");
+    const value = { a: "x", b: 1 };
+    assert((validate(schema, value) as { value: unknown }).value === value);
+  });
+});
+
+Deno.test("array constraints", async (t) => {
+  await t.step("minItems and maxItems", () => {
+    const schema = array(string(), { minItems: 1, maxItems: 2 });
+    assert(valid(schema, ["a"]) && valid(schema, ["a", "b"]));
+    assertEquals(validate(schema, []), {
+      issues: [
+        issue(
+          "minItems",
+          "Expected an array of at least 1 item, received 0",
+          1,
+          0,
+        ),
+      ],
+    });
+    assertEquals(messages(validate(schema, ["a", "b", "c"])), [
+      "Expected an array of at most 2 items, received 3",
+    ]);
+  });
+
+  await t.step("uniqueItems compares by JSON value", () => {
+    const schema = array(unknown(), { uniqueItems: true });
+    assert(valid(schema, [1, "1", true, null, [1], { a: 1 }]));
+    assertEquals(messages(validate(schema, [1, 2, 1])), [
+      "Expected unique items, found duplicates at indexes 0, 2",
+    ]);
+    assert(!valid(schema, [{ a: 1, b: 2 }, { b: 2, a: 1 }]));
+    assert(!valid(schema, [[1, { x: 1 }], [1, { x: 1 }]]));
+    assert(valid(array(unknown()), [1, 1]));
+  });
+
+  await t.step("contains, minContains and maxContains", () => {
+    const schema = array(unknown(), { contains: integer() });
+    assert(valid(schema, ["a", 1]));
+    assertEquals(validate(schema, ["a"]), {
+      issues: [
+        issue(
+          "minContains",
+          "Expected at least 1 item matching the schema, received 0",
+          1,
+          0,
+        ),
+      ],
+    });
+
+    const range = array(unknown(), {
+      contains: integer(),
+      minContains: 2,
+      maxContains: 3,
+    });
+    assert(valid(range, [1, 2, "a"]) && valid(range, [1, 2, 3]));
+    assertEquals(kinds(validate(range, [1, "a"])), ["minContains"]);
+    assertEquals(kinds(validate(range, [1, 2, 3, 4])), ["maxContains"]);
+    // minContains 0 turns the requirement off
+    assert(
+      valid(array(unknown(), { contains: integer(), minContains: 0 }), []),
+    );
+    // without contains they have no effect
+    assert(valid(array(unknown(), { minContains: 2 }), []));
+  });
+
+  await t.step("contains can be async", async () => {
+    const schema = array(unknown(), { contains: asyncString, minContains: 2 });
+    assertEquals(
+      (await validateAsync(schema, ["a", "b", 1])).issues,
+      undefined,
+    );
+    assertEquals(kinds(await validateAsync(schema, ["a", 1])), ["minContains"]);
+  });
+
+  await t.step("constraint issues come before the issues of the items", () => {
+    const schema = array(string(), { minItems: 3, uniqueItems: true });
+    assertEquals(kinds(validate(schema, [1, 1])), [
+      "minItems",
+      "uniqueItems",
+      "type",
+      "type",
+    ]);
+    assertEquals(kinds(validate(schema, "no")), ["type"]);
+  });
+
+  await t.step("exports the constraints as JSON Schema keywords", () => {
+    const schema = array(string(), {
+      minItems: 1,
+      maxItems: 5,
+      uniqueItems: true,
+      contains: string({ minLength: 2 }),
+      minContains: 1,
+      maxContains: 2,
+    });
+    const expected = {
+      type: "array",
+      items: { type: "string" },
+      minItems: 1,
+      maxItems: 5,
+      uniqueItems: true,
+      contains: { type: "string", minLength: 2 },
+      minContains: 1,
+      maxContains: 2,
+    };
+    assertEquals(toJSONSchema(schema, { io: "input" }), expected);
+    assertEquals(toJSONSchema(schema), expected);
+    // minContains and maxContains are only exported with contains
+    assertEquals(toJSONSchema(array(string(), { minContains: 1 })), {
+      type: "array",
+      items: { type: "string" },
+    });
+  });
+
+  await t.step("rejects options that are not valid", () => {
+    assertThrows(() => array(string(), { minItems: -1 }), TypeError);
+    assertThrows(
+      () => array(string(), { minItems: 3, maxItems: 2 }),
+      TypeError,
+      "minItems (3) must not be greater than maxItems (2)",
+    );
+    assertThrows(
+      () => array(string(), { minContains: 2, maxContains: 1 }),
+      TypeError,
+      "minContains",
+    );
+  });
+});
+
+Deno.test("record options", async (t) => {
+  await t.step("keys validates every key", () => {
+    const schema = record(integer(), { keys: string({ pattern: "^[a-z]+$" }) });
+    assertEquals(validate(schema, { a: 1, bc: 2 }), { value: { a: 1, bc: 2 } });
+    assertEquals(validate(schema, { A: 1 }), {
+      issues: [
+        issue(
+          "pattern",
+          'Expected a string matching the pattern ^[a-z]+$, received "A"',
+          "^[a-z]+$",
+          "A",
+          ["A"],
+        ),
+      ],
+    });
+    // the issues of the values and of the keys are both reported
+    assertEquals(
+      validate(schema, { A: "x" }).issues?.map((i) => i.path),
+      [["A"], ["A"]],
+    );
+  });
+
+  await t.step("keys can be async", async () => {
+    const schema = record(integer(), { keys: asyncString });
+    assertEquals(await validateAsync(schema, { a: 1 }), { value: { a: 1 } });
+  });
+
+  await t.step("minProperties and maxProperties", () => {
+    const schema = record(integer(), { minProperties: 1, maxProperties: 2 });
+    assert(valid(schema, { a: 1 }));
+    assertEquals(kinds(validate(schema, {})), ["minProperties"]);
+    assertEquals(kinds(validate(schema, { a: 1, b: 2, c: 3 })), [
+      "maxProperties",
+    ]);
+    assertThrows(
+      () => record(integer(), { minProperties: 2, maxProperties: 1 }),
+      TypeError,
+    );
+  });
+
+  await t.step("exports propertyNames and the counts", () => {
+    const schema = record(integer(), {
+      keys: string({ minLength: 1 }),
+      minProperties: 1,
+      maxProperties: 3,
+    });
+    const expected = {
+      type: "object",
+      additionalProperties: { type: "integer" },
+      propertyNames: { type: "string", minLength: 1 },
+      minProperties: 1,
+      maxProperties: 3,
+    };
+    assertEquals(toJSONSchema(schema, { io: "input" }), expected);
+    assertEquals(toJSONSchema(schema), expected);
+  });
+});
+
+Deno.test("tuple options", async (t) => {
+  await t.step("rest validates the extra items", () => {
+    const schema = tuple([string(), integer()], { rest: boolean() });
+    assertEquals(validate(schema, ["a", 1]), { value: ["a", 1] });
+    assertEquals(validate(schema, ["a", 1, true, false]), {
+      value: ["a", 1, true, false],
+    });
+    assertEquals(validate(schema, ["a", 1, true, "no"]), {
+      issues: [typeIssue("a boolean", "no", "string", [3])],
+    });
+    assertEquals(validate(schema, ["a"]), {
+      issues: [
+        issue(
+          "length",
+          "Expected an array of at least 2 items, received 1",
+          2,
+          1,
+        ),
+      ],
+    });
+  });
+
+  await t.step("without rest the length is exact", () => {
+    const schema = tuple([string()]);
+    assert(valid(schema, ["a"]));
+    assertEquals(messages(validate(schema, ["a", "b"])), [
+      "Expected an array of 1 items, received 2",
+    ]);
+  });
+
+  await t.step("minItems and maxItems", () => {
+    const schema = tuple([string()], {
+      rest: string(),
+      minItems: 2,
+      maxItems: 3,
+    });
+    assert(valid(schema, ["a", "b"]) && valid(schema, ["a", "b", "c"]));
+    assertEquals(kinds(validate(schema, ["a"])), ["minItems"]);
+    assertEquals(kinds(validate(schema, ["a", "b", "c", "d"])), ["maxItems"]);
+    assertThrows(
+      () => tuple([string()], { minItems: 3, maxItems: 2 }),
+      TypeError,
+    );
+  });
+
+  await t.step("exports the JSON Schema", () => {
+    assertEquals(toJSONSchema(tuple([string(), integer()])), {
+      type: "array",
+      prefixItems: [{ type: "string" }, { type: "integer" }],
+      minItems: 2,
+      maxItems: 2,
+    });
+    assertEquals(
+      toJSONSchema(tuple([string()], { rest: boolean(), maxItems: 4 })),
+      {
+        type: "array",
+        prefixItems: [{ type: "string" }],
+        items: { type: "boolean" },
+        minItems: 1,
+        maxItems: 4,
+      },
+    );
+    assertEquals(
+      toJSONSchema(tuple([string()], { rest: boolean(), minItems: 3 }), {
+        io: "input",
+      }),
+      {
+        type: "array",
+        prefixItems: [{ type: "string" }],
+        items: { type: "boolean" },
+        minItems: 3,
+      },
+    );
+    // the options can only narrow a tuple without rest
+    assertEquals(
+      toJSONSchema(tuple([string(), string()], { maxItems: 1 })),
+      {
+        type: "array",
+        prefixItems: [{ type: "string" }, { type: "string" }],
+        minItems: 2,
+        maxItems: 1,
+      },
+    );
+  });
+
+  await t.step("infers the types with rest", () => {
+    const schema = tuple([string(), integer()], { rest: boolean() });
+    assertType<
+      Equals<Output<typeof schema>, [string, number, ...boolean[]]>
+    >();
+    assertType<Equals<Input<typeof schema>, [string, number, ...boolean[]]>>();
+    const plain = tuple([string(), integer()]);
+    assertType<Equals<Output<typeof plain>, [string, number]>>();
+  });
+});
+
+Deno.test("anyOf and oneOf discriminator", async (t) => {
+  const circle = object({ type: literal("circle"), radius: number() });
+  const square = object({ type: literal("square"), size: number() });
+
+  for (const [name, union] of [["anyOf", anyOf], ["oneOf", oneOf]] as const) {
+    const shapes = union([circle, square], { discriminator: "type" });
+
+    await t.step(
+      `${name}: validates the schema the discriminator points at`,
+      () => {
+        assertEquals(validate(shapes, { type: "circle", radius: 1 }), {
+          value: { type: "circle", radius: 1 },
+        });
+        assertEquals(validate(shapes, { type: "square", size: 2 }), {
+          value: { type: "square", size: 2 },
+        });
+      },
+    );
+
+    await t.step(`${name}: reports only the issues of that schema`, () => {
+      assertEquals(validate(shapes, { type: "circle", radius: "big" }), {
+        issues: [typeIssue("a number", "big", "string", ["radius"])],
+      });
+      // without a discriminator the issues of every schema are reported
+      const plain = union([circle, square]);
+      assert(
+        (validate(plain, { type: "circle", radius: "big" }).issues?.length ??
+          0) >
+          1,
+      );
+    });
+
+    await t.step(`${name}: reports an unknown discriminator value`, () => {
+      assertEquals(validate(shapes, { type: "triangle" }), {
+        issues: [
+          issue(
+            "discriminator",
+            'Invalid value for the discriminator "type"',
+            "type",
+            "triangle",
+            ["type"],
+          ),
+        ],
+      });
+      assertEquals(
+        validate(
+          union([circle, square], {
+            discriminator: "type",
+            message: "Unknown",
+          }),
+          { type: "x" },
+        ).issues?.[0].message,
+        "Unknown",
+      );
+    });
+
+    await t.step(
+      `${name}: tries every schema when the value has no discriminator`,
+      () => {
+        // not an object, or the key is missing
+        assert(!valid(shapes, "circle"));
+        assert(!valid(shapes, null));
+        assert(!valid(shapes, { radius: 1 }));
+        assert((validate(shapes, { radius: 1 }).issues?.length ?? 0) > 1);
+      },
+    );
+
+    await t.step(
+      `${name}: ignores schemas that do not expose the property`,
+      () => {
+        const mixed = union([circle, string()], { discriminator: "type" });
+        assert(valid(mixed, { type: "circle", radius: 1 }));
+        assert(valid(mixed, "text"));
+        // nothing to point at: every schema is tried
+        const none = union([string(), integer()], { discriminator: "type" });
+        assert(valid(none, "a") && valid(none, 1));
+        assert(!valid(none, { type: "x" }));
+      },
+    );
+
+    await t.step(`${name}: works with shape and with enumerators`, () => {
+      const open = union([
+        shape({ type: enumerator(["a", "b"]), a: string() }),
+        shape({ type: literal("c"), c: string() }),
+      ], { discriminator: "type" });
+      assert(valid(open, { type: "b", a: "x" }));
+      assert(valid(open, { type: "c", c: "x" }));
+      assert(!valid(open, { type: "c", a: "x" }));
+      assertEquals(kinds(validate(open, { type: "d" })), ["discriminator"]);
+    });
+
+    await t.step(`${name}: works with async schemas`, async () => {
+      const pending = union([
+        object({ type: asyncString, a: asyncString }),
+        object({ type: literal("b"), b: integer() }),
+      ], { discriminator: "type" });
+      assertEquals(await validateAsync(pending, { type: "x", a: "y" }), {
+        value: { type: "x", a: "y" },
+      });
+      assertEquals(
+        (await validateAsync(pending, { type: "b", b: "no" })).issues?.length,
+        2,
+      );
+      assertEquals(
+        (await validateAsync(pending, { type: 1, a: "y" })).issues?.length,
+        1,
+      );
+    });
+
+    await t.step(`${name}: has no effect on the JSON Schema`, () => {
+      assertEquals(
+        toJSONSchema(shapes),
+        toJSONSchema(union([circle, square])),
+      );
+    });
+  }
+
+  await t.step("oneOf: runs the schemas the discriminator selects", () => {
+    // two schemas accept the discriminator: exactly one has to accept the value
+    const both = oneOf([
+      object({ type: string(), a: string() }),
+      object({ type: string(), b: string() }),
+    ], { discriminator: "type" });
+    assert(valid(both, { type: "x", a: "y" }));
+    assertEquals(
+      messages(validate(both, { type: "x", a: "y", b: "z" })),
+      ["Expected input to match exactly one schema, matched 2"],
     );
   });
 });

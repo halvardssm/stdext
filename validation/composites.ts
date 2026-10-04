@@ -5,9 +5,12 @@
  * combinators {@linkcode anyOf}, {@linkcode oneOf}, {@linkcode allOf} and
  * {@linkcode not}, and {@linkcode lazy} for recursion.
  *
- * Every schema function takes an options argument. The options are
- * placeholders for now: they are accepted and ignored, so options can be added
- * later without changing the signatures.
+ * Every schema function takes an options argument with the JSON Schema
+ * annotations (`title`, `description`, ...) and a `message` that replaces the
+ * default issue message, plus the keywords of the schema: `additionalProperties`
+ * and `minProperties`/`maxProperties` for objects, `minItems`, `maxItems`,
+ * `uniqueItems` and `contains` for arrays, `keys` for records, `rest` for
+ * tuples and `discriminator` for unions.
  *
  * The schemas they nest may be sync or async. A composite stays synchronous
  * unless one of the nested schemas returns a promise.
@@ -42,20 +45,31 @@ import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "@standard-schema/spec";
+import type { JSONSchema } from "@stdext/json/json-schema/2020-12";
 import {
   acceptsUndefined,
   chain,
   collect,
   type CombinedSchemaV1,
+  type CommonOptions,
   createSchema,
   failure,
   isRecord,
+  type Issue,
   jsonSchemaOf,
   prefixIssues,
   type Schema,
   setOwn,
   typeIssue,
 } from "./core.ts";
+import {
+  arrayIssues,
+  checkCounts,
+  containsIssues,
+  pick,
+  type PropertyCountConstraints,
+  propertyCountIssues,
+} from "./constraints.ts";
 import { validateAsync } from "./utils.ts";
 
 type Result = StandardSchemaV1.Result<unknown>;
@@ -152,11 +166,30 @@ function objectJsonSchema(
   };
 }
 
+/** What `additionalProperties` can be: reject, keep, or validate unknown keys. */
+export type AdditionalProperties = boolean | CombinedSchemaV1 | undefined;
+
+/** The extra keys an object may have, in its types. */
+export type WithAdditional<TAdditional extends AdditionalProperties> =
+  TAdditional extends false | undefined ? unknown : Record<string, unknown>;
+
 /**
- * Options for {@linkcode object}. Placeholder: no options yet.
+ * Options for {@linkcode object}: the annotations, the message of the issues of
+ * the object itself, the number of properties, and what to do with unknown
+ * keys.
+ *
+ * @template TAdditional The type of `additionalProperties`
  */
-// deno-lint-ignore no-empty-interface
-export interface ObjectOptions {}
+export interface ObjectOptions<
+  TAdditional extends AdditionalProperties = undefined,
+> extends CommonOptions, PropertyCountConstraints {
+  /**
+   * What to do with the keys that are not properties: `false` rejects them,
+   * `true` keeps them, a schema validates and keeps them. Without it unknown
+   * keys are removed from the output.
+   */
+  additionalProperties?: TAdditional;
+}
 
 /** The input type of an object schema with these properties. */
 export type ObjectInput<
@@ -171,6 +204,24 @@ export type ObjectOutput<
 > = OptionalizeUndefined<
   { [K in keyof TProperties]: StandardSchemaV1.InferOutput<TProperties[K]> }
 >;
+
+/**
+ * The schema {@linkcode object} returns: a schema that also exposes the
+ * `properties` it was made from.
+ *
+ * @template TProperties The schema of every property, by key
+ * @template TAdditional The type of `additionalProperties`
+ */
+export type ObjectSchema<
+  TProperties extends Record<PropertyKey, CombinedSchemaV1>,
+  TAdditional extends AdditionalProperties = undefined,
+> =
+  & Schema<
+    ObjectInput<TProperties> & WithAdditional<TAdditional>,
+    ObjectOutput<TProperties> & WithAdditional<TAdditional>,
+    "object"
+  >
+  & { readonly properties: TProperties };
 
 /**
  * An object with the given property schemas. Properties whose schema accepts
@@ -211,46 +262,110 @@ export type ObjectOutput<
  *
  * @template TProperties The schema of every property, by key
  * @param properties The schema of every property
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations, `message`, `minProperties`/`maxProperties` and `additionalProperties` (`false` rejects unknown keys, `true` keeps them, a schema validates and keeps them; by default they are removed)
  * @returns A schema accepting objects with those properties
  */
 export function object<
   TProperties extends Record<PropertyKey, CombinedSchemaV1>,
+  const TAdditional extends AdditionalProperties = undefined,
 >(
   properties: TProperties,
-  // deno-lint-ignore no-unused-vars
-  options?: ObjectOptions,
-): Schema<ObjectInput<TProperties>, ObjectOutput<TProperties>, "object"> {
+  options: ObjectOptions<TAdditional> = {},
+): ObjectSchema<TProperties, TAdditional> {
+  checkCounts(
+    "minProperties",
+    options.minProperties,
+    "maxProperties",
+    options.maxProperties,
+  );
   const schemas: Record<PropertyKey, CombinedSchemaV1> = properties;
   const keys = ownKeys(properties);
+  const declared = new Set<PropertyKey>(keys);
+  const additional: AdditionalProperties = options.additionalProperties;
+  const additionalSchema = typeof additional === "object"
+    ? additional
+    : undefined;
 
-  return createSchema("object", {
+  const schema = createSchema("object", {
     validate: (value, validateOptions) => {
-      if (!isRecord(value)) return typeIssue("an object", value);
+      if (!isRecord(value)) {
+        return typeIssue("an object", value, options.message);
+      }
       const source: Record<PropertyKey, unknown> = value;
+      const sourceKeys = Object.keys(source);
+      const extraKeys = additional === undefined
+        ? []
+        : sourceKeys.filter((key) => !declared.has(key));
 
       return chain(
-        collect(
-          keys.map((key) =>
+        collect([
+          ...keys.map((key) =>
             validateAsync(schemas[key], source[key], validateOptions)
           ),
-        ),
-        (results) =>
-          keyedResult(
+          ...(additionalSchema
+            ? extraKeys.map((key) =>
+              validateAsync(additionalSchema, source[key], validateOptions)
+            )
+            : []),
+        ]),
+        (results): Result => {
+          const extraResults = results.slice(keys.length);
+          const base = keyedResult(
             keys,
-            results,
+            results.slice(0, keys.length),
             (key, result) =>
               Object.hasOwn(source, key) || result.value !== undefined,
-          ),
+          );
+          const issues: StandardSchemaV1.Issue[] = [
+            ...propertyCountIssues(sourceKeys.length, options, options.message),
+            ...(base.issues ?? []),
+          ];
+          const output = base.issues
+            ? undefined
+            : base.value as Record<PropertyKey, unknown>;
+
+          if (additional === false) {
+            for (const key of extraKeys) {
+              issues.push({
+                kind: "additionalProperties",
+                message: options.message ??
+                  `Unexpected key ${JSON.stringify(key)}`,
+                path: [key],
+                expected: false,
+                actual: source[key],
+              } as Issue);
+            }
+          } else if (additionalSchema) {
+            extraKeys.forEach((key, index) => {
+              const result = extraResults[index];
+              if (result.issues) {
+                issues.push(...prefixIssues(key, result.issues));
+              } else if (output) {
+                setOwn(output, key, result.value);
+              }
+            });
+          } else if (additional === true && output) {
+            for (const key of extraKeys) setOwn(output, key, source[key]);
+          }
+
+          return issues.length ? { issues } : { value: output };
+        },
       );
     },
-    jsonSchema: jsonSchemaOf((convert) =>
-      objectJsonSchema(keys, schemas, convert)
-    ),
-  }) as unknown as Schema<
-    ObjectInput<TProperties>,
-    ObjectOutput<TProperties>,
-    "object"
+    jsonSchema: jsonSchemaOf((convert) => ({
+      ...objectJsonSchema(keys, schemas, convert),
+      ...(additional === undefined ? {} : {
+        additionalProperties: additionalSchema
+          ? convert(additionalSchema)
+          : additional,
+      }),
+      ...pick(options, ["minProperties", "maxProperties"]),
+    }), options),
+  });
+
+  return Object.freeze({ ...schema, properties }) as unknown as ObjectSchema<
+    TProperties,
+    TAdditional
   >;
 }
 
@@ -259,10 +374,22 @@ export function object<
 // ---------------------------------------------------------------------------
 
 /**
- * Options for {@linkcode shape}. Placeholder: no options yet.
+ * Options for {@linkcode shape}: the annotations, the message of the issues of
+ * the shape itself, and the number of properties.
  */
-// deno-lint-ignore no-empty-interface
-export interface ShapeOptions {}
+export interface ShapeOptions extends CommonOptions, PropertyCountConstraints {}
+
+/**
+ * The schema {@linkcode shape} returns: a schema that also exposes the
+ * `properties` it was made from.
+ *
+ * @template TProperties The schema of every property, by key
+ */
+export type ShapeSchema<
+  TProperties extends Record<PropertyKey, CombinedSchemaV1>,
+> =
+  & Schema<ObjectInput<TProperties>, ObjectInput<TProperties>, "shape">
+  & { readonly properties: TProperties };
 
 /**
  * Duck typing: any non-null object (arrays, `Map`s and objects with a custom
@@ -303,23 +430,28 @@ export interface ShapeOptions {}
  *
  * @template TProperties The schema of every property, by key
  * @param properties The schema of every property
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations, `message` and `minProperties`/`maxProperties`
  * @returns A schema accepting objects that have those properties
  */
 export function shape<
   TProperties extends Record<PropertyKey, CombinedSchemaV1>,
 >(
   properties: TProperties,
-  // deno-lint-ignore no-unused-vars
-  options?: ShapeOptions,
-): Schema<ObjectInput<TProperties>, ObjectInput<TProperties>, "shape"> {
+  options: ShapeOptions = {},
+): ShapeSchema<TProperties> {
+  checkCounts(
+    "minProperties",
+    options.minProperties,
+    "maxProperties",
+    options.maxProperties,
+  );
   const schemas: Record<PropertyKey, CombinedSchemaV1> = properties;
   const keys = ownKeys(properties);
 
-  return createSchema("shape", {
+  const schema = createSchema("shape", {
     validate: (value, validateOptions) => {
       if (typeof value !== "object" || value === null) {
-        return typeIssue("an object", value);
+        return typeIssue("an object", value, options.message);
       }
       const source = value as Record<PropertyKey, unknown>;
 
@@ -330,20 +462,28 @@ export function shape<
           ),
         ),
         (results): Result => {
-          const issues = results.flatMap((result, index) =>
-            result.issues ? prefixIssues(keys[index], result.issues) : []
-          );
+          const issues = [
+            ...propertyCountIssues(
+              Object.keys(source).length,
+              options,
+              options.message,
+            ),
+            ...results.flatMap((result, index) =>
+              result.issues ? prefixIssues(keys[index], result.issues) : []
+            ),
+          ];
           return issues.length ? { issues } : { value };
         },
       );
     },
-    jsonSchema: jsonSchemaOf((convert) =>
-      objectJsonSchema(keys, schemas, convert)
-    ),
-  }) as unknown as Schema<
-    ObjectInput<TProperties>,
-    ObjectInput<TProperties>,
-    "shape"
+    jsonSchema: jsonSchemaOf((convert) => ({
+      ...objectJsonSchema(keys, schemas, convert),
+      ...pick(options, ["minProperties", "maxProperties"]),
+    }), options),
+  });
+
+  return Object.freeze({ ...schema, properties }) as unknown as ShapeSchema<
+    TProperties
   >;
 }
 
@@ -352,10 +492,21 @@ export function shape<
 // ---------------------------------------------------------------------------
 
 /**
- * Options for {@linkcode array}. Placeholder: no options yet.
+ * Options for {@linkcode array}: the annotations, the message of the issues of
+ * the array itself, and the JSON Schema constraints on the items.
  */
-// deno-lint-ignore no-empty-interface
-export interface ArrayOptions {}
+export interface ArrayOptions extends
+  CommonOptions,
+  Pick<
+    JSONSchema,
+    "minItems" | "maxItems" | "uniqueItems" | "minContains" | "maxContains"
+  > {
+  /**
+   * A schema at least `minContains` (default 1) items must match, and at most
+   * `maxContains`.
+   */
+  contains?: CombinedSchemaV1;
+}
 
 /**
  * An array whose items all match `item`. The issue of a failing item has its
@@ -379,36 +530,75 @@ export interface ArrayOptions {}
  *
  * @template TItem The schema of the items
  * @param item The schema of every item
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations, `message`, `minItems`, `maxItems`, `uniqueItems`, and `contains` with `minContains`/`maxContains`
  * @returns A schema accepting arrays of items
  */
 export function array<TItem extends CombinedSchemaV1>(
   item: TItem,
-  // deno-lint-ignore no-unused-vars
-  options?: ArrayOptions,
+  options: ArrayOptions = {},
 ): Schema<
   StandardSchemaV1.InferInput<TItem>[],
   StandardSchemaV1.InferOutput<TItem>[],
   "array"
 > {
+  checkCounts("minItems", options.minItems, "maxItems", options.maxItems);
+  checkCounts(
+    "minContains",
+    options.minContains,
+    "maxContains",
+    options.maxContains,
+  );
+  const { contains } = options;
+
   return createSchema("array", {
     validate: (value, validateOptions) => {
-      if (!Array.isArray(value)) return typeIssue("an array", value);
+      if (!Array.isArray(value)) {
+        return typeIssue("an array", value, options.message);
+      }
 
       return chain(
-        collect(
-          Array.from(
+        collect([
+          ...Array.from(
             value,
             (entry) => validateAsync(item, entry, validateOptions),
           ),
-        ),
-        itemsResult,
+          ...(contains
+            ? Array.from(
+              value,
+              (entry) => validateAsync(contains, entry, validateOptions),
+            )
+            : []),
+        ]),
+        (results): Result => {
+          const base = itemsResult(results.slice(0, value.length));
+          const issues: StandardSchemaV1.Issue[] = [
+            ...arrayIssues(value, options, options.message),
+            ...(base.issues ?? []),
+            ...(contains
+              ? containsIssues(
+                results.slice(value.length).filter((result) => !result.issues)
+                  .length,
+                options.minContains,
+                options.maxContains,
+                options.message,
+              )
+              : []),
+          ];
+          return issues.length ? { issues } : base;
+        },
       );
     },
     jsonSchema: jsonSchemaOf((convert) => ({
       type: "array",
       items: convert(item),
-    })),
+      ...pick(options, ["minItems", "maxItems", "uniqueItems"]),
+      ...(contains
+        ? {
+          contains: convert(contains),
+          ...pick(options, ["minContains", "maxContains"]),
+        }
+        : {}),
+    }), options),
   }) as unknown as Schema<
     StandardSchemaV1.InferInput<TItem>[],
     StandardSchemaV1.InferOutput<TItem>[],
@@ -421,10 +611,16 @@ export function array<TItem extends CombinedSchemaV1>(
 // ---------------------------------------------------------------------------
 
 /**
- * Options for {@linkcode record}. Placeholder: no options yet.
+ * Options for {@linkcode record}: the annotations, the message of the issues of
+ * the record itself, the number of properties, and a schema for the keys.
  */
-// deno-lint-ignore no-empty-interface
-export interface RecordOptions {}
+export interface RecordOptions extends CommonOptions, PropertyCountConstraints {
+  /**
+   * A schema every key must match. It only checks: the keys of the output are
+   * the keys of the input. It is the `propertyNames` of the JSON Schema.
+   */
+  keys?: CombinedSchemaV1;
+}
 
 /**
  * An object with any string keys, whose values all match `value`. The issue of
@@ -448,34 +644,60 @@ export interface RecordOptions {}
  *
  * @template TValue The schema of the values
  * @param value The schema of every value
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations, `message`, `minProperties`/`maxProperties` and `keys`, a schema every key has to match
  * @returns A schema accepting objects with values of that schema
  */
 export function record<TValue extends CombinedSchemaV1>(
   value: TValue,
-  // deno-lint-ignore no-unused-vars
-  options?: RecordOptions,
+  options: RecordOptions = {},
 ): Schema<
   Record<string, StandardSchemaV1.InferInput<TValue>>,
   Record<string, StandardSchemaV1.InferOutput<TValue>>,
   "record"
 > {
+  checkCounts(
+    "minProperties",
+    options.minProperties,
+    "maxProperties",
+    options.maxProperties,
+  );
+  const { keys: keySchema } = options;
+
   return createSchema("record", {
     validate: (input, validateOptions) => {
-      if (!isRecord(input)) return typeIssue("an object", input);
+      if (!isRecord(input)) {
+        return typeIssue("an object", input, options.message);
+      }
 
       const keys = Object.keys(input);
       return chain(
-        collect(
-          keys.map((key) => validateAsync(value, input[key], validateOptions)),
-        ),
-        (results) => keyedResult(keys, results),
+        collect([
+          ...keys.map((key) =>
+            validateAsync(value, input[key], validateOptions)
+          ),
+          ...(keySchema
+            ? keys.map((key) => validateAsync(keySchema, key, validateOptions))
+            : []),
+        ]),
+        (results): Result => {
+          const base = keyedResult(keys, results.slice(0, keys.length));
+          const issues: StandardSchemaV1.Issue[] = [
+            ...propertyCountIssues(keys.length, options, options.message),
+            ...(base.issues ?? []),
+            ...results.slice(keys.length).flatMap((result, index) =>
+              result.issues ? prefixIssues(keys[index], result.issues) : []
+            ),
+          ];
+          return issues.length ? { issues } : base;
+        },
       );
     },
     jsonSchema: jsonSchemaOf((convert) => ({
       type: "object",
       additionalProperties: convert(value),
-    })),
+      ...(keySchema ? { propertyNames: convert(keySchema) } : {}),
+      ...pick(options, ["minProperties", "maxProperties"]),
+    }), options),
   }) as unknown as Schema<
     Record<string, StandardSchemaV1.InferInput<TValue>>,
     Record<string, StandardSchemaV1.InferOutput<TValue>>,
@@ -488,20 +710,51 @@ export function record<TValue extends CombinedSchemaV1>(
 // ---------------------------------------------------------------------------
 
 /**
- * Options for {@linkcode tuple}. Placeholder: no options yet.
+ * Options for {@linkcode tuple}: the annotations, the message of the issues of
+ * the tuple itself, the number of items, and a schema for the extra items.
+ *
+ * @template TRest The type of `rest`
  */
-// deno-lint-ignore no-empty-interface
-export interface TupleOptions {}
+export interface TupleOptions<
+  TRest extends CombinedSchemaV1 | undefined = undefined,
+> extends CommonOptions, Pick<JSONSchema, "minItems" | "maxItems"> {
+  /**
+   * A schema for the items after the ones of the tuple. Without it the array
+   * must have exactly one item per schema. It is the `items` of the JSON
+   * Schema.
+   */
+  rest?: TRest;
+}
 
-/** The input type of a tuple schema with these items. */
-export type TupleInput<TItems extends readonly CombinedSchemaV1[]> = {
-  -readonly [K in keyof TItems]: StandardSchemaV1.InferInput<TItems[K]>;
-};
+/**
+ * The input type of a tuple schema with these items, and optionally a schema
+ * for the extra items.
+ */
+export type TupleInput<
+  TItems extends readonly CombinedSchemaV1[],
+  TRest extends CombinedSchemaV1 | undefined = undefined,
+> = TRest extends CombinedSchemaV1 ? [
+    ...{
+      -readonly [K in keyof TItems]: StandardSchemaV1.InferInput<TItems[K]>;
+    },
+    ...StandardSchemaV1.InferInput<TRest>[],
+  ]
+  : { -readonly [K in keyof TItems]: StandardSchemaV1.InferInput<TItems[K]> };
 
-/** The output type of a tuple schema with these items. */
-export type TupleOutput<TItems extends readonly CombinedSchemaV1[]> = {
-  -readonly [K in keyof TItems]: StandardSchemaV1.InferOutput<TItems[K]>;
-};
+/**
+ * The output type of a tuple schema with these items, and optionally a schema
+ * for the extra items.
+ */
+export type TupleOutput<
+  TItems extends readonly CombinedSchemaV1[],
+  TRest extends CombinedSchemaV1 | undefined = undefined,
+> = TRest extends CombinedSchemaV1 ? [
+    ...{
+      -readonly [K in keyof TItems]: StandardSchemaV1.InferOutput<TItems[K]>;
+    },
+    ...StandardSchemaV1.InferOutput<TRest>[],
+  ]
+  : { -readonly [K in keyof TItems]: StandardSchemaV1.InferOutput<TItems[K]> };
 
 /**
  * An array with exactly one item per schema, each matching the schema at its
@@ -526,43 +779,67 @@ export type TupleOutput<TItems extends readonly CombinedSchemaV1[]> = {
  *
  * @template TItems The schemas of the positions, as a tuple
  * @param items The schema of every position
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations, `message`, `minItems`/`maxItems` and `rest`, a schema for the items after the listed ones
  * @returns A schema accepting arrays of that shape
  */
-export function tuple<const TItems extends readonly CombinedSchemaV1[]>(
+export function tuple<
+  const TItems extends readonly CombinedSchemaV1[],
+  const TRest extends CombinedSchemaV1 | undefined = undefined,
+>(
   items: TItems,
-  // deno-lint-ignore no-unused-vars
-  options?: TupleOptions,
-): Schema<TupleInput<TItems>, TupleOutput<TItems>, "tuple"> {
+  options: TupleOptions<TRest> = {},
+): Schema<TupleInput<TItems, TRest>, TupleOutput<TItems, TRest>, "tuple"> {
+  checkCounts("minItems", options.minItems, "maxItems", options.maxItems);
+  const rest: CombinedSchemaV1 | undefined = options.rest;
+
   return createSchema("tuple", {
     validate: (value, validateOptions) => {
-      if (!Array.isArray(value)) return typeIssue("an array", value);
-      if (value.length !== items.length) {
+      if (!Array.isArray(value)) {
+        return typeIssue("an array", value, options.message);
+      }
+      if (rest ? value.length < items.length : value.length !== items.length) {
         return failure(
           "length",
-          `Expected an array of ${items.length} items, received ${value.length}`,
+          options.message ??
+            `Expected an array of ${
+              rest ? "at least " : ""
+            }${items.length} items, received ${value.length}`,
           { expected: items.length, actual: value.length },
         );
       }
 
       return chain(
         collect(
-          items.map((item, index) =>
-            validateAsync(item, value[index], validateOptions)
+          value.map((entry, index) =>
+            validateAsync(
+              index < items.length ? items[index] : rest!,
+              entry,
+              validateOptions,
+            )
           ),
         ),
-        itemsResult,
+        (results): Result => {
+          const base = itemsResult(results);
+          const issues: StandardSchemaV1.Issue[] = [
+            ...arrayIssues(value, options, options.message),
+            ...(base.issues ?? []),
+          ];
+          return issues.length ? { issues } : base;
+        },
       );
     },
     jsonSchema: jsonSchemaOf((convert) => ({
       type: "array",
       prefixItems: items.map((item) => convert(item)),
-      minItems: items.length,
-      maxItems: items.length,
-    })),
+      ...(rest ? { items: convert(rest) } : {}),
+      minItems: Math.max(items.length, options.minItems ?? 0),
+      ...(rest
+        ? pick(options, ["maxItems"])
+        : { maxItems: Math.min(items.length, options.maxItems ?? Infinity) }),
+    }), options),
   }) as unknown as Schema<
-    TupleInput<TItems>,
-    TupleOutput<TItems>,
+    TupleInput<TItems, TRest>,
+    TupleOutput<TItems, TRest>,
     "tuple"
   >;
 }
@@ -582,11 +859,84 @@ export type OutputOf<TSchemas extends readonly CombinedSchemaV1[]> =
     TSchemas[number]
   >;
 
+/** The properties an object schema exposes, if it does. */
+function propertiesOf(
+  schema: CombinedSchemaV1,
+): Record<PropertyKey, CombinedSchemaV1> | undefined {
+  return (schema as { properties?: Record<PropertyKey, CombinedSchemaV1> })
+    .properties;
+}
+
 /**
- * Options for {@linkcode anyOf}. Placeholder: no options yet.
+ * The schemas to try for a value. Without a discriminator, or when the value
+ * has none, they are all of them. Otherwise they are the object schemas whose
+ * property of that name accepts the value's one; when there are none, the
+ * failure is a single issue about the discriminator.
  */
-// deno-lint-ignore no-empty-interface
-export interface AnyOfOptions {}
+function select(
+  schemas: readonly CombinedSchemaV1[],
+  discriminator: string | undefined,
+  value: unknown,
+  validateOptions: StandardSchemaV1.Options | undefined,
+  message: string | undefined,
+):
+  | readonly CombinedSchemaV1[]
+  | { issues: Issue[] }
+  | Promise<readonly CombinedSchemaV1[] | { issues: Issue[] }> {
+  if (
+    discriminator === undefined || typeof value !== "object" ||
+    value === null || !(discriminator in value)
+  ) {
+    return schemas;
+  }
+  const actual = (value as Record<string, unknown>)[discriminator];
+  const candidates = schemas.filter((schema) =>
+    propertiesOf(schema)?.[discriminator]
+  );
+  if (candidates.length === 0) return schemas;
+
+  return chain(
+    collect(
+      candidates.map((schema) =>
+        validateAsync(
+          propertiesOf(schema)![discriminator],
+          actual,
+          validateOptions,
+        )
+      ),
+    ),
+    (results) => {
+      const matching = candidates.filter((_, index) => !results[index].issues);
+      return matching.length ? matching : {
+        issues: [{
+          kind: "discriminator",
+          message: message ??
+            `Invalid value for the discriminator ${
+              JSON.stringify(discriminator)
+            }`,
+          path: [discriminator],
+          expected: discriminator,
+          actual,
+        } as Issue],
+      };
+    },
+  );
+}
+
+/**
+ * Options for {@linkcode anyOf}: the annotations, the message of the issues of
+ * the union itself, and a discriminator.
+ */
+export interface AnyOfOptions extends CommonOptions {
+  /**
+   * The name of a property that tells the object schemas apart, such as
+   * `"type"`. A value that has it is only validated by the schemas whose
+   * property of that name accepts the value's, which is faster, and when none
+   * does the only issue is about the discriminator. It has no effect on the
+   * JSON Schema.
+   */
+  discriminator?: string;
+}
 
 /**
  * Tries the schemas in order; the first that accepts the value wins. When none
@@ -611,50 +961,75 @@ export interface AnyOfOptions {}
  *
  * @template TSchemas The alternatives, as a tuple
  * @param schemas The alternatives
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations, `message` and `discriminator`, the key of the property that selects the schema to validate with
  * @returns A schema accepting what any of the schemas accepts
  */
 export function anyOf<const TSchemas extends readonly CombinedSchemaV1[]>(
   schemas: TSchemas,
-  // deno-lint-ignore no-unused-vars
-  options?: AnyOfOptions,
+  options: AnyOfOptions = {},
 ): Schema<InputOf<TSchemas>, OutputOf<TSchemas>, "anyOf"> {
   return createSchema("anyOf", {
     validate: (value, validateOptions) => {
-      const failures: StandardSchemaV1.Issue[] = [];
+      const tryFrom = (
+        selected: readonly CombinedSchemaV1[],
+      ): Result | Promise<Result> => {
+        const failures: StandardSchemaV1.Issue[] = [];
 
-      const tryFrom = (start: number): Result | Promise<Result> => {
-        for (let index = start; index < schemas.length; index++) {
-          const result = validateAsync(schemas[index], value, validateOptions);
-          if (result instanceof Promise) {
-            return result.then((settled) => {
-              if (!settled.issues) return settled;
-              failures.push(...settled.issues);
-              return tryFrom(index + 1);
-            });
+        const next = (start: number): Result | Promise<Result> => {
+          for (let index = start; index < selected.length; index++) {
+            const result = validateAsync(
+              selected[index],
+              value,
+              validateOptions,
+            );
+            if (result instanceof Promise) {
+              return result.then((settled) => {
+                if (!settled.issues) return settled;
+                failures.push(...settled.issues);
+                return next(index + 1);
+              });
+            }
+            if (!result.issues) return result;
+            failures.push(...result.issues);
           }
-          if (!result.issues) return result;
-          failures.push(...result.issues);
-        }
-        return failures.length ? { issues: failures } : failure(
-          "anyOf",
-          "Expected input to match one of the schemas, but there are none",
-        );
+          return failures.length ? { issues: failures } : failure(
+            "anyOf",
+            options.message ??
+              "Expected input to match one of the schemas, but there are none",
+          );
+        };
+        return next(0);
       };
 
-      return tryFrom(0);
+      return chain(
+        select(
+          schemas,
+          options.discriminator,
+          value,
+          validateOptions,
+          options.message,
+        ),
+        (selected) => Array.isArray(selected) ? tryFrom(selected) : selected,
+      ) as Result | Promise<Result>;
     },
     jsonSchema: jsonSchemaOf((convert) => ({
       anyOf: schemas.map((schema) => convert(schema)),
-    })),
+    }), options),
   }) as unknown as Schema<InputOf<TSchemas>, OutputOf<TSchemas>, "anyOf">;
 }
 
 /**
- * Options for {@linkcode oneOf}. Placeholder: no options yet.
+ * Options for {@linkcode oneOf}: the annotations, the message of the issues of
+ * the union itself, and a discriminator.
  */
-// deno-lint-ignore no-empty-interface
-export interface OneOfOptions {}
+export interface OneOfOptions extends CommonOptions {
+  /**
+   * The name of a property that tells the object schemas apart, see the
+   * `discriminator` of {@linkcode AnyOfOptions}. It has no effect on the JSON
+   * Schema.
+   */
+  discriminator?: string;
+}
 
 /**
  * Exactly one of the schemas must accept the value. When none does, the issues
@@ -678,52 +1053,66 @@ export interface OneOfOptions {}
  *
  * @template TSchemas The alternatives, as a tuple
  * @param schemas The alternatives
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations, `message` and `discriminator`, the key of the property that selects the schemas to validate with
  * @returns A schema accepting what exactly one of the schemas accepts
  */
 export function oneOf<const TSchemas extends readonly CombinedSchemaV1[]>(
   schemas: TSchemas,
-  // deno-lint-ignore no-unused-vars
-  options?: OneOfOptions,
+  options: OneOfOptions = {},
 ): Schema<InputOf<TSchemas>, OutputOf<TSchemas>, "oneOf"> {
   return createSchema("oneOf", {
     validate: (value, validateOptions) =>
       chain(
-        collect(
-          schemas.map((schema) =>
-            validateAsync(schema, value, validateOptions)
-          ),
+        select(
+          schemas,
+          options.discriminator,
+          value,
+          validateOptions,
+          options.message,
         ),
-        (results): Result => {
-          const matches = results.filter((result) => !result.issues);
-          if (matches.length === 1) return matches[0];
-          if (matches.length === 0) {
-            // every result failed
-            const issues = (results as StandardSchemaV1.FailureResult[])
-              .flatMap((result) => result.issues);
-            return issues.length ? { issues } : failure(
-              "oneOf",
-              "Expected input to match exactly one schema, matched 0",
-            );
-          }
-          return failure(
-            "oneOf",
-            `Expected input to match exactly one schema, matched ${matches.length}`,
-            { expected: 1, actual: matches.length },
+        (selected) => {
+          if (!Array.isArray(selected)) return selected as Result;
+          return chain(
+            collect(
+              selected.map((schema) =>
+                validateAsync(schema, value, validateOptions)
+              ),
+            ),
+            (results): Result => {
+              const matches = results.filter((result) => !result.issues);
+              if (matches.length === 1) return matches[0];
+              if (matches.length === 0) {
+                // every result failed
+                const issues = (results as StandardSchemaV1.FailureResult[])
+                  .flatMap((result) => result.issues);
+                return issues.length ? { issues } : failure(
+                  "oneOf",
+                  options.message ??
+                    "Expected input to match exactly one schema, matched 0",
+                );
+              }
+              return failure(
+                "oneOf",
+                options.message ??
+                  `Expected input to match exactly one schema, matched ${matches.length}`,
+                { expected: 1, actual: matches.length },
+              );
+            },
           );
         },
-      ),
+      ) as Result | Promise<Result>,
     jsonSchema: jsonSchemaOf((convert) => ({
       oneOf: schemas.map((schema) => convert(schema)),
-    })),
+    }), options),
   }) as unknown as Schema<InputOf<TSchemas>, OutputOf<TSchemas>, "oneOf">;
 }
 
 /**
- * Options for {@linkcode allOf}. Placeholder: no options yet.
+ * Options for {@linkcode allOf}: the annotations. `allOf` and `lazy` report the
+ * issues of the schemas they nest, so there are no issues of their own to give
+ * a `message` to.
  */
-// deno-lint-ignore no-empty-interface
-export interface AllOfOptions {}
+export interface AllOfOptions extends CommonOptions {}
 
 /**
  * Every schema must accept the value; each one validates the original value.
@@ -751,12 +1140,11 @@ export interface AllOfOptions {}
  *
  * @template TSchemas The schemas that must all match, as a tuple
  * @param schemas The schemas that must all match
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations and `message`
  * @returns A schema accepting what all of the schemas accept
  */
 export function allOf<const TSchemas extends readonly CombinedSchemaV1[]>(
   schemas: TSchemas,
-  // deno-lint-ignore no-unused-vars
   options?: AllOfOptions,
 ): Schema<
   UnionToIntersection<InputOf<TSchemas>>,
@@ -791,7 +1179,7 @@ export function allOf<const TSchemas extends readonly CombinedSchemaV1[]>(
       ),
     jsonSchema: jsonSchemaOf((convert) => ({
       allOf: schemas.map((schema) => convert(schema)),
-    })),
+    }), options),
   }) as unknown as Schema<
     UnionToIntersection<InputOf<TSchemas>>,
     UnionToIntersection<OutputOf<TSchemas>>,
@@ -800,10 +1188,9 @@ export function allOf<const TSchemas extends readonly CombinedSchemaV1[]>(
 }
 
 /**
- * Options for {@linkcode not}. Placeholder: no options yet.
+ * Options for {@linkcode not}: the annotations, and the message of its issue.
  */
-// deno-lint-ignore no-empty-interface
-export interface NotOptions {}
+export interface NotOptions extends CommonOptions {}
 
 /**
  * Accepts a value only if `schema` rejects it. The value is passed through
@@ -826,12 +1213,11 @@ export interface NotOptions {}
  * ```
  *
  * @param schema The schema the value must not match
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations and `message`
  * @returns A schema accepting what `schema` rejects
  */
 export function not(
   schema: CombinedSchemaV1,
-  // deno-lint-ignore no-unused-vars
   options?: NotOptions,
 ): Schema<unknown, unknown, "not"> {
   return createSchema("not", {
@@ -841,13 +1227,13 @@ export function not(
         (result): Result =>
           result.issues ? { value } : failure(
             "not",
-            "Expected input not to match the schema",
+            options?.message ?? "Expected input not to match the schema",
             { actual: value },
           ),
       ),
     jsonSchema: jsonSchemaOf((convert) => ({
       not: convert(schema),
-    })),
+    }), options),
   });
 }
 
@@ -856,10 +1242,11 @@ export function not(
 // ---------------------------------------------------------------------------
 
 /**
- * Options for {@linkcode lazy}. Placeholder: no options yet.
+ * Options for {@linkcode lazy}: the annotations. `allOf` and `lazy` report the
+ * issues of the schemas they nest, so there are no issues of their own to give
+ * a `message` to.
  */
-// deno-lint-ignore no-empty-interface
-export interface LazyOptions {}
+export interface LazyOptions extends CommonOptions {}
 
 let lazyCount = 0;
 
@@ -906,12 +1293,11 @@ const converting = new WeakMap<
  *
  * @template TSchema The schema that is resolved
  * @param getter Returns the schema; called once, on first use
- * @param options Placeholder, not used yet
+ * @param options The JSON Schema annotations and `message`
  * @returns A schema delegating to the resolved one
  */
 export function lazy<TSchema extends CombinedSchemaV1>(
   getter: () => TSchema,
-  // deno-lint-ignore no-unused-vars
   options?: LazyOptions,
 ): Schema<
   StandardSchemaV1.InferInput<TSchema>,
@@ -944,7 +1330,7 @@ export function lazy<TSchema extends CombinedSchemaV1>(
       } finally {
         active.delete(anchor);
       }
-    }),
+    }, options),
   }) as unknown as Schema<
     StandardSchemaV1.InferInput<TSchema>,
     StandardSchemaV1.InferOutput<TSchema>,

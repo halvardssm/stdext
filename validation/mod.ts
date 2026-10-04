@@ -63,3 +63,7 @@ export * from "./core.ts";
 export * from "./schemas.ts";
 export * from "./composites.ts";
 export * from "./utils.ts";
+export type {
+  NumberConstraints,
+  PropertyCountConstraints,
+} from "./constraints.ts";

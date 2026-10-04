@@ -6,9 +6,12 @@
  * {@linkcode unknown} and {@linkcode never}, and the wrappers {@linkcode nullable}, {@linkcode optional} and
  * {@linkcode nullish}.
  *
- * Every schema function takes an options argument. The options are
- * placeholders for now: they are accepted and ignored, so constraints (such as
- * a minimum length) can be added later without changing the signatures.
+ * Every schema function takes an options argument. All of them accept the
+ * annotations of JSON Schema (`title`, `description`, ...), which end up in the
+ * JSON Schema, and a `message` that replaces the message of the issues of the
+ * schema itself. {@linkcode string}, {@linkcode integer}, {@linkcode float}
+ * and {@linkcode number} also take the constraints JSON Schema has keywords
+ * for, and {@linkcode optional} and {@linkcode nullish} a `default`.
  *
  * @example
  * ```ts
@@ -29,8 +32,10 @@
  */
 
 import type { StandardSchemaV1 } from "@standard-schema/spec";
+import type { JSONSchema } from "@stdext/json/json-schema/2020-12";
 import {
   type CombinedSchemaV1,
+  type CommonOptions,
   createSchema,
   failure,
   jsonSchemaOf,
@@ -38,7 +43,26 @@ import {
   typeIssue,
   typeOf,
 } from "./core.ts";
+import {
+  checkNumberConstraints,
+  compileStringConstraints,
+  type NumberConstraints,
+  numberIssues,
+  patternSource,
+  pick,
+  stringIssues,
+} from "./constraints.ts";
+import type { StringFormat } from "./formats.ts";
 import { stringify, validateAsync } from "./utils.ts";
+
+/** The number keywords, in JSON Schema. */
+const NUMBER_KEYWORDS = [
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+] as const;
 
 /** A value in a message: strings are quoted, so `"1"` and `1` differ. */
 function show(value: unknown): string {
@@ -46,13 +70,33 @@ function show(value: unknown): string {
 }
 
 /**
- * Options for {@linkcode string}. Placeholder: no options yet.
+ * Options for {@linkcode string}. The constraints are the JSON Schema keywords
+ * of the same name, and are all checked: a string that violates several gets
+ * several issues.
  */
-// deno-lint-ignore no-empty-interface
-export interface StringOptions {}
+export interface StringOptions
+  extends CommonOptions, Pick<JSONSchema, "minLength" | "maxLength"> {
+  /**
+   * A regular expression the string must match, anywhere in it: anchor it with
+   * `^` and `$` to match the whole string. A `RegExp` cannot have flags, as a
+   * JSON Schema pattern has none.
+   */
+  pattern?: string | RegExp;
+  /** A format the string must be in, such as `"email"` or `"uuid"`. */
+  format?: StringFormat;
+}
+
+export type { StringFormat };
 
 /**
- * A string.
+ * A string, optionally constrained by its length, a pattern and a format.
+ *
+ * `format` is checked, not only annotated, for `date-time`, `date`, `time`,
+ * `duration`, `email`, `idn-email`, `hostname`, `idn-hostname`, `ipv4`,
+ * `ipv6`, `uri`, `uri-reference`, `iri`, `iri-reference`, `uri-template`,
+ * `uuid`, `json-pointer`, `relative-json-pointer` and `regex`.
+ *
+ * The JSON Schema is `{ type: "string", minLength, maxLength, pattern, format }`.
  *
  * @example
  * ```ts
@@ -60,36 +104,57 @@ export interface StringOptions {}
  * import { validate } from "./utils.ts";
  * import { assertEquals } from "@std/assert";
  *
- * const schema = string();
+ * const schema = string({ minLength: 3, pattern: /^[a-z]+$/ });
  * // Schema<string, string, "string">
  *
- * assertEquals(validate(schema, "a"), { value: "a" });
+ * assertEquals(validate(schema, "abc"), { value: "abc" });
  * assertEquals(validate(schema, 1).issues?.[0].message, "Expected a string, received number");
+ * // every violated constraint is reported
+ * assertEquals(validate(schema, "AB").issues?.length, 2);
+ *
+ * assertEquals(validate(string({ format: "email" }), "a@b.co"), { value: "a@b.co" });
+ * assertEquals(validate(string({ message: "Invalid id" }), 1).issues?.[0].message, "Invalid id");
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The constraints, annotations and message
  * @returns A schema accepting strings
+ * @throws TypeError if an option is not valid: a bad pattern, an unsupported
+ * format, or a minimum greater than the maximum
  */
 export function string(
-  // deno-lint-ignore no-unused-vars
-  options?: StringOptions,
+  options: StringOptions = {},
 ): Schema<string, string, "string"> {
+  const pattern = compileStringConstraints(options);
+
   return createSchema("string", {
-    validate: (value) =>
-      typeof value === "string" ? { value } : typeIssue("a string", value),
-    jsonSchema: jsonSchemaOf(() => ({ type: "string" })),
+    validate: (value) => {
+      if (typeof value !== "string") {
+        return typeIssue("a string", value, options.message);
+      }
+      const issues = stringIssues(value, options, pattern, options.message);
+      return issues.length ? { issues } : { value };
+    },
+    jsonSchema: jsonSchemaOf(() => ({
+      type: "string",
+      ...pick(options, ["minLength", "maxLength", "format"]),
+      ...(options.pattern === undefined
+        ? {}
+        : { pattern: patternSource(options.pattern) }),
+    }), options),
   });
 }
 
 /**
- * Options for {@linkcode integer}. Placeholder: no options yet.
+ * Options for {@linkcode integer}. The constraints are the JSON Schema keywords
+ * of the same name, and are all checked.
  */
-// deno-lint-ignore no-empty-interface
-export interface IntegerOptions {}
+export interface IntegerOptions extends CommonOptions, NumberConstraints {}
 
 /**
- * An integer: a number without a fractional part. `1`, `1.0` and `1e20` are
- * integers, `1.5`, `NaN` and `Infinity` are not.
+ * An integer: a number without a fractional part (`1`, `1.0` and `1e20` are integers), optionally constrained by a range and a divisor.
+ *
+ * The JSON Schema is `{ type: "integer", minimum, maximum, exclusiveMinimum,
+ * exclusiveMaximum, multipleOf }`.
  *
  * @example
  * ```ts
@@ -97,38 +162,51 @@ export interface IntegerOptions {}
  * import { validate } from "./utils.ts";
  * import { assertEquals } from "@std/assert";
  *
- * const schema = integer();
+ * const schema = integer({ minimum: 1, maximum: 10 });
  * // Schema<number, number, "integer">
  *
- * assertEquals(validate(schema, 1), { value: 1 });
- * assertEquals(validate(schema, 1.5).issues?.length, 1);
+ * assertEquals(validate(schema, 5), { value: 5 });
+ * assertEquals(validate(schema, 11).issues?.[0].message, "Expected a number of at most 10, received 11");
+ * assertEquals(validate(schema, 0.5).issues?.[0].message, "Expected an integer, received number");
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The constraints, annotations and message
  * @returns A schema accepting integers
+ * @throws TypeError if an option is not valid: a non-finite limit, a
+ * `multipleOf` that is not greater than 0, or a minimum greater than the
+ * maximum
  */
 export function integer(
-  // deno-lint-ignore no-unused-vars
-  options?: IntegerOptions,
+  options: IntegerOptions = {},
 ): Schema<number, number, "integer"> {
+  checkNumberConstraints(options);
+
   return createSchema("integer", {
-    validate: (value) =>
-      typeof value === "number" && Number.isInteger(value)
-        ? { value }
-        : typeIssue("an integer", value),
-    jsonSchema: jsonSchemaOf(() => ({ type: "integer" })),
+    validate: (value) => {
+      if (!(typeof value === "number" && Number.isInteger(value))) {
+        return typeIssue("an integer", value, options.message);
+      }
+      const issues = numberIssues(value as number, options, options.message);
+      return issues.length ? { issues } : { value: value as number };
+    },
+    jsonSchema: jsonSchemaOf(() => ({
+      type: "integer",
+      ...pick(options, NUMBER_KEYWORDS),
+    }), options),
   });
 }
 
 /**
- * Options for {@linkcode float}. Placeholder: no options yet.
+ * Options for {@linkcode float}. The constraints are the JSON Schema keywords
+ * of the same name, and are all checked.
  */
-// deno-lint-ignore no-empty-interface
-export interface FloatOptions {}
+export interface FloatOptions extends CommonOptions, NumberConstraints {}
 
 /**
- * A finite floating point number. Integers are floats too; `NaN` and
- * `Infinity` are not accepted.
+ * A finite floating point number (integers are floats too; `NaN` and `Infinity` are not accepted), optionally constrained by a range and a divisor.
+ *
+ * The JSON Schema is `{ type: "number", minimum, maximum, exclusiveMinimum,
+ * exclusiveMaximum, multipleOf }`.
  *
  * @example
  * ```ts
@@ -136,41 +214,51 @@ export interface FloatOptions {}
  * import { validate } from "./utils.ts";
  * import { assertEquals } from "@std/assert";
  *
- * const schema = float();
+ * const schema = float({ minimum: 1, maximum: 10 });
  * // Schema<number, number, "float">
  *
  * assertEquals(validate(schema, 1.5), { value: 1.5 });
- * assertEquals(validate(schema, NaN).issues?.length, 1);
+ * assertEquals(validate(schema, 11).issues?.[0].message, "Expected a number of at most 10, received 11");
+ * assertEquals(validate(schema, NaN).issues?.[0].message, "Expected a finite number, received number");
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The constraints, annotations and message
  * @returns A schema accepting finite numbers
+ * @throws TypeError if an option is not valid: a non-finite limit, a
+ * `multipleOf` that is not greater than 0, or a minimum greater than the
+ * maximum
  */
 export function float(
-  // deno-lint-ignore no-unused-vars
-  options?: FloatOptions,
+  options: FloatOptions = {},
 ): Schema<number, number, "float"> {
+  checkNumberConstraints(options);
+
   return createSchema("float", {
-    validate: (value) =>
-      typeof value === "number" && Number.isFinite(value)
-        ? { value }
-        : typeIssue("a finite number", value),
-    jsonSchema: jsonSchemaOf(() => ({ type: "number" })),
+    validate: (value) => {
+      if (!(typeof value === "number" && Number.isFinite(value))) {
+        return typeIssue("a finite number", value, options.message);
+      }
+      const issues = numberIssues(value as number, options, options.message);
+      return issues.length ? { issues } : { value: value as number };
+    },
+    jsonSchema: jsonSchemaOf(() => ({
+      type: "number",
+      ...pick(options, NUMBER_KEYWORDS),
+    }), options),
   });
 }
 
 /**
- * Options for {@linkcode number}. Placeholder: no options yet.
+ * Options for {@linkcode number}. The constraints are the JSON Schema keywords
+ * of the same name, and are all checked.
  */
-// deno-lint-ignore no-empty-interface
-export interface NumberOptions {}
+export interface NumberOptions extends CommonOptions, NumberConstraints {}
 
 /**
- * Any JavaScript number, including `NaN` and `Infinity`. Use {@linkcode float}
- * for finite numbers and {@linkcode integer} for integers.
+ * Any JavaScript number, including `NaN` and `Infinity`. Use {@linkcode float} for finite numbers and {@linkcode integer} for integers. The JSON Schema cannot express `NaN` or `Infinity`, optionally constrained by a range and a divisor.
  *
- * The JSON Schema is `{ type: "number" }`, which cannot express `NaN` or
- * `Infinity`.
+ * The JSON Schema is `{ type: "number", minimum, maximum, exclusiveMinimum,
+ * exclusiveMaximum, multipleOf }`.
  *
  * @example
  * ```ts
@@ -178,33 +266,45 @@ export interface NumberOptions {}
  * import { validate } from "./utils.ts";
  * import { assertEquals } from "@std/assert";
  *
- * const schema = number();
+ * const schema = number({ minimum: 1, maximum: 10 });
  * // Schema<number, number, "number">
  *
  * assertEquals(validate(schema, 1.5), { value: 1.5 });
- * assertEquals(validate(schema, Infinity), { value: Infinity });
- * assertEquals(validate(schema, "1").issues?.length, 1);
+ * assertEquals(validate(schema, 11).issues?.[0].message, "Expected a number of at most 10, received 11");
+ * assertEquals(validate(schema, "1").issues?.[0].message, "Expected a number, received string");
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The constraints, annotations and message
  * @returns A schema accepting numbers
+ * @throws TypeError if an option is not valid: a non-finite limit, a
+ * `multipleOf` that is not greater than 0, or a minimum greater than the
+ * maximum
  */
 export function number(
-  // deno-lint-ignore no-unused-vars
-  options?: NumberOptions,
+  options: NumberOptions = {},
 ): Schema<number, number, "number"> {
+  checkNumberConstraints(options);
+
   return createSchema("number", {
-    validate: (value) =>
-      typeof value === "number" ? { value } : typeIssue("a number", value),
-    jsonSchema: jsonSchemaOf(() => ({ type: "number" })),
+    validate: (value) => {
+      if (!(typeof value === "number")) {
+        return typeIssue("a number", value, options.message);
+      }
+      const issues = numberIssues(value as number, options, options.message);
+      return issues.length ? { issues } : { value: value as number };
+    },
+    jsonSchema: jsonSchemaOf(() => ({
+      type: "number",
+      ...pick(options, NUMBER_KEYWORDS),
+    }), options),
   });
 }
 
 /**
- * Options for {@linkcode boolean}. Placeholder: no options yet.
+ * Options for {@linkcode boolean}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface BooleanOptions {}
+export interface BooleanOptions extends CommonOptions {}
 
 /**
  * A boolean.
@@ -222,24 +322,33 @@ export interface BooleanOptions {}
  * assertEquals(validate(schema, 0).issues?.length, 1);
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting booleans
  */
 export function boolean(
-  // deno-lint-ignore no-unused-vars
   options?: BooleanOptions,
 ): Schema<boolean, boolean, "boolean"> {
   return createSchema("boolean", {
     validate: (value) =>
-      typeof value === "boolean" ? { value } : typeIssue("a boolean", value),
-    jsonSchema: jsonSchemaOf(() => ({ type: "boolean" })),
+      typeof value === "boolean"
+        ? { value }
+        : typeIssue("a boolean", value, options?.message),
+    jsonSchema: jsonSchemaOf(() => ({ type: "boolean" }), options),
   });
+}
+
+/** What the value of a `default` option is: the value, or a function making it. */
+function resolveDefault(value: unknown): unknown {
+  return typeof value === "function" ? value() : value;
 }
 
 /**
  * The schema behind {@linkcode nullable}, {@linkcode optional} and
  * {@linkcode nullish}: values for which `isExtra` is true are accepted as they
  * are, every other value is validated by `schema`.
+ *
+ * `undefined` is replaced by `options.default` when there is one, and then
+ * validated by `schema` like any other value.
  *
  * With `addsNull` the JSON Schema is `{ anyOf: [<schema>, { type: "null" }] }`,
  * otherwise it is the one of `schema`: JSON has no `undefined`, so whether a
@@ -250,23 +359,35 @@ function wrap<TSchema extends CombinedSchemaV1, TExtra, TKind extends string>(
   schema: TSchema,
   isExtra: (value: unknown) => value is TExtra,
   addsNull: boolean,
+  options: CommonOptions & { default?: unknown } = {},
 ): Schema<
   StandardSchemaV1.InferInput<TSchema> | TExtra,
   StandardSchemaV1.InferOutput<TSchema> | TExtra,
   TKind
 > {
+  const hasDefault = options.default !== undefined;
+
   // The nested schema is only known as `CombinedSchemaV1` inside, so the
   // result is restated in terms of its inferred input and output types.
   return createSchema(kind, {
-    validate: (value, validateOptions) =>
-      isExtra(value)
+    validate: (value, validateOptions) => {
+      if (value === undefined && hasDefault) {
+        return validateAsync(
+          schema,
+          resolveDefault(options.default),
+          validateOptions,
+        );
+      }
+      return isExtra(value)
         ? { value }
-        : validateAsync(schema, value, validateOptions),
-    jsonSchema: jsonSchemaOf((convert) =>
-      addsNull
+        : validateAsync(schema, value, validateOptions);
+    },
+    jsonSchema: jsonSchemaOf((convert) => ({
+      ...(addsNull
         ? { anyOf: [convert(schema), { type: "null" }] }
-        : convert(schema)
-    ),
+        : convert(schema)),
+      ...(hasDefault ? { default: resolveDefault(options.default) } : {}),
+    }), options),
   }) as unknown as Schema<
     StandardSchemaV1.InferInput<TSchema> | TExtra,
     StandardSchemaV1.InferOutput<TSchema> | TExtra,
@@ -275,10 +396,10 @@ function wrap<TSchema extends CombinedSchemaV1, TExtra, TKind extends string>(
 }
 
 /**
- * Options for {@linkcode nullable}. Placeholder: no options yet.
+ * Options for {@linkcode nullable}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface NullableOptions {}
+export interface NullableOptions extends CommonOptions {}
 
 /**
  * Accepts `null` in addition to what `schema` accepts. Any other value is
@@ -306,12 +427,11 @@ export interface NullableOptions {}
  *
  * @template TSchema The schema for the values that are not `null`
  * @param schema The schema for values that are not `null`
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting `null` and what `schema` accepts
  */
 export function nullable<TSchema extends CombinedSchemaV1>(
   schema: TSchema,
-  // deno-lint-ignore no-unused-vars
   options?: NullableOptions,
 ): Schema<
   StandardSchemaV1.InferInput<TSchema> | null,
@@ -323,14 +443,24 @@ export function nullable<TSchema extends CombinedSchemaV1>(
     schema,
     (value): value is null => value === null,
     true,
+    options,
   );
 }
 
 /**
- * Options for {@linkcode optional}. Placeholder: no options yet.
+ * Options for {@linkcode optional}: the annotations, and a `default`.
+ *
+ * @template TDefault The type of the default value: the input type of the schema
  */
-// deno-lint-ignore no-empty-interface
-export interface OptionalOptions {}
+export interface OptionalOptions<TDefault = unknown> extends CommonOptions {
+  /**
+   * A value used instead of `undefined`, or a function making it, for a fresh
+   * value each time. It is validated by the schema like any other value, so it
+   * has the schema's input type, and the output type no longer includes
+   * `undefined`. It is the `default` of the JSON Schema.
+   */
+  default?: TDefault | (() => TDefault);
+}
 
 /**
  * Accepts `undefined` in addition to what `schema` accepts. Any other value is
@@ -360,31 +490,55 @@ export interface OptionalOptions {}
  *
  * @template TSchema The schema for the values that are not `undefined`
  * @param schema The schema for values that are not `undefined`
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting `undefined` and what `schema` accepts
  */
 export function optional<TSchema extends CombinedSchemaV1>(
   schema: TSchema,
-  // deno-lint-ignore no-unused-vars
-  options?: OptionalOptions,
+  options: OptionalOptions<StandardSchemaV1.InferInput<TSchema>> & {
+    default:
+      | StandardSchemaV1.InferInput<TSchema>
+      | (() => StandardSchemaV1.InferInput<TSchema>);
+  },
+): Schema<
+  StandardSchemaV1.InferInput<TSchema> | undefined,
+  StandardSchemaV1.InferOutput<TSchema>,
+  "optional"
+>;
+/**
+ * Without a `default`, the output type includes `undefined`.
+ *
+ * @template TSchema The schema for the other values
+ * @param schema The schema for the other values
+ * @param options The annotations and message
+ * @returns A schema accepting `undefined` and what `schema` accepts
+ */
+export function optional<TSchema extends CombinedSchemaV1>(
+  schema: TSchema,
+  options?: OptionalOptions<never>,
 ): Schema<
   StandardSchemaV1.InferInput<TSchema> | undefined,
   StandardSchemaV1.InferOutput<TSchema> | undefined,
   "optional"
-> {
+>;
+export function optional(
+  schema: CombinedSchemaV1,
+  options: OptionalOptions = {},
+): Schema<unknown, unknown, "optional"> {
   return wrap(
     "optional",
     schema,
     (value): value is undefined => value === undefined,
     false,
+    options,
   );
 }
 
 /**
- * Options for {@linkcode null_}. Placeholder: no options yet.
+ * Options for {@linkcode null_}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface NullOptions {}
+export interface NullOptions extends CommonOptions {}
 
 /**
  * The value `null`. Named `null_` because `null` is a reserved word. To accept
@@ -403,24 +557,24 @@ export interface NullOptions {}
  * assertEquals(validate(schema, undefined).issues?.length, 1);
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting only `null`
  */
 export function null_(
-  // deno-lint-ignore no-unused-vars
   options?: NullOptions,
 ): Schema<null, null, "null"> {
   return createSchema("null", {
-    validate: (value) => value === null ? { value } : typeIssue("null", value),
-    jsonSchema: jsonSchemaOf(() => ({ type: "null" })),
+    validate: (value) =>
+      value === null ? { value } : typeIssue("null", value, options?.message),
+    jsonSchema: jsonSchemaOf(() => ({ type: "null" }), options),
   });
 }
 
 /**
- * Options for {@linkcode literal}. Placeholder: no options yet.
+ * Options for {@linkcode literal}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface LiteralOptions {}
+export interface LiteralOptions extends CommonOptions {}
 
 /**
  * Exactly one value, compared with `===`. The type is the literal type of the
@@ -443,30 +597,30 @@ export interface LiteralOptions {}
  *
  * @template T The literal type of the value
  * @param literalValue The only accepted value
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting only that value
  */
 export function literal<const T extends string | number | boolean | null>(
   literalValue: T,
-  // deno-lint-ignore no-unused-vars
   options?: LiteralOptions,
 ): Schema<T, T, "literal"> {
   return createSchema("literal", {
     validate: (value) =>
       value === literalValue ? { value: literalValue } : failure(
         "literal",
-        `Expected ${show(literalValue)}, received ${show(value)}`,
+        options?.message ??
+          `Expected ${show(literalValue)}, received ${show(value)}`,
         { expected: literalValue, actual: value },
       ),
-    jsonSchema: jsonSchemaOf(() => ({ const: literalValue })),
+    jsonSchema: jsonSchemaOf(() => ({ const: literalValue }), options),
   }) as unknown as Schema<T, T, "literal">;
 }
 
 /**
- * Options for {@linkcode enumerator}. Placeholder: no options yet.
+ * Options for {@linkcode enumerator}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface EnumeratorOptions {}
+export interface EnumeratorOptions extends CommonOptions {}
 
 /**
  * One of several values, compared with `===`. The type is the union of the
@@ -489,14 +643,13 @@ export interface EnumeratorOptions {}
  *
  * @template T The tuple of accepted values
  * @param values The accepted values
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting only those values
  */
 export function enumerator<
   const T extends readonly (string | number | boolean | null)[],
 >(
   values: T,
-  // deno-lint-ignore no-unused-vars
   options?: EnumeratorOptions,
 ): Schema<T[number], T[number], "enumerator"> {
   return createSchema("enumerator", {
@@ -505,18 +658,21 @@ export function enumerator<
         ? { value: value as T[number] }
         : failure(
           "enumerator",
-          `Expected one of ${JSON.stringify(values)}, received ${show(value)}`,
+          options?.message ??
+            `Expected one of ${JSON.stringify(values)}, received ${
+              show(value)
+            }`,
           { expected: values, actual: value },
         ),
-    jsonSchema: jsonSchemaOf(() => ({ enum: [...values] })),
+    jsonSchema: jsonSchemaOf(() => ({ enum: [...values] }), options),
   });
 }
 
 /**
- * Options for {@linkcode unknown}. Placeholder: no options yet.
+ * Options for {@linkcode unknown}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface UnknownOptions {}
+export interface UnknownOptions extends CommonOptions {}
 
 /**
  * Any value. The JSON Schema is `{}`, which accepts everything.
@@ -534,24 +690,23 @@ export interface UnknownOptions {}
  * assertEquals(validate(schema, undefined), { value: undefined });
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting every value
  */
 export function unknown(
-  // deno-lint-ignore no-unused-vars
   options?: UnknownOptions,
 ): Schema<unknown, unknown, "unknown"> {
   return createSchema("unknown", {
     validate: (value) => ({ value }),
-    jsonSchema: jsonSchemaOf(() => ({})),
+    jsonSchema: jsonSchemaOf(() => ({}), options),
   });
 }
 
 /**
- * Options for {@linkcode never}. Placeholder: no options yet.
+ * Options for {@linkcode never}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface NeverOptions {}
+export interface NeverOptions extends CommonOptions {}
 
 /**
  * No value: every value is rejected. The JSON Schema is `{ not: {} }`, which
@@ -569,24 +724,32 @@ export interface NeverOptions {}
  * assertEquals(validate(schema, 1).issues?.[0].message, "Expected no value, received number");
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema rejecting every value
  */
 export function never(
-  // deno-lint-ignore no-unused-vars
   options?: NeverOptions,
 ): Schema<never, never, "never"> {
   return createSchema("never", {
-    validate: (value) => typeIssue("no value", value),
-    jsonSchema: jsonSchemaOf(() => ({ not: {} })),
+    validate: (value) => typeIssue("no value", value, options?.message),
+    jsonSchema: jsonSchemaOf(() => ({ not: {} }), options),
   });
 }
 
 /**
- * Options for {@linkcode nullish}. Placeholder: no options yet.
+ * Options for {@linkcode nullish}: the annotations, and a `default`.
+ *
+ * @template TDefault The type of the default value: the input type of the schema
  */
-// deno-lint-ignore no-empty-interface
-export interface NullishOptions {}
+export interface NullishOptions<TDefault = unknown> extends CommonOptions {
+  /**
+   * A value used instead of `undefined` (`null` stays `null`), or a function making it, for a fresh
+   * value each time. It is validated by the schema like any other value, so it
+   * has the schema's input type, and the output type no longer includes
+   * `undefined`. It is the `default` of the JSON Schema.
+   */
+  default?: TDefault | (() => TDefault);
+}
 
 /**
  * Accepts `null` and `undefined` in addition to what `schema` accepts: the
@@ -610,31 +773,55 @@ export interface NullishOptions {}
  *
  * @template TSchema The schema for the values that are neither `null` nor `undefined`
  * @param schema The schema for values that are neither `null` nor `undefined`
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting `null`, `undefined` and what `schema` accepts
  */
 export function nullish<TSchema extends CombinedSchemaV1>(
   schema: TSchema,
-  // deno-lint-ignore no-unused-vars
-  options?: NullishOptions,
+  options: NullishOptions<StandardSchemaV1.InferInput<TSchema>> & {
+    default:
+      | StandardSchemaV1.InferInput<TSchema>
+      | (() => StandardSchemaV1.InferInput<TSchema>);
+  },
+): Schema<
+  StandardSchemaV1.InferInput<TSchema> | null | undefined,
+  StandardSchemaV1.InferOutput<TSchema> | null,
+  "nullish"
+>;
+/**
+ * Without a `default`, the output type includes `null | undefined`.
+ *
+ * @template TSchema The schema for the other values
+ * @param schema The schema for the other values
+ * @param options The annotations and message
+ * @returns A schema accepting `null | undefined` and what `schema` accepts
+ */
+export function nullish<TSchema extends CombinedSchemaV1>(
+  schema: TSchema,
+  options?: NullishOptions<never>,
 ): Schema<
   StandardSchemaV1.InferInput<TSchema> | null | undefined,
   StandardSchemaV1.InferOutput<TSchema> | null | undefined,
   "nullish"
-> {
+>;
+export function nullish(
+  schema: CombinedSchemaV1,
+  options: NullishOptions = {},
+): Schema<unknown, unknown, "nullish"> {
   return wrap(
     "nullish",
     schema,
     (value): value is null | undefined => value === null || value === undefined,
     true,
+    options,
   );
 }
 
 /**
- * Options for {@linkcode symbol}. Placeholder: no options yet.
+ * Options for {@linkcode symbol}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface SymbolOptions {}
+export interface SymbolOptions extends CommonOptions {}
 
 /**
  * A symbol, such as `Symbol("id")` or `Symbol.iterator`.
@@ -655,25 +842,26 @@ export interface SymbolOptions {}
  * assertEquals(validate(schema, "id").issues?.[0].message, "Expected a symbol, received string");
  * ```
  *
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting symbols
  */
 export function symbol(
-  // deno-lint-ignore no-unused-vars
   options?: SymbolOptions,
 ): Schema<symbol, symbol, "symbol"> {
   return createSchema("symbol", {
     validate: (value) =>
-      typeof value === "symbol" ? { value } : typeIssue("a symbol", value),
-    jsonSchema: jsonSchemaOf(() => ({})),
+      typeof value === "symbol"
+        ? { value }
+        : typeIssue("a symbol", value, options?.message),
+    jsonSchema: jsonSchemaOf(() => ({}), options),
   });
 }
 
 /**
- * Options for {@linkcode instanceOf}. Placeholder: no options yet.
+ * Options for {@linkcode instanceOf}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface InstanceOfOptions {}
+export interface InstanceOfOptions extends CommonOptions {}
 
 /** A class, including abstract classes and built-ins such as `Date`. */
 // deno-lint-ignore no-explicit-any
@@ -717,12 +905,11 @@ function receivedType(value: unknown): string {
  *
  * @template TClass The class
  * @param constructor The class
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting instances of the class
  */
 export function instanceOf<TClass extends Class>(
   constructor: TClass,
-  // deno-lint-ignore no-unused-vars
   options?: InstanceOfOptions,
 ): Schema<InstanceType<TClass>, InstanceType<TClass>, "instanceOf"> {
   return createSchema("instanceOf", {
@@ -731,20 +918,21 @@ export function instanceOf<TClass extends Class>(
         ? { value: value as InstanceType<TClass> }
         : failure(
           "instanceOf",
-          `Expected an instance of ${
-            constructor.name || "the class"
-          }, received ${receivedType(value)}`,
+          options?.message ??
+            `Expected an instance of ${
+              constructor.name || "the class"
+            }, received ${receivedType(value)}`,
           { expected: constructor, actual: value },
         ),
-    jsonSchema: jsonSchemaOf(() => ({})),
+    jsonSchema: jsonSchemaOf(() => ({}), options),
   });
 }
 
 /**
- * Options for {@linkcode func}. Placeholder: no options yet.
+ * Options for {@linkcode func}: the annotations, and the message of the issues of
+ * the schema.
  */
-// deno-lint-ignore no-empty-interface
-export interface FuncOptions {}
+export interface FuncOptions extends CommonOptions {}
 
 /** Any function. */
 // deno-lint-ignore no-explicit-any
@@ -781,18 +969,17 @@ export type AnyFunction = (...args: any[]) => any;
  * ```
  *
  * @template TFunction The type of the function
- * @param options Placeholder, not used yet
+ * @param options The annotations and message
  * @returns A schema accepting functions
  */
 export function func<TFunction extends AnyFunction = AnyFunction>(
-  // deno-lint-ignore no-unused-vars
   options?: FuncOptions,
 ): Schema<TFunction, TFunction, "function"> {
   return createSchema("function", {
     validate: (value) =>
       typeof value === "function"
         ? { value: value as TFunction }
-        : typeIssue("a function", value),
-    jsonSchema: jsonSchemaOf(() => ({})),
+        : typeIssue("a function", value, options?.message),
+    jsonSchema: jsonSchemaOf(() => ({}), options),
   });
 }

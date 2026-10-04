@@ -57,9 +57,8 @@ toJSONSchema(plain, { silent: true }); // undefined
 
 ## Ready-made schemas
 
-Schemas built with `createSchema`, each with a placeholder `options` argument
-for constraints that will be added later. Every one has its own JSON Schema, and
-its types are inferred.
+Schemas built with `createSchema`. Every one has its own JSON Schema, its types
+are inferred, and it takes an `options` argument (see [Options](#options)).
 
 | Schema                  | Accepts                                                                                                          | Type                              |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------- |
@@ -162,6 +161,53 @@ if (isValid(closable, value)) {
 
 `shape({})` accepts any non-null object. The property schemas only check, so
 what they output is not used.
+
+### Options
+
+Options are named after the JSON Schema keywords, and the ones that have an
+equivalent are exported to the generated JSON Schema.
+
+- **All schemas**: `title`, `description`, `examples`, `deprecated`, `readOnly`,
+  `writeOnly` and `$comment` are added to the JSON Schema. `message` replaces
+  the default message of the issues the schema reports itself.
+- **`string`**: `minLength`, `maxLength` (in code points), `pattern` (a string
+  or a `RegExp`) and `format` (`date-time`, `date`, `time`, `duration`, `email`,
+  `idn-email`, `hostname`, `idn-hostname`, `ipv4`, `ipv6`, `uri`,
+  `uri-reference`, `iri`, `iri-reference`, `uri-template`, `uuid`,
+  `json-pointer`, `relative-json-pointer` and `regex`).
+- **`integer`, `float`, `number`**: `minimum`, `maximum`, `exclusiveMinimum`,
+  `exclusiveMaximum` and `multipleOf`.
+- **`array`**: `minItems`, `maxItems`, `uniqueItems`, and `contains` with
+  `minContains` and `maxContains`.
+- **`tuple`**: `rest` for the items after the listed ones, and
+  `minItems`/`maxItems`.
+- **`object`**: `additionalProperties` (`false` rejects unknown keys, `true`
+  keeps them, a schema validates and keeps them; unknown keys are removed by
+  default) and `minProperties`/`maxProperties`.
+- **`shape`**: `minProperties` and `maxProperties`.
+- **`record`**: `keys`, a schema for every key (`propertyNames`), and
+  `minProperties`/`maxProperties`.
+- **`optional`, `nullish`**: `default`, a value or a function that returns one,
+  used when the input is `undefined`. The output type no longer includes
+  `undefined`.
+- **`anyOf`, `oneOf`**: `discriminator`, the key of a property that selects the
+  schema to validate with, so only its issues are reported.
+
+Options that are not valid, such as `minLength: -1` or `minItems` greater than
+`maxItems`, throw a `TypeError` when the schema is created.
+
+```ts
+import { array, integer, object, string, validate } from "@stdext/validation";
+
+const user = object({
+  name: string({ minLength: 1, message: "Name is required" }),
+  email: string({ format: "email" }),
+  age: integer({ minimum: 0 }),
+  tags: array(string(), { uniqueItems: true, maxItems: 5 }),
+}, { additionalProperties: false });
+
+validate(user, { name: "", email: "x", age: -1, tags: [], extra: 1 });
+```
 
 ## Creating a schema
 
@@ -358,4 +404,4 @@ own schemas:
 | `TupleInput`, `TupleOutput`   | The types of a `tuple` schema.                                                   |
 
 Every schema function has a matching `...Options` interface (`StringOptions`,
-`ObjectOptions`, ...). They are empty placeholders for now.
+`ObjectOptions`, ...).
