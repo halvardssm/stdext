@@ -184,6 +184,7 @@ export type ObjectOutput<
  * assertEquals(validate(entity, { [id]: 1 }).issues?.[0].path, [id]);
  * ```
  *
+ * @template TProperties The schema of every property, by key
  * @param properties The schema of every property
  * @param options Placeholder, not used yet
  * @returns A schema accepting objects with those properties
@@ -272,6 +273,7 @@ export interface ArrayOptions {}
  * assertEquals(validate(schema, ["a", 1]).issues?.[0].path, [1]);
  * ```
  *
+ * @template TItem The schema of the items
  * @param item The schema of every item
  * @param options Placeholder, not used yet
  * @returns A schema accepting arrays of items
@@ -340,6 +342,7 @@ export interface RecordOptions {}
  * assertEquals(validate(schema, { a: 1, b: "2" }).issues?.[0].path, ["b"]);
  * ```
  *
+ * @template TValue The schema of the values
  * @param value The schema of every value
  * @param options Placeholder, not used yet
  * @returns A schema accepting objects with values of that schema
@@ -417,6 +420,7 @@ export type TupleOutput<TItems extends readonly CombinedSchemaV1[]> = {
  * assertEquals(validate(schema, [1, 1.5]).issues?.[0].path, [0]);
  * ```
  *
+ * @template TItems The schemas of the positions, as a tuple
  * @param items The schema of every position
  * @param options Placeholder, not used yet
  * @returns A schema accepting arrays of that shape
@@ -501,6 +505,7 @@ export interface AnyOfOptions {}
  * assertEquals(validate(schema, "other").issues?.length, 2);
  * ```
  *
+ * @template TSchemas The alternatives, as a tuple
  * @param schemas The alternatives
  * @param options Placeholder, not used yet
  * @returns A schema accepting what any of the schemas accepts
@@ -567,6 +572,7 @@ export interface OneOfOptions {}
  * assertEquals(validate(schema, 1).issues?.[0].message, "Expected input to match exactly one schema, matched 2");
  * ```
  *
+ * @template TSchemas The alternatives, as a tuple
  * @param schemas The alternatives
  * @param options Placeholder, not used yet
  * @returns A schema accepting what exactly one of the schemas accepts
@@ -588,7 +594,9 @@ export function oneOf<const TSchemas extends readonly CombinedSchemaV1[]>(
           const matches = results.filter((result) => !result.issues);
           if (matches.length === 1) return matches[0];
           if (matches.length === 0) {
-            const issues = results.flatMap((result) => result.issues ?? []);
+            // every result failed
+            const issues = (results as StandardSchemaV1.FailureResult[])
+              .flatMap((result) => result.issues);
             return issues.length ? { issues } : failure(
               "oneOf",
               "Expected input to match exactly one schema, matched 0",
@@ -637,6 +645,7 @@ export interface AllOfOptions {}
  * assertEquals(validate(schema, { name: "Alice" }).issues?.[0].path, ["age"]);
  * ```
  *
+ * @template TSchemas The schemas that must all match, as a tuple
  * @param schemas The schemas that must all match
  * @param options Placeholder, not used yet
  * @returns A schema accepting what all of the schemas accept
@@ -791,6 +800,7 @@ const converting = new WeakMap<
  * );
  * ```
  *
+ * @template TSchema The schema that is resolved
  * @param getter Returns the schema; called once, on first use
  * @param options Placeholder, not used yet
  * @returns A schema delegating to the resolved one

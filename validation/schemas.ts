@@ -85,7 +85,7 @@ export function string(
  * Options for {@linkcode integer}. Placeholder: no options yet.
  */
 // deno-lint-ignore no-empty-interface
-export interface IntOptions {}
+export interface IntegerOptions {}
 
 /**
  * An integer: a number without a fractional part. `1`, `1.0` and `1e20` are
@@ -109,7 +109,7 @@ export interface IntOptions {}
  */
 export function integer(
   // deno-lint-ignore no-unused-vars
-  options?: IntOptions,
+  options?: IntegerOptions,
 ): Schema<number, number, "integer"> {
   return createSchema("integer", {
     validate: (value) =>
@@ -204,7 +204,7 @@ export function number(
  * Options for {@linkcode boolean}. Placeholder: no options yet.
  */
 // deno-lint-ignore no-empty-interface
-export interface BoolOptions {}
+export interface BooleanOptions {}
 
 /**
  * A boolean.
@@ -227,7 +227,7 @@ export interface BoolOptions {}
  */
 export function boolean(
   // deno-lint-ignore no-unused-vars
-  options?: BoolOptions,
+  options?: BooleanOptions,
 ): Schema<boolean, boolean, "boolean"> {
   return createSchema("boolean", {
     validate: (value) =>
@@ -304,6 +304,7 @@ export interface NullableOptions {}
  * );
  * ```
  *
+ * @template TSchema The schema for the values that are not `null`
  * @param schema The schema for values that are not `null`
  * @param options Placeholder, not used yet
  * @returns A schema accepting `null` and what `schema` accepts
@@ -357,6 +358,7 @@ export interface OptionalOptions {}
  * );
  * ```
  *
+ * @template TSchema The schema for the values that are not `undefined`
  * @param schema The schema for values that are not `undefined`
  * @param options Placeholder, not used yet
  * @returns A schema accepting `undefined` and what `schema` accepts
@@ -439,6 +441,7 @@ export interface LiteralOptions {}
  * assertEquals(validate(schema, "user").issues?.[0].message, 'Expected "admin", received "user"');
  * ```
  *
+ * @template T The literal type of the value
  * @param literalValue The only accepted value
  * @param options Placeholder, not used yet
  * @returns A schema accepting only that value
@@ -484,6 +487,7 @@ export interface EnumeratorOptions {}
  * assertEquals(validate(schema, "dim").issues?.[0].message, 'Expected one of ["on","off"], received "dim"');
  * ```
  *
+ * @template T The tuple of accepted values
  * @param values The accepted values
  * @param options Placeholder, not used yet
  * @returns A schema accepting only those values
@@ -497,7 +501,7 @@ export function enumerator<
 ): Schema<T[number], T[number], "enumerator"> {
   return createSchema("enumerator", {
     validate: (value) =>
-      values.includes(value as T[number])
+      values.some((accepted) => accepted === value)
         ? { value: value as T[number] }
         : failure(
           "enumerator",
@@ -604,6 +608,7 @@ export interface NullishOptions {}
  * assertEquals(validate(schema, "a"), { value: "a" });
  * ```
  *
+ * @template TSchema The schema for the values that are neither `null` nor `undefined`
  * @param schema The schema for values that are neither `null` nor `undefined`
  * @param options Placeholder, not used yet
  * @returns A schema accepting `null`, `undefined` and what `schema` accepts
@@ -710,6 +715,7 @@ function receivedType(value: unknown): string {
  * );
  * ```
  *
+ * @template TClass The class
  * @param constructor The class
  * @param options Placeholder, not used yet
  * @returns A schema accepting instances of the class

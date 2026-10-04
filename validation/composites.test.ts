@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { assert, assertEquals } from "@std/assert";
 import {
   allOf,
@@ -819,4 +820,60 @@ Deno.test("composites nest sync and async schemas", async (t) => {
       ["names", 0],
     );
   });
+});
+
+Deno.test("composites pass the validate options on to nested schemas", async (t) => {
+  const options = { libraryOptions: { strict: true } };
+
+  /** A schema that records the options it is validated with. */
+  function recording(received: unknown[]) {
+    return createSchema("recording", {
+      validate: (value, validateOptions) => {
+        received.push(validateOptions);
+        return { value };
+      },
+      jsonSchema: { input: () => ({}), output: () => ({}) },
+    });
+  }
+
+  const cases: Record<
+    string,
+    (inner: ReturnType<typeof recording>) => {
+      schema: StandardSchemaV1;
+      input: unknown;
+      calls: number;
+    }
+  > = {
+    object: (inner) => ({
+      schema: object({ a: inner, b: inner }),
+      input: { a: 1, b: 2 },
+      calls: 2,
+    }),
+    array: (inner) => ({ schema: array(inner), input: [1, 2], calls: 2 }),
+    record: (inner) => ({
+      schema: record(inner),
+      input: { a: 1, b: 2 },
+      calls: 2,
+    }),
+    tuple: (inner) => ({
+      schema: tuple([inner, inner]),
+      input: [1, 2],
+      calls: 2,
+    }),
+    anyOf: (inner) => ({ schema: anyOf([inner]), input: 1, calls: 1 }),
+    oneOf: (inner) => ({ schema: oneOf([inner]), input: 1, calls: 1 }),
+    allOf: (inner) => ({ schema: allOf([inner, inner]), input: 1, calls: 2 }),
+    not: (inner) => ({ schema: not(inner), input: 1, calls: 1 }),
+    lazy: (inner) => ({ schema: lazy(() => inner), input: 1, calls: 1 }),
+  };
+
+  for (const [name, build] of Object.entries(cases)) {
+    await t.step(name, () => {
+      const received: unknown[] = [];
+      const { schema, input, calls } = build(recording(received));
+      validate(schema, input, options);
+      assertEquals(received.length, calls);
+      for (const seen of received) assertEquals(seen, options);
+    });
+  }
 });

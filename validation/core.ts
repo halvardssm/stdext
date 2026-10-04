@@ -254,6 +254,7 @@ export interface CreateSchemaOptions<
  * assertEquals(await collect([1, Promise.resolve(2)]), [1, 2]);
  * ```
  *
+ * @template T The type of the items
  * @param items Values or promises
  * @returns The values, or a promise of them
  */
@@ -277,6 +278,8 @@ export function collect<T>(
  * assertEquals(await chain(Promise.resolve(1), (n) => n + 1), 2);
  * ```
  *
+ * @template T The type of the value
+ * @template R The type of the result
  * @param value A value or a promise
  * @param fn The continuation
  * @returns The result of `fn`, or a promise of it

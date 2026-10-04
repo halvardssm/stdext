@@ -11,31 +11,48 @@
  *   async.
  * - Ready-made schemas cover the basics: `string`, `integer`, `float`,
  *   `number`, `boolean`, `symbol`, `null_`, `literal`, `enumerator`,
- *   `instanceOf`, `unknown`, `never`, `nullable`, `optional` and `nullish`, and the ones made of other schemas:
- *   `object`, `array`, `record`, `tuple`, `anyOf`, `oneOf`, `allOf`, `not` and
- *   `lazy`.
+ *   `instanceOf`, `unknown`, `never`, `nullable`, `optional` and `nullish`, and
+ *   the ones made of other schemas: `object`, `array`, `record`, `tuple`,
+ *   `anyOf`, `oneOf`, `allOf`, `not` and `lazy`.
+ * - Helper functions work with any Standard Schema, also from other libraries:
+ *   `validate`, `validateAsync`, `parse`, `parseAsync` and `toJSONSchema`.
  *
  * @example
  * ```ts
- * import { createSchema } from "@stdext/validation";
+ * import {
+ *   array,
+ *   createSchema,
+ *   object,
+ *   string,
+ *   toJSONSchema,
+ *   validate,
+ * } from "@stdext/validation";
  * import { assertEquals } from "@std/assert";
  *
- * const string = createSchema("string", {
+ * // a schema of your own
+ * const port = createSchema("port", {
  *   validate: (value) =>
- *     typeof value === "string"
- *       ? { value }
- *       : { issues: [{ message: "Expected a string" }] },
+ *     Number.isInteger(value) && (value as number) > 0
+ *       ? { value: value as number }
+ *       : { issues: [{ message: "Expected a positive integer" }] },
  *   jsonSchema: {
- *     input: () => ({ type: "string" }),
- *     output: () => ({ type: "string" }),
+ *     input: () => ({ type: "integer", minimum: 1 }),
+ *     output: () => ({ type: "integer", minimum: 1 }),
  *   },
  * });
- * // Schema<string, string, "string">
+ * // Schema<number, number, "port">
  *
- * assertEquals(string["~standard"].validate("a"), { value: "a" });
- * assertEquals(string["~standard"].validate(1), {
- *   issues: [{ message: "Expected a string" }],
+ * // ready-made schemas nest other schemas
+ * const server = object({ host: string(), ports: array(port) });
+ *
+ * assertEquals(validate(server, { host: "localhost", ports: [80] }), {
+ *   value: { host: "localhost", ports: [80] },
  * });
+ * assertEquals(
+ *   validate(server, { host: "localhost", ports: [0] }).issues?.[0].path,
+ *   ["ports", 0],
+ * );
+ * assertEquals(toJSONSchema(server).type, "object");
  * ```
  *
  * @module

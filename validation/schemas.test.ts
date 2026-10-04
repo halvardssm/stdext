@@ -179,174 +179,37 @@ Deno.test("boolean", async (t) => {
   });
 });
 
-Deno.test("options are placeholders", () => {
-  // accepted, and without effect for now
-  assertEquals(validate(string({}), "a"), { value: "a" });
-  assertEquals(validate(integer({}), 1), { value: 1 });
-  assertEquals(validate(float({}), 1.5), { value: 1.5 });
-  assertEquals(validate(number({}), 1.5), { value: 1.5 });
-  assertEquals(validate(boolean({}), true), { value: true });
-  assertEquals(validate(nullable(string(), {}), null), { value: null });
-  assertEquals(validate(optional(string(), {}), undefined), {
-    value: undefined,
-  });
-});
-
-Deno.test("nullable", async (t) => {
-  await t.step("accepts null and what the schema accepts", () => {
-    assertEquals(validate(nullable(string()), null), { value: null });
-    assertEquals(validate(nullable(string()), "a"), { value: "a" });
-    assertEquals(validate(nullable(integer()), 1), { value: 1 });
-  });
-
-  await t.step("rejects undefined and what the schema rejects", () => {
-    assert(!valid(nullable(string()), undefined));
-    assert(!valid(nullable(string()), 1));
-    assertEquals(validate(nullable(string()), 1), {
-      issues: [typeIssue("a string", 1, "number")],
-    });
-  });
-
-  await t.step("infers its types", () => {
-    const schema = nullable(string());
-    assertType<
-      Equals<typeof schema, Schema<string | null, string | null, "nullable">>
-    >();
-    assertType<Equals<Output<typeof schema>, string | null>>();
-    assertType<Equals<Input<typeof schema>, string | null>>();
-  });
-
-  await t.step("exports a JSON Schema with null", () => {
-    const expected = { anyOf: [{ type: "string" }, { type: "null" }] };
-    assertEquals(toJSONSchema(nullable(string()), { io: "input" }), expected);
-    assertEquals(toJSONSchema(nullable(string())), expected);
-  });
-
-  await t.step("keeps an input type that differs from the output", () => {
-    const length = createSchema("length", {
-      validate: (value) =>
-        typeof value === "string"
-          ? { value: value.length }
-          : { issues: [{ message: "Expected a string" }] },
-      jsonSchema: {
-        input: () => ({ type: "string" }),
-        output: () => ({ type: "integer" }),
-      },
-      types: undefined as unknown as StandardSchemaV1.Types<string, number>,
-    });
-    const schema = nullable(length);
-    assertType<Equals<Input<typeof schema>, string | null>>();
-    assertType<Equals<Output<typeof schema>, number | null>>();
-    assertEquals(validate(schema, "abc"), { value: 3 });
-    assertEquals(toJSONSchema(schema, { io: "input" }), {
-      anyOf: [{ type: "string" }, { type: "null" }],
-    });
-    assertEquals(toJSONSchema(schema, { io: "output" }), {
-      anyOf: [{ type: "integer" }, { type: "null" }],
-    });
-  });
-
-  await t.step("passes the validate options on", () => {
-    let received: unknown;
-    const inner = createSchema("inner", {
-      validate: (value, validateOptions) => {
-        received = validateOptions;
-        return { value };
-      },
-      jsonSchema: { input: () => ({}), output: () => ({}) },
-    });
-    validate(nullable(inner), 1, { libraryOptions: { a: 1 } });
-    assertEquals(received, { libraryOptions: { a: 1 } });
-  });
-});
-
-Deno.test("optional", async (t) => {
-  await t.step("accepts undefined and what the schema accepts", () => {
-    assertEquals(validate(optional(string()), undefined), { value: undefined });
-    assertEquals(validate(optional(string()), "a"), { value: "a" });
-    assertEquals(validate(optional(integer()), 1), { value: 1 });
-  });
-
-  await t.step("rejects null and what the schema rejects", () => {
-    assert(!valid(optional(string()), null));
-    assert(!valid(optional(string()), 1));
-    assertEquals(
-      validate(optional(string()), null).issues?.[0].message,
-      "Expected a string, received null",
-    );
-  });
-
-  await t.step("infers its types", () => {
-    const schema = optional(string());
-    assertType<
-      Equals<
-        typeof schema,
-        Schema<string | undefined, string | undefined, "optional">
-      >
-    >();
-    assertType<Equals<Output<typeof schema>, string | undefined>>();
-  });
-
-  await t.step("exports the JSON Schema of the nested schema", () => {
-    assertEquals(toJSONSchema(optional(string()), { io: "input" }), {
-      type: "string",
-    });
-    assertEquals(toJSONSchema(optional(string())), { type: "string" });
-  });
-});
-
-Deno.test("nullable and optional compose and nest async schemas", async (t) => {
-  await t.step("nullable(optional(x)) and optional(nullable(x))", () => {
-    for (
-      const schema of [
-        nullable(optional(string())),
-        optional(nullable(string())),
-      ]
-    ) {
-      assertEquals(validate(schema, null), { value: null });
-      assertEquals(validate(schema, undefined), { value: undefined });
-      assertEquals(validate(schema, "a"), { value: "a" });
-      assert(!valid(schema, 1));
+Deno.test("symbol", async (t) => {
+  await t.step("accepts symbols", () => {
+    const local = Symbol("id");
+    assertEquals(validate(symbol(), local), { value: local });
+    for (const value of [Symbol(), Symbol.for("shared"), Symbol.iterator]) {
+      assert(valid(symbol(), value), String(value.description));
     }
+  });
 
-    const schema = optional(nullable(string()));
-    assertType<Equals<Output<typeof schema>, string | null | undefined>>();
-    assertEquals(schema.kind, "optional");
-    assertEquals(toJSONSchema(schema), {
-      anyOf: [{ type: "string" }, { type: "null" }],
+  await t.step("rejects everything else", () => {
+    for (
+      const value of ["id", 1, true, null, undefined, {}, [], Object(Symbol())]
+    ) {
+      assert(
+        !valid(symbol(), value),
+        Object.prototype.toString.call(value),
+      );
+    }
+    assertEquals(validate(symbol(), "id"), {
+      issues: [typeIssue("a symbol", "id", "string")],
     });
   });
 
-  await t.step("stays sync for sync schemas", () => {
-    assert(!(validateAsync(nullable(string()), "a") instanceof Promise));
-    assert(!(validateAsync(optional(string()), "a") instanceof Promise));
+  await t.step("exports a JSON Schema that accepts everything", () => {
+    assertEquals(toJSONSchema(symbol(), { io: "input" }), {});
+    assertEquals(toJSONSchema(symbol()), {});
   });
 
-  await t.step("passes the result of an async schema through", async () => {
-    const asyncString = createSchema("asyncString", {
-      validate: (value) =>
-        Promise.resolve(
-          typeof value === "string"
-            ? { value }
-            : { issues: [{ message: "Expected a string" }] },
-        ),
-      jsonSchema: {
-        input: () => ({ type: "string" }),
-        output: () => ({ type: "string" }),
-      },
-    });
-
-    const nullableAsync = nullable(asyncString);
-    // null never reaches the async schema, so it stays sync
-    assertEquals(validate(nullableAsync, null), { value: null });
-    assertEquals(await validateAsync(nullableAsync, "a"), { value: "a" });
-    assertEquals(await validateAsync(nullableAsync, 1), {
-      issues: [{ message: "Expected a string" }],
-    });
-
-    const optionalAsync = optional(asyncString);
-    assertEquals(validate(optionalAsync, undefined), { value: undefined });
-    assertEquals(await validateAsync(optionalAsync, "a"), { value: "a" });
+  await t.step("infers its types", () => {
+    const schema = symbol();
+    assertType<Equals<typeof schema, Schema<symbol, symbol, "symbol">>>();
   });
 });
 
@@ -403,6 +266,13 @@ Deno.test("literal", async (t) => {
     );
   });
 
+  await t.step("compares numbers with ===", () => {
+    assert(valid(literal(0), -0));
+    assert(valid(literal(-0), 0));
+    // NaN is never equal to itself, so it is never accepted
+    assert(!valid(literal(NaN), NaN));
+  });
+
   await t.step("exports a const", () => {
     assertEquals(toJSONSchema(literal("a"), { io: "input" }), { const: "a" });
     assertEquals(toJSONSchema(literal(1)), { const: 1 });
@@ -449,6 +319,12 @@ Deno.test("enumerator", async (t) => {
     });
   });
 
+  await t.step("compares with ===, like literal", () => {
+    assert(valid(enumerator([0]), -0));
+    assert(!valid(enumerator([NaN]), NaN));
+    assert(!valid(enumerator([1]), new Number(1)));
+  });
+
   await t.step("exports an enum", () => {
     assertEquals(toJSONSchema(enumerator(["a", 1, null]), { io: "input" }), {
       enum: ["a", 1, null],
@@ -463,125 +339,6 @@ Deno.test("enumerator", async (t) => {
     >();
     const mixed = enumerator(["a", 1, null]);
     assertType<Equals<Output<typeof mixed>, "a" | 1 | null>>();
-  });
-});
-
-Deno.test("unknown", async (t) => {
-  await t.step("accepts every value", () => {
-    for (const value of [1, "a", null, undefined, [], { a: 1 }, NaN]) {
-      assert(valid(unknown(), value), String(value));
-    }
-    const value = { a: 1 };
-    assertEquals(validate(unknown(), value), { value });
-  });
-
-  await t.step("exports a JSON Schema that accepts everything", () => {
-    assertEquals(toJSONSchema(unknown(), { io: "input" }), {});
-    assertEquals(toJSONSchema(unknown()), {});
-  });
-
-  await t.step("infers its types", () => {
-    const schema = unknown();
-    assertType<Equals<typeof schema, Schema<unknown, unknown, "unknown">>>();
-  });
-});
-
-Deno.test("never", async (t) => {
-  await t.step("rejects every value", () => {
-    for (const value of [1, "a", null, undefined, [], { a: 1 }]) {
-      assert(!valid(never(), value), String(value));
-    }
-    assertEquals(validate(never(), 1), {
-      issues: [typeIssue("no value", 1, "number")],
-    });
-  });
-
-  await t.step("exports a JSON Schema that rejects everything", () => {
-    assertEquals(toJSONSchema(never(), { io: "input" }), { not: {} });
-    assertEquals(toJSONSchema(never()), { not: {} });
-  });
-
-  await t.step("infers never", () => {
-    const schema = never();
-    assertType<Equals<typeof schema, Schema<never, never, "never">>>();
-  });
-});
-
-Deno.test("nullish", async (t) => {
-  await t.step("accepts null, undefined and what the schema accepts", () => {
-    assertEquals(validate(nullish(string()), null), { value: null });
-    assertEquals(validate(nullish(string()), undefined), { value: undefined });
-    assertEquals(validate(nullish(string()), "a"), { value: "a" });
-  });
-
-  await t.step("rejects what the schema rejects", () => {
-    assert(!valid(nullish(string()), 1));
-    assertEquals(validate(nullish(string()), 1), {
-      issues: [typeIssue("a string", 1, "number")],
-    });
-  });
-
-  await t.step("is the same as nullable(optional(x))", () => {
-    for (const value of [null, undefined, "a", 1, {}]) {
-      assertEquals(
-        validate(nullish(string()), value),
-        validate(nullable(optional(string())), value),
-      );
-    }
-  });
-
-  await t.step("exports a JSON Schema with null", () => {
-    const expected = { anyOf: [{ type: "string" }, { type: "null" }] };
-    assertEquals(toJSONSchema(nullish(string()), { io: "input" }), expected);
-    assertEquals(toJSONSchema(nullish(string())), expected);
-  });
-
-  await t.step("infers its types", () => {
-    const schema = nullish(string());
-    assertType<
-      Equals<
-        typeof schema,
-        Schema<
-          string | null | undefined,
-          string | null | undefined,
-          "nullish"
-        >
-      >
-    >();
-  });
-});
-
-Deno.test("symbol", async (t) => {
-  await t.step("accepts symbols", () => {
-    const local = Symbol("id");
-    assertEquals(validate(symbol(), local), { value: local });
-    for (const value of [Symbol(), Symbol.for("shared"), Symbol.iterator]) {
-      assert(valid(symbol(), value), String(value.description));
-    }
-  });
-
-  await t.step("rejects everything else", () => {
-    for (
-      const value of ["id", 1, true, null, undefined, {}, [], Object(Symbol())]
-    ) {
-      assert(
-        !valid(symbol(), value),
-        Object.prototype.toString.call(value),
-      );
-    }
-    assertEquals(validate(symbol(), "id"), {
-      issues: [typeIssue("a symbol", "id", "string")],
-    });
-  });
-
-  await t.step("exports a JSON Schema that accepts everything", () => {
-    assertEquals(toJSONSchema(symbol(), { io: "input" }), {});
-    assertEquals(toJSONSchema(symbol()), {});
-  });
-
-  await t.step("infers its types", () => {
-    const schema = symbol();
-    assertType<Equals<typeof schema, Schema<symbol, symbol, "symbol">>>();
   });
 });
 
@@ -704,5 +461,261 @@ Deno.test("instanceOf", async (t) => {
     const shape = instanceOf(Shape);
     assertType<Equals<Output<typeof shape>, Shape>>();
     assertEquals(point.kind, "instanceOf");
+  });
+});
+
+Deno.test("unknown", async (t) => {
+  await t.step("accepts every value", () => {
+    for (const value of [1, "a", null, undefined, [], { a: 1 }, NaN]) {
+      assert(valid(unknown(), value), String(value));
+    }
+    const value = { a: 1 };
+    assertEquals(validate(unknown(), value), { value });
+  });
+
+  await t.step("exports a JSON Schema that accepts everything", () => {
+    assertEquals(toJSONSchema(unknown(), { io: "input" }), {});
+    assertEquals(toJSONSchema(unknown()), {});
+  });
+
+  await t.step("infers its types", () => {
+    const schema = unknown();
+    assertType<Equals<typeof schema, Schema<unknown, unknown, "unknown">>>();
+  });
+});
+
+Deno.test("never", async (t) => {
+  await t.step("rejects every value", () => {
+    for (const value of [1, "a", null, undefined, [], { a: 1 }]) {
+      assert(!valid(never(), value), String(value));
+    }
+    assertEquals(validate(never(), 1), {
+      issues: [typeIssue("no value", 1, "number")],
+    });
+  });
+
+  await t.step("exports a JSON Schema that rejects everything", () => {
+    assertEquals(toJSONSchema(never(), { io: "input" }), { not: {} });
+    assertEquals(toJSONSchema(never()), { not: {} });
+  });
+
+  await t.step("infers never", () => {
+    const schema = never();
+    assertType<Equals<typeof schema, Schema<never, never, "never">>>();
+  });
+});
+
+Deno.test("nullable", async (t) => {
+  await t.step("accepts null and what the schema accepts", () => {
+    assertEquals(validate(nullable(string()), null), { value: null });
+    assertEquals(validate(nullable(string()), "a"), { value: "a" });
+    assertEquals(validate(nullable(integer()), 1), { value: 1 });
+  });
+
+  await t.step("rejects undefined and what the schema rejects", () => {
+    assert(!valid(nullable(string()), undefined));
+    assert(!valid(nullable(string()), 1));
+    assertEquals(validate(nullable(string()), 1), {
+      issues: [typeIssue("a string", 1, "number")],
+    });
+  });
+
+  await t.step("infers its types", () => {
+    const schema = nullable(string());
+    assertType<
+      Equals<typeof schema, Schema<string | null, string | null, "nullable">>
+    >();
+    assertType<Equals<Output<typeof schema>, string | null>>();
+    assertType<Equals<Input<typeof schema>, string | null>>();
+  });
+
+  await t.step("exports a JSON Schema with null", () => {
+    const expected = { anyOf: [{ type: "string" }, { type: "null" }] };
+    assertEquals(toJSONSchema(nullable(string()), { io: "input" }), expected);
+    assertEquals(toJSONSchema(nullable(string())), expected);
+  });
+
+  await t.step("keeps an input type that differs from the output", () => {
+    const length = createSchema("length", {
+      validate: (value) =>
+        typeof value === "string"
+          ? { value: value.length }
+          : { issues: [{ message: "Expected a string" }] },
+      jsonSchema: {
+        input: () => ({ type: "string" }),
+        output: () => ({ type: "integer" }),
+      },
+      types: undefined as unknown as StandardSchemaV1.Types<string, number>,
+    });
+    const schema = nullable(length);
+    assertType<Equals<Input<typeof schema>, string | null>>();
+    assertType<Equals<Output<typeof schema>, number | null>>();
+    assertEquals(validate(schema, "abc"), { value: 3 });
+    assertEquals(toJSONSchema(schema, { io: "input" }), {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    });
+    assertEquals(toJSONSchema(schema, { io: "output" }), {
+      anyOf: [{ type: "integer" }, { type: "null" }],
+    });
+  });
+
+  await t.step("passes the validate options on", () => {
+    let received: unknown;
+    const inner = createSchema("inner", {
+      validate: (value, validateOptions) => {
+        received = validateOptions;
+        return { value };
+      },
+      jsonSchema: { input: () => ({}), output: () => ({}) },
+    });
+    validate(nullable(inner), 1, { libraryOptions: { a: 1 } });
+    assertEquals(received, { libraryOptions: { a: 1 } });
+  });
+});
+
+Deno.test("optional", async (t) => {
+  await t.step("accepts undefined and what the schema accepts", () => {
+    assertEquals(validate(optional(string()), undefined), { value: undefined });
+    assertEquals(validate(optional(string()), "a"), { value: "a" });
+    assertEquals(validate(optional(integer()), 1), { value: 1 });
+  });
+
+  await t.step("rejects null and what the schema rejects", () => {
+    assert(!valid(optional(string()), null));
+    assert(!valid(optional(string()), 1));
+    assertEquals(
+      validate(optional(string()), null).issues?.[0].message,
+      "Expected a string, received null",
+    );
+  });
+
+  await t.step("infers its types", () => {
+    const schema = optional(string());
+    assertType<
+      Equals<
+        typeof schema,
+        Schema<string | undefined, string | undefined, "optional">
+      >
+    >();
+    assertType<Equals<Output<typeof schema>, string | undefined>>();
+  });
+
+  await t.step("exports the JSON Schema of the nested schema", () => {
+    assertEquals(toJSONSchema(optional(string()), { io: "input" }), {
+      type: "string",
+    });
+    assertEquals(toJSONSchema(optional(string())), { type: "string" });
+  });
+});
+
+Deno.test("nullish", async (t) => {
+  await t.step("accepts null, undefined and what the schema accepts", () => {
+    assertEquals(validate(nullish(string()), null), { value: null });
+    assertEquals(validate(nullish(string()), undefined), { value: undefined });
+    assertEquals(validate(nullish(string()), "a"), { value: "a" });
+  });
+
+  await t.step("rejects what the schema rejects", () => {
+    assert(!valid(nullish(string()), 1));
+    assertEquals(validate(nullish(string()), 1), {
+      issues: [typeIssue("a string", 1, "number")],
+    });
+  });
+
+  await t.step("is the same as nullable(optional(x))", () => {
+    for (const value of [null, undefined, "a", 1, {}]) {
+      assertEquals(
+        validate(nullish(string()), value),
+        validate(nullable(optional(string())), value),
+      );
+    }
+  });
+
+  await t.step("exports a JSON Schema with null", () => {
+    const expected = { anyOf: [{ type: "string" }, { type: "null" }] };
+    assertEquals(toJSONSchema(nullish(string()), { io: "input" }), expected);
+    assertEquals(toJSONSchema(nullish(string())), expected);
+  });
+
+  await t.step("infers its types", () => {
+    const schema = nullish(string());
+    assertType<
+      Equals<
+        typeof schema,
+        Schema<
+          string | null | undefined,
+          string | null | undefined,
+          "nullish"
+        >
+      >
+    >();
+  });
+});
+
+Deno.test("nullable and optional compose and nest async schemas", async (t) => {
+  await t.step("nullable(optional(x)) and optional(nullable(x))", () => {
+    for (
+      const schema of [
+        nullable(optional(string())),
+        optional(nullable(string())),
+      ]
+    ) {
+      assertEquals(validate(schema, null), { value: null });
+      assertEquals(validate(schema, undefined), { value: undefined });
+      assertEquals(validate(schema, "a"), { value: "a" });
+      assert(!valid(schema, 1));
+    }
+
+    const schema = optional(nullable(string()));
+    assertType<Equals<Output<typeof schema>, string | null | undefined>>();
+    assertEquals(schema.kind, "optional");
+    assertEquals(toJSONSchema(schema), {
+      anyOf: [{ type: "string" }, { type: "null" }],
+    });
+  });
+
+  await t.step("stays sync for sync schemas", () => {
+    assert(!(validateAsync(nullable(string()), "a") instanceof Promise));
+    assert(!(validateAsync(optional(string()), "a") instanceof Promise));
+  });
+
+  await t.step("passes the result of an async schema through", async () => {
+    const asyncString = createSchema("asyncString", {
+      validate: (value) =>
+        Promise.resolve(
+          typeof value === "string"
+            ? { value }
+            : { issues: [{ message: "Expected a string" }] },
+        ),
+      jsonSchema: {
+        input: () => ({ type: "string" }),
+        output: () => ({ type: "string" }),
+      },
+    });
+
+    const nullableAsync = nullable(asyncString);
+    // null never reaches the async schema, so it stays sync
+    assertEquals(validate(nullableAsync, null), { value: null });
+    assertEquals(await validateAsync(nullableAsync, "a"), { value: "a" });
+    assertEquals(await validateAsync(nullableAsync, 1), {
+      issues: [{ message: "Expected a string" }],
+    });
+
+    const optionalAsync = optional(asyncString);
+    assertEquals(validate(optionalAsync, undefined), { value: undefined });
+    assertEquals(await validateAsync(optionalAsync, "a"), { value: "a" });
+  });
+});
+
+Deno.test("options are placeholders", () => {
+  // accepted, and without effect for now
+  assertEquals(validate(string({}), "a"), { value: "a" });
+  assertEquals(validate(integer({}), 1), { value: 1 });
+  assertEquals(validate(float({}), 1.5), { value: 1.5 });
+  assertEquals(validate(number({}), 1.5), { value: 1.5 });
+  assertEquals(validate(boolean({}), true), { value: true });
+  assertEquals(validate(nullable(string(), {}), null), { value: null });
+  assertEquals(validate(optional(string(), {}), undefined), {
+    value: undefined,
   });
 });

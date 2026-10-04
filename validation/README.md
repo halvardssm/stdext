@@ -12,9 +12,8 @@ fully typed factory to build them.
 
 ## Helper functions
 
-`utils.ts` has helpers that work with any Standard Schema, including schemas
-from other libraries such as Zod. They are not yet re-exported from the package
-root.
+These work with any Standard Schema, including schemas from other libraries such
+as Zod.
 
 | Function                                                      | What it does                                                                                               |
 | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -24,13 +23,14 @@ root.
 | `parseAsync(schema, input)`                                   | Like `parse`, for sync and async schemas.                                                                  |
 | `toJSONSchema(schema, options?)`                              | The JSON Schema of a Standard JSON Schema. Options: `io` (`"output"` by default), `target`, `silent`.      |
 | `isStandardSchemaV1(value)` / `isStandardJSONSchemaV1(value)` | Type guards, requiring `version` 1.                                                                        |
+| `stringify(value)`                                            | Formats any value for a message and never throws.                                                          |
 
 `validate`, `validateAsync`, `parse` and `parseAsync` also accept the boolean
 schemas `true` (accepts everything) and `false` (rejects everything).
 
-```ts ignore
+```ts
 import { z } from "@zod/zod";
-import { parse, toJSONSchema, validate } from "./utils.ts";
+import { parse, string, toJSONSchema, validate } from "@stdext/validation";
 
 const User = z.object({ name: z.string() });
 
@@ -38,9 +38,19 @@ validate(User, { name: "Alice" }); // { value: { name: "Alice" } }
 validate(User, { name: 1 }); // { issues: [...] }
 parse(User, { name: "Alice" }); // { name: "Alice" }
 
-// `io: "input"` gives what the schema accepts; `silent` returns `undefined`
-// for schemas without Standard JSON Schema support instead of throwing
-toJSONSchema(string, { io: "input", silent: true });
+// `io: "input"` gives the JSON Schema of what a schema accepts
+toJSONSchema(string(), { io: "input" }); // { type: "string" }
+
+// `silent` returns `undefined` for a schema without Standard JSON Schema
+// support, instead of throwing a TypeError
+const plain = {
+  "~standard": {
+    version: 1,
+    vendor: "other",
+    validate: (value: unknown) => ({ value }),
+  },
+} as const;
+toJSONSchema(plain, { silent: true }); // undefined
 ```
 
 ## Ready-made schemas
@@ -279,6 +289,23 @@ age["~standard"].jsonSchema.input({ target: "draft-2020-12" });
 // { type: "integer", minimum: 0 }
 ```
 
+## Helpers for building schemas
+
+The ready-made schemas are built from a few helpers, which you can use for your
+own schemas:
+
+| Helper                                    | What it does                                                                                                      |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `collect(items)`                          | Waits for a list of values, but only if one is a promise, so a schema stays synchronous when all of them are.     |
+| `chain(value, fn)`                        | Applies `fn` to a value, waiting for it first if it is a promise.                                                 |
+| `prefixIssues(segment, issues)`           | Prefixes the `path` of issues, for a schema that validates a part of its value.                                   |
+| `failure(kind, message, extra?)`          | A failure result with one issue of the given kind.                                                                |
+| `typeIssue(expected, actual)`             | The failure result for a value that is not of the expected type.                                                  |
+| `jsonSchemaOf(build)`                     | The `jsonSchema` converters of a schema, with `convert(schema)` for nested schemas in the direction asked for.    |
+| `isRecord(value)` / `setOwn(target, key)` | Checks for a plain object, and sets a property (string, number or symbol) without triggering `__proto__` setters. |
+| `acceptsUndefined(schema)`                | Whether a schema accepts `undefined`, i.e. whether an object property may be absent.                              |
+| `typeOf(value)`                           | The type of a value, with `null` and arrays told apart.                                                           |
+
 ## Types
 
 | Type                          | Description                                                                      |
@@ -286,5 +313,13 @@ age["~standard"].jsonSchema.input({ target: "draft-2020-12" });
 | `Schema<Input, Output, Kind>` | What `createSchema` returns: a Standard Schema and a Standard JSON Schema.       |
 | `CombinedSchemaV1`            | Any schema implementing both standards, without the `kind`.                      |
 | `CreateSchemaOptions`         | The options of `createSchema`.                                                   |
+| `ValidateResult`              | What a `validate` function returns: a result, or a promise of one.               |
 | `InferValidateOutput`         | The output type of a `validate` result, used by the inference.                   |
+| `Result`                      | The result of validating a value: `{ value }` or `{ issues }`.                   |
 | `Issue`                       | A Standard Schema issue with `kind`, `expected` and `actual` for form libraries. |
+| `Class`                       | A class, including abstract classes and built-ins such as `Date`.                |
+| `ObjectInput`, `ObjectOutput` | The types of an `object` schema, with optional keys for `undefined`.             |
+| `TupleInput`, `TupleOutput`   | The types of a `tuple` schema.                                                   |
+
+Every schema function has a matching `...Options` interface (`StringOptions`,
+`ObjectOptions`, ...). They are empty placeholders for now.
