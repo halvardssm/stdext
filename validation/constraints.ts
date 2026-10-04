@@ -90,20 +90,30 @@ export function isMultipleOf(value: number, divisor: number): boolean {
 
 /**
  * Serializes a value to JSON with the keys of objects sorted, so that equal
- * JSON values give the same string whatever the order of their keys.
+ * JSON values give the same string whatever the order of their keys. Values
+ * JSON cannot hold do not throw: a bigint is `1n`, and a reference to an
+ * object that contains it is `[Circular]`.
  */
-export function canonicalJSON(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJSON).join(",")}]`;
+export function canonicalJSON(
+  value: unknown,
+  ancestors: readonly object[] = [],
+): string {
   if (typeof value === "object" && value !== null) {
+    if (ancestors.includes(value)) return "[Circular]";
+    const path = [...ancestors, value];
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => canonicalJSON(item, path)).join(",")}]`;
+    }
     return `{${
       Object.keys(value).sort().map((key) =>
         `${JSON.stringify(key)}:${
-          canonicalJSON((value as Record<string, unknown>)[key])
+          canonicalJSON((value as Record<string, unknown>)[key], path)
         }`
       ).join(",")
     }}`;
   }
   if (Object.is(value, -0)) return "0";
+  if (typeof value === "bigint") return `${value}n`;
   return value === undefined
     ? "undefined"
     : JSON.stringify(value) ?? String(value);

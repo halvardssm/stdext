@@ -48,6 +48,13 @@ Deno.test("canonicalJSON", () => {
   assertEquals(canonicalJSON(1), canonicalJSON(1.0));
   assert(canonicalJSON(1) !== canonicalJSON("1"));
   assertEquals(canonicalJSON(Symbol.for("a")), "Symbol(a)");
+  assertEquals(canonicalJSON([1n, 1]), "[1n,1]");
+  const cyclic: Record<string, unknown> = { a: 1 };
+  cyclic.self = cyclic;
+  assertEquals(canonicalJSON(cyclic), '{"a":1,"self":[Circular]}');
+  // the same object twice is not a cycle
+  const shared = { a: 1 };
+  assertEquals(canonicalJSON([shared, shared]), '[{"a":1},{"a":1}]');
 });
 
 Deno.test("pick", () => {

@@ -14,6 +14,10 @@
  *   `instanceOf`, `unknown`, `never`, `nullable`, `optional` and `nullish`, and
  *   the ones made of other schemas: `object`, `shape`, `array`, `record`,
  *   `tuple`, `anyOf`, `oneOf`, `allOf`, `not` and `lazy`.
+ * - Schemas take options named after JSON Schema keywords (`minLength`,
+ *   `pattern`, `format`, `minimum`, `minItems`, `additionalProperties`, ...),
+ *   annotations such as `title` and `description`, and a `message` for the
+ *   issues. They are checked, and exported to the JSON Schema.
  * - Helper functions work with any Standard Schema, also from other libraries:
  *   `validate`, `validateAsync`, `parse`, `parseAsync`, `isValid`,
  *   `assertValid` and `toJSONSchema`.
