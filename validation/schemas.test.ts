@@ -2,9 +2,11 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { assert, assertEquals } from "@std/assert";
 import { createSchema, type Schema } from "./core.ts";
 import {
+  type AnyFunction,
   boolean,
   enumerator,
   float,
+  func,
   instanceOf,
   integer,
   literal,
@@ -210,6 +212,74 @@ Deno.test("symbol", async (t) => {
   await t.step("infers its types", () => {
     const schema = symbol();
     assertType<Equals<typeof schema, Schema<symbol, symbol, "symbol">>>();
+  });
+});
+
+Deno.test("func", async (t) => {
+  await t.step("accepts functions", () => {
+    const fn = () => 1;
+    assertEquals(validate(func(), fn), { value: fn });
+    class Point {}
+    for (
+      const value of [
+        function () {},
+        () => {},
+        async () => {},
+        function* () {},
+        Point,
+        Math.max,
+        Symbol,
+        new Proxy(() => {}, {}),
+      ]
+    ) {
+      assert(valid(func(), value), String(value));
+    }
+  });
+
+  await t.step("rejects everything else", () => {
+    for (
+      const value of [
+        "fn",
+        1,
+        null,
+        undefined,
+        {},
+        [],
+        { call() {} },
+        Symbol("s"),
+      ]
+    ) {
+      assert(!valid(func(), value), String(value));
+    }
+    assertEquals(validate(func(), "fn"), {
+      issues: [typeIssue("a function", "fn", "string")],
+    });
+  });
+
+  await t.step("only checks that it is a function", () => {
+    assert(valid(func<(a: number, b: string) => boolean>(), () => 1));
+  });
+
+  await t.step("exports a JSON Schema that accepts everything", () => {
+    assertEquals(toJSONSchema(func(), { io: "input" }), {});
+    assertEquals(toJSONSchema(func()), {});
+  });
+
+  await t.step("infers the function type", () => {
+    const any = func();
+    assertType<Equals<Output<typeof any>, AnyFunction>>();
+    const typed = func<(index: number) => string>();
+    assertType<
+      Equals<
+        typeof typed,
+        Schema<
+          (index: number) => string,
+          (index: number) => string,
+          "function"
+        >
+      >
+    >();
+    assertEquals(typed.kind, "function");
   });
 });
 

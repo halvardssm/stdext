@@ -9,15 +9,19 @@ import {
   object,
   oneOf,
   record,
+  shape,
   tuple,
 } from "./composites.ts";
 import { createSchema, type Schema } from "./core.ts";
 import {
+  boolean,
   enumerator,
   float,
+  func,
   integer,
   literal,
   nullable,
+  number,
   optional,
   string,
 } from "./schemas.ts";
@@ -275,6 +279,158 @@ Deno.test("object with symbol keys", async (t) => {
         id,
       ],
     );
+  });
+});
+
+Deno.test("shape", async (t) => {
+  const closable = shape({
+    closed: boolean(),
+    close: func(),
+    reset: optional(func()),
+  });
+
+  class Connection {
+    #closed = false;
+    get closed() {
+      return this.#closed;
+    }
+    close() {
+      this.#closed = true;
+    }
+  }
+
+  await t.step("accepts objects that have the properties", () => {
+    assert(valid(closable, { closed: false, close: () => {} }));
+    assert(valid(closable, { closed: true, close() {}, reset() {} }));
+  });
+
+  await t.step("returns the very same value", () => {
+    const connection = new Connection();
+    const result = validate(closable, connection) as { value: unknown };
+    assert(result.value === connection);
+    assert(result.value instanceof Connection);
+
+    // unknown keys are kept, unlike with object()
+    const plain = { closed: false, close() {}, extra: 1 };
+    assert((validate(closable, plain) as { value: unknown }).value === plain);
+  });
+
+  await t.step("reads inherited members, like methods and getters", () => {
+    assert(valid(closable, new Connection()));
+    // the prototype chain is walked
+    assert(valid(closable, Object.create({ closed: false, close() {} })));
+  });
+
+  await t.step("accepts every non-null object", () => {
+    class Tagged {
+      closed = false;
+      close() {}
+      get [Symbol.toStringTag]() {
+        return "Tagged";
+      }
+    }
+    assert(valid(closable, new Tagged()));
+    assert(valid(shape({ length: number() }), []));
+    assert(valid(shape({ size: number() }), new Map()));
+    assert(valid(shape({}), Object.create(null)));
+    // object() is stricter
+    assert(!valid(object({ closed: boolean(), close: func() }), new Tagged()));
+    assert(!valid(object({ length: number() }), []));
+  });
+
+  await t.step("rejects everything that is not an object", () => {
+    for (
+      const value of [null, undefined, "a", 1, true, Symbol("s"), () => {}]
+    ) {
+      assert(!valid(closable, value), String(value));
+    }
+    assertEquals(validate(closable, null), {
+      issues: [typeIssue("an object", null, "null")],
+    });
+    // a function is not an object, even with the properties
+    const fn = Object.assign(() => {}, { closed: false, close() {} });
+    assert(!valid(closable, fn));
+  });
+
+  await t.step("reports every failing property with its key", () => {
+    assertEquals(validate(closable, { closed: "no", close: 1 }), {
+      issues: [
+        typeIssue("a boolean", "no", "string", ["closed"]),
+        typeIssue("a function", 1, "number", ["close"]),
+      ],
+    });
+    assertEquals(validate(closable, {}).issues?.length, 2);
+    assert(!valid(closable, { closed: false, close() {}, reset: 1 }));
+  });
+
+  await t.step("checks symbol keys", () => {
+    const schema = shape({ [Symbol.asyncDispose]: func() });
+    assert(valid(schema, { async [Symbol.asyncDispose]() {} }));
+    assertEquals(validate(schema, {}).issues?.[0].path, [Symbol.asyncDispose]);
+  });
+
+  await t.step("ignores what the property schemas output", () => {
+    const upper = createSchema("upper", {
+      validate: (value) =>
+        typeof value === "string"
+          ? { value: value.toUpperCase() }
+          : { issues: [{ message: "Expected a string" }] },
+      jsonSchema: { input: () => ({}), output: () => ({}) },
+    });
+    const input = { name: "alice" };
+    assertEquals(validate(shape({ name: upper }), input), { value: input });
+    assertEquals(input.name, "alice");
+  });
+
+  await t.step("any non-null object with shape({})", () => {
+    assert(valid(shape({}), {}));
+    assert(valid(shape({}), []));
+    assert(valid(shape({}), new Date()));
+    assert(!valid(shape({}), null));
+    assert(!valid(shape({}), () => {}));
+  });
+
+  await t.step("exports the JSON Schema of an object", () => {
+    const expected = {
+      type: "object",
+      properties: {
+        closed: { type: "boolean" },
+        close: {},
+        reset: {},
+      },
+      required: ["closed", "close"],
+    };
+    assertEquals(toJSONSchema(closable, { io: "input" }), expected);
+    assertEquals(toJSONSchema(closable), expected);
+    assertEquals(
+      toJSONSchema(closable),
+      toJSONSchema(object({
+        closed: boolean(),
+        close: func(),
+        reset: optional(func()),
+      })),
+    );
+  });
+
+  await t.step("infers the properties, with the input as the output", () => {
+    assertType<Equals<Input<typeof closable>, Output<typeof closable>>>();
+    assertType<Equals<typeof closable.kind, "shape">>();
+    const user = shape({ name: string(), age: optional(integer()) });
+    assertType<
+      Equals<
+        Output<typeof user>,
+        { name: string; age?: number | undefined }
+      >
+    >();
+  });
+
+  await t.step("works with async schemas", async () => {
+    const pending = shape({ name: asyncString });
+    const input = { name: "a" };
+    assertEquals(await validateAsync(pending, input), { value: input });
+    assertEquals((await validateAsync(pending, { name: 1 })).issues?.[0].path, [
+      "name",
+    ]);
   });
 });
 

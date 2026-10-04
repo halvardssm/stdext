@@ -1,7 +1,9 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
+  assertValid,
   isStandardJSONSchemaV1,
   isStandardSchemaV1,
+  isValid,
   parse,
   parseAsync,
   stringify,
@@ -387,5 +389,119 @@ Deno.test("works with other Standard Schema libraries (zod)", async (t) => {
   await t.step("parse", () => {
     assertEquals(parse(schema, { name: "Alice" }), { name: "Alice" });
     assertThrows(() => parse(schema, { name: 1 }), SchemaError);
+  });
+});
+
+Deno.test("isValid", async (t) => {
+  const User = z.object({ name: z.string() });
+
+  await t.step("tells whether a value is valid", () => {
+    assert(isValid(User, { name: "Alice" }));
+    assert(!isValid(User, { name: 1 }));
+    assert(!isValid(User, null));
+    assert(isValid(TestSchemaSync, true));
+    assert(!isValid(TestSchemaSync, false));
+  });
+
+  await t.step("narrows the value to the input type", () => {
+    const value: unknown = { name: "Alice" };
+    if (isValid(User, value)) {
+      const name: string = value.name;
+      assertEquals(name, "Alice");
+    } else {
+      throw new Error("Expected the value to be valid");
+    }
+
+    // a schema that transforms: the guard is about the input, not the output
+    const length = createSchema("length", {
+      validate: (input) =>
+        typeof input === "string"
+          ? { value: input.length }
+          : { issues: [{ message: "Expected a string" }] },
+      jsonSchema: { input: () => ({}), output: () => ({}) },
+      types: undefined as unknown as StandardSchemaV1.Types<string, number>,
+    });
+    const text: unknown = "abc";
+    if (isValid(length, text)) {
+      const narrowed: string = text;
+      assertEquals(narrowed, "abc");
+    }
+  });
+
+  await t.step("does not change the value", () => {
+    const upper = createSchema("upper", {
+      validate: (input) =>
+        typeof input === "string"
+          ? { value: input.toUpperCase() }
+          : { issues: [{ message: "Expected a string" }] },
+      jsonSchema: { input: () => ({}), output: () => ({}) },
+    });
+    const value: unknown = "abc";
+    assert(isValid(upper, value));
+    assertEquals(value, "abc");
+  });
+
+  await t.step("accepts boolean schemas", () => {
+    assert(isValid(true, 1));
+    assert(!isValid(false, 1));
+  });
+
+  await t.step("passes the options on", () => {
+    let received: unknown;
+    const schema = createSchema("options", {
+      validate: (value, options) => {
+        received = options;
+        return { value };
+      },
+      jsonSchema: { input: () => ({}), output: () => ({}) },
+    });
+    isValid(schema, 1, { libraryOptions: { a: 1 } });
+    assertEquals(received, { libraryOptions: { a: 1 } });
+  });
+
+  await t.step("throws for an async schema", () => {
+    assertThrows(() => isValid(TestSchemaAsync, true), TypeError);
+  });
+});
+
+Deno.test("assertValid", async (t) => {
+  const User = z.object({ name: z.string() });
+
+  await t.step("returns for a valid value and narrows it", () => {
+    const value: unknown = { name: "Alice" };
+    assertValid(User, value);
+    const name: string = value.name;
+    assertEquals(name, "Alice");
+  });
+
+  await t.step("throws a SchemaError with the issues", () => {
+    const error = assertThrows(
+      () => assertValid(User, { name: 1 }),
+      SchemaError,
+    );
+    assertEquals(error.issues[0].path, ["name"]);
+    assertThrows(() => assertValid(TestSchemaSync, false), SchemaError, "test");
+  });
+
+  await t.step("accepts boolean schemas", () => {
+    assertValid(true, 1);
+    assertThrows(() => assertValid(false, 1), SchemaError);
+  });
+
+  await t.step("passes the options on", () => {
+    let received: unknown;
+    const schema = createSchema("options", {
+      validate: (value, options) => {
+        received = options;
+        return { value };
+      },
+      jsonSchema: { input: () => ({}), output: () => ({}) },
+    });
+    assertValid(schema, 1, { libraryOptions: { a: 1 } });
+    assertEquals(received, { libraryOptions: { a: 1 } });
+  });
+
+  await t.step("throws for an async schema", () => {
+    assertThrows(() => assertValid(TestSchemaAsync, true), TypeError);
   });
 });

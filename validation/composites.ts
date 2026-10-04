@@ -1,6 +1,7 @@
 /**
  * Schemas that are made of other schemas: the containers {@linkcode object},
- * {@linkcode array}, {@linkcode record} and {@linkcode tuple}, the
+ * {@linkcode array}, {@linkcode record} and {@linkcode tuple}, the duck-typing
+ * {@linkcode shape}, the
  * combinators {@linkcode anyOf}, {@linkcode oneOf}, {@linkcode allOf} and
  * {@linkcode not}, and {@linkcode lazy} for recursion.
  *
@@ -128,6 +129,30 @@ export type UnionToIntersection<U> =
 // ---------------------------------------------------------------------------
 
 /**
+ * The JSON Schema of an object with these properties: `properties` and
+ * `required`, the latter listing the properties that do not accept
+ * `undefined`. Symbol keys cannot exist in JSON, so they are left out.
+ */
+function objectJsonSchema(
+  keys: (string | symbol)[],
+  schemas: Record<PropertyKey, CombinedSchemaV1>,
+  convert: (schema: CombinedSchemaV1) => Record<string, unknown>,
+): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+  for (const key of keys) {
+    if (typeof key === "symbol") continue;
+    properties[key] = convert(schemas[key]);
+    if (!acceptsUndefined(schemas[key])) required.push(key);
+  }
+  return {
+    type: "object",
+    ...(Object.keys(properties).length ? { properties } : {}),
+    ...(required.length ? { required } : {}),
+  };
+}
+
+/**
  * Options for {@linkcode object}. Placeholder: no options yet.
  */
 // deno-lint-ignore no-empty-interface
@@ -219,27 +244,106 @@ export function object<
           ),
       );
     },
-    jsonSchema: jsonSchemaOf((convert) => {
-      const jsonProperties: Record<string, unknown> = {};
-      const required: string[] = [];
-      // symbol keys cannot exist in JSON
-      for (const key of keys) {
-        if (typeof key === "symbol") continue;
-        jsonProperties[key] = convert(schemas[key]);
-        if (!acceptsUndefined(schemas[key])) required.push(key);
-      }
-      return {
-        type: "object",
-        ...(Object.keys(jsonProperties).length
-          ? { properties: jsonProperties }
-          : {}),
-        ...(required.length ? { required } : {}),
-      };
-    }),
+    jsonSchema: jsonSchemaOf((convert) =>
+      objectJsonSchema(keys, schemas, convert)
+    ),
   }) as unknown as Schema<
     ObjectInput<TProperties>,
     ObjectOutput<TProperties>,
     "object"
+  >;
+}
+
+// ---------------------------------------------------------------------------
+// shape
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for {@linkcode shape}. Placeholder: no options yet.
+ */
+// deno-lint-ignore no-empty-interface
+export interface ShapeOptions {}
+
+/**
+ * Duck typing: any non-null object (arrays, `Map`s and objects with a custom
+ * `Symbol.toStringTag` included, functions not) that has the given
+ * properties, however it was made. Unlike {@linkcode object}, the value is
+ * returned as it is, not as a copy with the declared keys only, so its
+ * identity, prototype and other properties are kept.
+ *
+ * The property schemas only check: what they output is not used, so a
+ * transforming schema has no effect here. The input type is the output type.
+ * Inherited properties, such as methods and getters of a class, are read like
+ * any other.
+ *
+ * The JSON Schema is the one of {@linkcode object}.
+ *
+ * @example
+ * ```ts
+ * import { shape } from "./composites.ts";
+ * import { boolean, func, optional } from "./schemas.ts";
+ * import { validate } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const closable = shape({ closed: boolean(), close: func(), reset: optional(func()) });
+ *
+ * class Connection {
+ *   get closed() {
+ *     return false;
+ *   }
+ *   close() {}
+ * }
+ *
+ * const connection = new Connection();
+ * // the very same object comes back
+ * const result = validate(closable, connection);
+ * assertEquals(result, { value: connection });
+ * assertEquals(validate(closable, {}).issues?.length, 2);
+ * ```
+ *
+ * @template TProperties The schema of every property, by key
+ * @param properties The schema of every property
+ * @param options Placeholder, not used yet
+ * @returns A schema accepting objects that have those properties
+ */
+export function shape<
+  TProperties extends Record<PropertyKey, CombinedSchemaV1>,
+>(
+  properties: TProperties,
+  // deno-lint-ignore no-unused-vars
+  options?: ShapeOptions,
+): Schema<ObjectInput<TProperties>, ObjectInput<TProperties>, "shape"> {
+  const schemas: Record<PropertyKey, CombinedSchemaV1> = properties;
+  const keys = ownKeys(properties);
+
+  return createSchema("shape", {
+    validate: (value, validateOptions) => {
+      if (typeof value !== "object" || value === null) {
+        return typeIssue("an object", value);
+      }
+      const source = value as Record<PropertyKey, unknown>;
+
+      return chain(
+        collect(
+          keys.map((key) =>
+            validateAsync(schemas[key], source[key], validateOptions)
+          ),
+        ),
+        (results): Result => {
+          const issues = results.flatMap((result, index) =>
+            result.issues ? prefixIssues(keys[index], result.issues) : []
+          );
+          return issues.length ? { issues } : { value };
+        },
+      );
+    },
+    jsonSchema: jsonSchemaOf((convert) =>
+      objectJsonSchema(keys, schemas, convert)
+    ),
+  }) as unknown as Schema<
+    ObjectInput<TProperties>,
+    ObjectInput<TProperties>,
+    "shape"
   >;
 }
 

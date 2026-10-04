@@ -5,6 +5,8 @@
  *
  * - {@linkcode validate}, {@linkcode validateAsync}, {@linkcode parse} and
  *   {@linkcode parseAsync} run a schema and return the result or throw,
+ * - {@linkcode isValid} and {@linkcode assertValid} check a value against a
+ *   schema as a type guard and an assertion,
  * - {@linkcode toJSONSchema} gets the JSON Schema of a Standard JSON Schema,
  * - {@linkcode isStandardSchemaV1} and {@linkcode isStandardJSONSchemaV1} are
  *   type guards for the two standards,
@@ -196,6 +198,80 @@ export function parse<S extends StandardSchemaV1>(
   }
 
   return result.value;
+}
+
+/**
+ * Checks whether a value is valid for a schema, as a type guard: when it is,
+ * TypeScript narrows the value to the schema's input type. The value itself is
+ * not changed, whatever the schema outputs.
+ *
+ * @example
+ * ```ts
+ * import { z } from "@zod/zod";
+ * import { isValid } from "./utils.ts";
+ * import { assert, assertFalse } from "@std/assert";
+ *
+ * const User = z.object({ name: z.string() });
+ *
+ * const value: unknown = { name: "Alice" };
+ * if (isValid(User, value)) {
+ *   // `value` is { name: string } here
+ *   assert(value.name === "Alice");
+ * }
+ * assertFalse(isValid(User, { name: 1 }));
+ * ```
+ *
+ * @template S - The schema type extending StandardSchemaV1
+ * @param schema - The schema to validate against
+ * @param value - The value to check
+ * @param options - Optional validation options specific to the schema
+ * @returns `true` if the value is valid
+ * @throws TypeError if the schema validation is asynchronous
+ */
+export function isValid<S extends StandardSchemaV1>(
+  schema: S | boolean,
+  value: unknown,
+  options?: Parameters<S["~standard"]["validate"]>[1],
+): value is StandardSchemaV1.InferInput<S> {
+  return !validate(schema, value, options).issues;
+}
+
+/**
+ * Asserts that a value is valid for a schema: when it returns, TypeScript
+ * narrows the value to the schema's input type. The value itself is not
+ * changed, whatever the schema outputs.
+ *
+ * @example
+ * ```ts
+ * import { z } from "@zod/zod";
+ * import { assertValid } from "./utils.ts";
+ * import { SchemaError } from "@standard-schema/utils";
+ * import { assert, assertThrows } from "@std/assert";
+ *
+ * const User = z.object({ name: z.string() });
+ *
+ * const value: unknown = { name: "Alice" };
+ * assertValid(User, value);
+ * // `value` is { name: string } from here on
+ * assert(value.name === "Alice");
+ *
+ * assertThrows(() => assertValid(User, { name: 1 }), SchemaError);
+ * ```
+ *
+ * @template S - The schema type extending StandardSchemaV1
+ * @param schema - The schema to validate against
+ * @param value - The value to check
+ * @param options - Optional validation options specific to the schema
+ * @throws SchemaError if the value is not valid
+ * @throws TypeError if the schema validation is asynchronous
+ */
+export function assertValid<S extends StandardSchemaV1>(
+  schema: S | boolean,
+  value: unknown,
+  options?: Parameters<S["~standard"]["validate"]>[1],
+): asserts value is StandardSchemaV1.InferInput<S> {
+  const result = validate(schema, value, options);
+  if (result.issues) throw new SchemaError(result.issues);
 }
 
 /**

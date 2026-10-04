@@ -10,12 +10,13 @@
  * - `validate` may be async: a schema whose `validate` returns a promise is
  *   async.
  * - Ready-made schemas cover the basics: `string`, `integer`, `float`,
- *   `number`, `boolean`, `symbol`, `null_`, `literal`, `enumerator`,
+ *   `number`, `boolean`, `symbol`, `func`, `null_`, `literal`, `enumerator`,
  *   `instanceOf`, `unknown`, `never`, `nullable`, `optional` and `nullish`, and
- *   the ones made of other schemas: `object`, `array`, `record`, `tuple`,
- *   `anyOf`, `oneOf`, `allOf`, `not` and `lazy`.
+ *   the ones made of other schemas: `object`, `shape`, `array`, `record`,
+ *   `tuple`, `anyOf`, `oneOf`, `allOf`, `not` and `lazy`.
  * - Helper functions work with any Standard Schema, also from other libraries:
- *   `validate`, `validateAsync`, `parse`, `parseAsync` and `toJSONSchema`.
+ *   `validate`, `validateAsync`, `parse`, `parseAsync`, `isValid`,
+ *   `assertValid` and `toJSONSchema`.
  *
  * @example
  * ```ts

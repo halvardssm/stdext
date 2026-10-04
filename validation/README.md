@@ -15,15 +15,17 @@ fully typed factory to build them.
 These work with any Standard Schema, including schemas from other libraries such
 as Zod.
 
-| Function                                                      | What it does                                                                                               |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `validate(schema, input)`                                     | Returns the `{ value }` or `{ issues }` result. Throws a `TypeError` if the schema is async.               |
-| `validateAsync(schema, input)`                                | Like `validate`, for sync and async schemas.                                                               |
-| `parse(schema, input)`                                        | Returns the value, or throws a `SchemaError` with the issues. Throws a `TypeError` if the schema is async. |
-| `parseAsync(schema, input)`                                   | Like `parse`, for sync and async schemas.                                                                  |
-| `toJSONSchema(schema, options?)`                              | The JSON Schema of a Standard JSON Schema. Options: `io` (`"output"` by default), `target`, `silent`.      |
-| `isStandardSchemaV1(value)` / `isStandardJSONSchemaV1(value)` | Type guards, requiring `version` 1.                                                                        |
-| `stringify(value)`                                            | Formats any value for a message and never throws.                                                          |
+| Function                                                      | What it does                                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `validate(schema, input)`                                     | Returns the `{ value }` or `{ issues }` result. Throws a `TypeError` if the schema is async.                 |
+| `validateAsync(schema, input)`                                | Like `validate`, for sync and async schemas.                                                                 |
+| `parse(schema, input)`                                        | Returns the value, or throws a `SchemaError` with the issues. Throws a `TypeError` if the schema is async.   |
+| `parseAsync(schema, input)`                                   | Like `parse`, for sync and async schemas.                                                                    |
+| `isValid(schema, value)`                                      | A type guard: whether the value is valid, narrowing it to the schema's input type. The value is not changed. |
+| `assertValid(schema, value)`                                  | Like `isValid`, as an assertion: throws a `SchemaError` with the issues if the value is not valid.           |
+| `toJSONSchema(schema, options?)`                              | The JSON Schema of a Standard JSON Schema. Options: `io` (`"output"` by default), `target`, `silent`.        |
+| `isStandardSchemaV1(value)` / `isStandardJSONSchemaV1(value)` | Type guards, requiring `version` 1.                                                                          |
+| `stringify(value)`                                            | Formats any value for a message and never throws.                                                            |
 
 `validate`, `validateAsync`, `parse` and `parseAsync` also accept the boolean
 schemas `true` (accepts everything) and `false` (rejects everything).
@@ -67,6 +69,7 @@ its types are inferred.
 | `number()`              | any JavaScript number, including `NaN` and `Infinity`                                                            | `number`                          |
 | `boolean()`             | booleans                                                                                                         | `boolean`                         |
 | `symbol()`              | symbols                                                                                                          | `symbol`                          |
+| `func()`                | functions; `func<(a: number) => string>()` sets the type                                                         | the function type                 |
 | `null_()`               | `null`                                                                                                           | `null`                            |
 | `literal(value)`        | exactly that string, number, boolean or `null`                                                                   | the literal type                  |
 | `enumerator(values)`    | one of the values                                                                                                | the union of the values           |
@@ -76,6 +79,7 @@ its types are inferred.
 | `optional(schema)`      | `undefined` or what the schema accepts                                                                           | `T \| undefined`                  |
 | `nullish(schema)`       | `null`, `undefined` or what the schema accepts                                                                   | `T \| null \| undefined`          |
 | `object(properties)`    | plain objects, string or symbol keys; properties that accept `undefined` may be absent, unknown keys are removed | an object type with optional keys |
+| `shape(properties)`     | duck typing: any non-null object with the properties, returned as it is (not a copy)                             | the input type                    |
 | `array(item)`           | arrays of items                                                                                                  | `T[]`                             |
 | `record(value)`         | objects with any string keys                                                                                     | `Record<string, T>`               |
 | `tuple(items)`          | arrays with exactly one item per schema                                                                          | a tuple type                      |
@@ -126,6 +130,38 @@ Symbol keys work in `object`: they are validated, kept in the output and typed,
 but left out of the JSON Schema, as JSON has no symbol keys. The schemas that
 nest others stay synchronous unless one of the nested schemas is async. The JSON
 Schema of a recursive `lazy` schema uses `$anchor` and `$ref`.
+
+### Checking the shape of existing objects
+
+`object` builds a new object with the declared keys, and only accepts plain
+objects. To check that a value of any kind has some properties, such as an
+instance of a class, use `shape`. It accepts every non-null object, reads
+inherited members like methods and getters, and returns the value itself, so its
+identity and prototype are kept. With `isValid` it makes a type guard:
+
+```ts
+import { boolean, func, isValid, optional, shape } from "@stdext/validation";
+
+const closable = shape({
+  closed: boolean(),
+  close: func(),
+  reset: optional(func()),
+});
+
+class Connection {
+  closed = false;
+  close() {}
+}
+
+const value: unknown = new Connection();
+if (isValid(closable, value)) {
+  // `value` has closed, close and reset here
+  value.close();
+}
+```
+
+`shape({})` accepts any non-null object. The property schemas only check, so
+what they output is not used.
 
 ## Creating a schema
 

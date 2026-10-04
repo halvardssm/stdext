@@ -1,7 +1,7 @@
 /**
  * Basic schemas built with {@linkcode createSchema}: {@linkcode string},
  * {@linkcode integer}, {@linkcode float}, {@linkcode number},
- * {@linkcode boolean}, {@linkcode symbol}, {@linkcode null_},
+ * {@linkcode boolean}, {@linkcode symbol}, {@linkcode func}, {@linkcode null_},
  * {@linkcode literal}, {@linkcode enumerator}, {@linkcode instanceOf},
  * {@linkcode unknown} and {@linkcode never}, and the wrappers {@linkcode nullable}, {@linkcode optional} and
  * {@linkcode nullish}.
@@ -736,6 +736,63 @@ export function instanceOf<TClass extends Class>(
           }, received ${receivedType(value)}`,
           { expected: constructor, actual: value },
         ),
+    jsonSchema: jsonSchemaOf(() => ({})),
+  });
+}
+
+/**
+ * Options for {@linkcode func}. Placeholder: no options yet.
+ */
+// deno-lint-ignore no-empty-interface
+export interface FuncOptions {}
+
+/** Any function. */
+// deno-lint-ignore no-explicit-any
+export type AnyFunction = (...args: any[]) => any;
+
+/**
+ * A function: anything `typeof` reports as `"function"`, including classes and
+ * async functions. Only that it is a function is checked, never its
+ * parameters or its result. Named `func` because `function` is a reserved
+ * word.
+ *
+ * The type parameter sets the type of the function, so a method of an
+ * interface can be described precisely: `func<(index: number) => string>()`.
+ *
+ * Functions do not exist in JSON, so the JSON Schema is `{}`, which accepts
+ * everything.
+ *
+ * @example
+ * ```ts
+ * import { func } from "./schemas.ts";
+ * import { validate } from "./utils.ts";
+ * import { assertEquals } from "@std/assert";
+ *
+ * const schema = func();
+ * // Schema<AnyFunction, AnyFunction, "function">
+ *
+ * const fn = () => 1;
+ * assertEquals(validate(schema, fn), { value: fn });
+ * assertEquals(validate(schema, "fn").issues?.[0].message, "Expected a function, received string");
+ *
+ * const placeholder = func<(index: number) => string>();
+ * // Schema<(index: number) => string, (index: number) => string, "function">
+ * assertEquals(validate(placeholder, (index: number) => `$${index}`).issues, undefined);
+ * ```
+ *
+ * @template TFunction The type of the function
+ * @param options Placeholder, not used yet
+ * @returns A schema accepting functions
+ */
+export function func<TFunction extends AnyFunction = AnyFunction>(
+  // deno-lint-ignore no-unused-vars
+  options?: FuncOptions,
+): Schema<TFunction, TFunction, "function"> {
+  return createSchema("function", {
+    validate: (value) =>
+      typeof value === "function"
+        ? { value: value as TFunction }
+        : typeIssue("a function", value),
     jsonSchema: jsonSchemaOf(() => ({})),
   });
 }
