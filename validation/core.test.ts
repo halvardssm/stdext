@@ -1,14 +1,24 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { assert, assertEquals, assertThrows } from "@std/assert";
-import { createSchema, type Schema } from "./core.ts";
-
-// Type level assertions: these fail to compile, not at runtime.
-type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends
-  (<T>() => T extends B ? 1 : 2) ? true : false;
-function assertType<_T extends true>() {}
-
-type Output<S extends StandardSchemaV1> = StandardSchemaV1.InferOutput<S>;
-type Input<S extends StandardSchemaV1> = StandardSchemaV1.InferInput<S>;
+import {
+  acceptsUndefined,
+  chain,
+  collect,
+  createSchema,
+  isRecord,
+  prefixIssues,
+  type Schema,
+  setOwn,
+  typeIssue,
+  typeOf,
+} from "./core.ts";
+import {
+  assertType,
+  asyncString,
+  type Equals,
+  type Input,
+  type Output,
+} from "./_testing.ts";
 
 const jsonSchema = {
   input: () => ({ type: "string" }),
@@ -20,15 +30,6 @@ const expectedString = { issues: [{ message: "Expected a string" }] };
 /** A sync schema accepting strings. */
 const string = createSchema("string", {
   validate: (value) => typeof value === "string" ? { value } : expectedString,
-  jsonSchema,
-});
-
-/** An async schema accepting strings. */
-const asyncString = createSchema("asyncString", {
-  validate: (value) =>
-    Promise.resolve(
-      typeof value === "string" ? { value } : expectedString,
-    ),
   jsonSchema,
 });
 
@@ -235,4 +236,158 @@ Deno.test("createSchema - nesting", async (t) => {
       });
     },
   );
+});
+
+Deno.test("collect", async (t) => {
+  await t.step("returns the values as they are when none is a promise", () => {
+    const items = [1, 2, 3];
+    assert(collect(items) === items);
+  });
+
+  await t.step("waits for all of them when one is a promise", async () => {
+    const result = collect([1, Promise.resolve(2), 3]);
+    assert(result instanceof Promise);
+    assertEquals(await result, [1, 2, 3]);
+  });
+
+  await t.step("handles an empty list", () => {
+    assertEquals(collect([]), []);
+  });
+});
+
+Deno.test("chain", async (t) => {
+  await t.step("applies the function directly to a value", () => {
+    assertEquals(chain(1, (n) => n + 1), 2);
+  });
+
+  await t.step("waits for a promise first", async () => {
+    const result = chain(Promise.resolve(1), (n) => n + 1);
+    assert(result instanceof Promise);
+    assertEquals(await result, 2);
+  });
+
+  await t.step("flattens a promise returned by the function", async () => {
+    assertEquals(await chain(1, (n) => Promise.resolve(n + 1)), 2);
+    assertEquals(
+      await chain(Promise.resolve(1), (n) => Promise.resolve(n + 1)),
+      2,
+    );
+  });
+});
+
+Deno.test("prefixIssues", async (t) => {
+  await t.step("prefixes the path of every issue", () => {
+    assertEquals(
+      prefixIssues("user", [
+        { message: "a", path: ["name"] },
+        { message: "b" },
+      ]),
+      [
+        { message: "a", path: ["user", "name"] },
+        { message: "b", path: ["user"] },
+      ],
+    );
+  });
+
+  await t.step("accepts indexes and path segments", () => {
+    assertEquals(prefixIssues(0, [{ message: "a" }]), [
+      { message: "a", path: [0] },
+    ]);
+    assertEquals(
+      prefixIssues({ key: "k" }, [{ message: "a", path: [1] }]),
+      [{ message: "a", path: [{ key: "k" }, 1] }],
+    );
+  });
+
+  await t.step("keeps the other fields and does not mutate", () => {
+    const issue = { message: "a", kind: "type", path: ["x"] };
+    const [prefixed] = prefixIssues("y", [issue]);
+    const expected = { message: "a", kind: "type", path: ["y", "x"] };
+    assertEquals(prefixed, expected);
+    assertEquals(issue.path, ["x"]);
+  });
+});
+
+Deno.test("typeOf and typeIssue", async (t) => {
+  await t.step("tells null and arrays apart", () => {
+    assertEquals(typeOf(null), "null");
+    assertEquals(typeOf([]), "array");
+    assertEquals(typeOf({}), "object");
+    assertEquals(typeOf("a"), "string");
+    assertEquals(typeOf(undefined), "undefined");
+    assertEquals(typeOf(1n), "bigint");
+  });
+
+  await t.step("builds a failure result", () => {
+    assertEquals(typeIssue("a string", 1), {
+      issues: [{
+        kind: "type",
+        message: "Expected a string, received number",
+        expected: "a string",
+        actual: 1,
+      }],
+    });
+  });
+});
+
+Deno.test("isRecord", () => {
+  assert(isRecord({}));
+  assert(isRecord({ a: 1 }));
+  assert(isRecord(Object.create(null)));
+  assert(isRecord(new (class Point {})()));
+  for (
+    const value of [[], null, undefined, 1, "a", new Date(), new Map(), /a/]
+  ) {
+    assert(!isRecord(value), String(value));
+  }
+});
+
+Deno.test("setOwn", () => {
+  const target: Record<PropertyKey, unknown> = {};
+  setOwn(target, "a", 1);
+  assertEquals(target, { a: 1 });
+  assertEquals(Object.keys(target), ["a"]);
+
+  // symbol and numeric keys
+  const symbol = Symbol("key");
+  setOwn(target, symbol, 2);
+  setOwn(target, 3, 3);
+  assertEquals(target[symbol], 2);
+  assertEquals(target[3], 3);
+  assert(Object.getOwnPropertySymbols(target).includes(symbol));
+  assert(Object.getOwnPropertyDescriptor(target, symbol)?.enumerable);
+  delete target[symbol];
+  delete target[3];
+
+  // a `__proto__` key becomes an own property instead of the prototype
+  setOwn(target, "__proto__", { polluted: true });
+  assertEquals(Object.keys(target), ["a", "__proto__"]);
+  assertEquals(Object.getPrototypeOf(target), Object.prototype);
+  assertEquals(({} as Record<string, unknown>).polluted, undefined);
+});
+
+Deno.test("acceptsUndefined", async (t) => {
+  const accepting = createSchema("accepting", {
+    validate: () => ({ value: undefined }),
+    jsonSchema,
+  });
+
+  await t.step("is true for schemas that accept undefined", () => {
+    assert(acceptsUndefined(accepting));
+  });
+
+  await t.step("is false for schemas that reject it", () => {
+    assert(!acceptsUndefined(string));
+  });
+
+  await t.step("is false for async schemas and schemas that throw", () => {
+    assert(!acceptsUndefined(asyncString));
+    const throwing = createSchema("throwing", {
+      validate: () => {
+        throw new Error("boom");
+      },
+      jsonSchema,
+    });
+    assert(!acceptsUndefined(throwing));
+  });
 });

@@ -2,7 +2,6 @@
   "version": "0.1.1",
   "name": "@stdext/validation",
   "exports": {
-    ".": "./mod.ts",
-    "./core": "./core.ts"
+    ".": "./mod.ts"
   }
 }

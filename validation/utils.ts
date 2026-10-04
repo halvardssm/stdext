@@ -227,7 +227,7 @@ export interface ToJSONSchemaOptions
  *
  * @example
  * ```ts
- * import { createSchema } from "@stdext/validation/core";
+ * import { createSchema } from "@stdext/validation";
  * import { toJSONSchema } from "./utils.ts";
  * import { assertEquals } from "@std/assert";
  *

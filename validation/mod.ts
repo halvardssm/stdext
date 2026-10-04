@@ -9,8 +9,11 @@
  *   libraries, OpenAPI generators) and can be nested in other schemas.
  * - `validate` may be async: a schema whose `validate` returns a promise is
  *   async.
- * - `@stdext/validation/core` exports the same, for libraries that build their
- *   own schemas on top.
+ * - Ready-made schemas cover the basics: `string`, `integer`, `float`,
+ *   `number`, `boolean`, `symbol`, `null_`, `literal`, `enumerator`,
+ *   `instanceOf`, `unknown`, `never`, `nullable`, `optional` and `nullish`, and the ones made of other schemas:
+ *   `object`, `array`, `record`, `tuple`, `anyOf`, `oneOf`, `allOf`, `not` and
+ *   `lazy`.
  *
  * @example
  * ```ts
@@ -39,4 +42,6 @@
  */
 
 export * from "./core.ts";
+export * from "./schemas.ts";
+export * from "./composites.ts";
 export * from "./utils.ts";

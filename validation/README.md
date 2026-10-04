@@ -9,7 +9,6 @@ fully typed factory to build them.
 - `createSchema` infers the input type, output type and kind from the options.
 - Schemas nest by calling one schema's `validate` from another's, sync or async.
 - It uses `@stdext/validation` as vendor identifier.
-- The package root and `@stdext/validation/core` export the same API.
 
 ## Helper functions
 
@@ -43,6 +42,80 @@ parse(User, { name: "Alice" }); // { name: "Alice" }
 // for schemas without Standard JSON Schema support instead of throwing
 toJSONSchema(string, { io: "input", silent: true });
 ```
+
+## Ready-made schemas
+
+Schemas built with `createSchema`, each with a placeholder `options` argument
+for constraints that will be added later. Every one has its own JSON Schema, and
+its types are inferred.
+
+| Schema                  | Accepts                                                                                                          | Type                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `string()`              | strings                                                                                                          | `string`                          |
+| `integer()`             | numbers without a fractional part                                                                                | `number`                          |
+| `float()`               | finite numbers                                                                                                   | `number`                          |
+| `number()`              | any JavaScript number, including `NaN` and `Infinity`                                                            | `number`                          |
+| `boolean()`             | booleans                                                                                                         | `boolean`                         |
+| `symbol()`              | symbols                                                                                                          | `symbol`                          |
+| `null_()`               | `null`                                                                                                           | `null`                            |
+| `literal(value)`        | exactly that string, number, boolean or `null`                                                                   | the literal type                  |
+| `enumerator(values)`    | one of the values                                                                                                | the union of the values           |
+| `instanceOf(Class)`     | instances of the class (checked with `instanceof`), subclasses included                                          | the instance type                 |
+| `unknown()` / `never()` | everything / nothing                                                                                             | `unknown` / `never`               |
+| `nullable(schema)`      | `null` or what the schema accepts                                                                                | `T \| null`                       |
+| `optional(schema)`      | `undefined` or what the schema accepts                                                                           | `T \| undefined`                  |
+| `nullish(schema)`       | `null`, `undefined` or what the schema accepts                                                                   | `T \| null \| undefined`          |
+| `object(properties)`    | plain objects, string or symbol keys; properties that accept `undefined` may be absent, unknown keys are removed | an object type with optional keys |
+| `array(item)`           | arrays of items                                                                                                  | `T[]`                             |
+| `record(value)`         | objects with any string keys                                                                                     | `Record<string, T>`               |
+| `tuple(items)`          | arrays with exactly one item per schema                                                                          | a tuple type                      |
+| `anyOf(schemas)`        | what any schema accepts, the first match wins                                                                    | the union                         |
+| `oneOf(schemas)`        | what exactly one schema accepts                                                                                  | the union                         |
+| `allOf(schemas)`        | what every schema accepts; object outputs are merged                                                             | the intersection                  |
+| `not(schema)`           | what the schema rejects                                                                                          | `unknown`                         |
+| `lazy(getter)`          | what the resolved schema accepts, for recursive schemas                                                          | the type of the schema            |
+
+```ts
+import {
+  array,
+  integer,
+  lazy,
+  literal,
+  object,
+  optional,
+  type Schema,
+  string,
+  validate,
+} from "@stdext/validation";
+
+const user = object({
+  name: string(),
+  age: optional(integer()),
+  role: literal("admin"),
+  tags: array(string()),
+});
+// { name: string; role: "admin"; tags: string[]; age?: number | undefined }
+
+validate(user, { name: "Alice", role: "admin", tags: ["a"] });
+// { value: { name: "Alice", role: "admin", tags: ["a"] } }
+validate(user, { name: "Alice", role: "admin", tags: [1] });
+// { issues: [{ ..., path: ["tags", 0] }] }
+
+// Recursive schemas need an explicit type annotation
+interface Category {
+  name: string;
+  children: Category[];
+}
+const category: Schema<Category> = object({
+  name: string(),
+  children: array(lazy(() => category)),
+});
+```
+
+Symbol keys work in `object`: they are validated, kept in the output and typed,
+but left out of the JSON Schema, as JSON has no symbol keys. The schemas that
+nest others stay synchronous unless one of the nested schemas is async. The JSON
+Schema of a recursive `lazy` schema uses `$anchor` and `$ref`.
 
 ## Creating a schema
 
