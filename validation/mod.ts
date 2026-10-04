@@ -1,45 +1,73 @@
 /**
- * The `@stdext/validation` package.
- *
- * Schema building and validation on top of the
+ * The `@stdext/validation` package: schemas that implement both
  * {@link https://standardschema.dev | Standard Schema} and
- * {@link https://standardschema.dev/#json-schema | Standard JSON Schema}
- * specifications:
+ * {@link https://standardschema.dev/#json-schema | Standard JSON Schema}.
  *
- * - `./json_schema.ts` — builders (`string`, `number`, `object`, ...) that
- *   produce Standard Schema entities carrying their own JSON Schema
- *   representation
- * - `./validator.ts` — `validate`, `parse` and their async variants for
- *   any Standard Schema entity
- * - `./utils.ts` — type guards and helpers for working with Standard
- *   Schema values
+ * - {@linkcode createSchema} builds a schema from a `validate` function and
+ *   its JSON Schema. The input type, output type and kind are inferred.
+ * - A schema works with any consumer of either standard (validators, form
+ *   libraries, OpenAPI generators) and can be nested in other schemas.
+ * - `validate` may be async: a schema whose `validate` returns a promise is
+ *   async.
+ * - Ready-made schemas cover the basics: `string`, `integer`, `float`,
+ *   `number`, `boolean`, `symbol`, `func`, `null_`, `literal`, `enumerator`,
+ *   `instanceOf`, `unknown`, `never`, `nullable`, `optional` and `nullish`, and
+ *   the ones made of other schemas: `object`, `shape`, `array`, `record`,
+ *   `tuple`, `anyOf`, `oneOf`, `allOf`, `not` and `lazy`.
+ * - Schemas take options named after JSON Schema keywords (`minLength`,
+ *   `pattern`, `format`, `minimum`, `minItems`, `additionalProperties`, ...),
+ *   annotations such as `title` and `description`, and a `message` for the
+ *   issues. They are checked, and exported to the JSON Schema.
+ * - Helper functions work with any Standard Schema, also from other libraries:
+ *   `validate`, `validateAsync`, `parse`, `parseAsync`, `isValid`,
+ *   `assertValid` and `toJSONSchema`.
  *
  * @example
  * ```ts
- * import { object, parse, string, validate } from "@stdext/validation";
- * import { assert, assertThrows } from "@std/assert";
+ * import {
+ *   array,
+ *   createSchema,
+ *   object,
+ *   string,
+ *   toJSONSchema,
+ *   validate,
+ * } from "@stdext/validation";
+ * import { assertEquals } from "@std/assert";
  *
- * const person = object({
- *   properties: { name: string() },
- *   required: ["name"],
+ * // a schema of your own
+ * const port = createSchema("port", {
+ *   validate: (value) =>
+ *     Number.isInteger(value) && (value as number) > 0
+ *       ? { value: value as number }
+ *       : { issues: [{ message: "Expected a positive integer" }] },
+ *   jsonSchema: {
+ *     input: () => ({ type: "integer", minimum: 1 }),
+ *     output: () => ({ type: "integer", minimum: 1 }),
+ *   },
  * });
+ * // Schema<number, number, "port">
  *
- * const result = validate(person, { name: "Alice" });
- * assert(!("issues" in result));
+ * // ready-made schemas nest other schemas
+ * const server = object({ host: string(), ports: array(port) });
  *
- * assertThrows(() => parse(person, {}));
+ * assertEquals(validate(server, { host: "localhost", ports: [80] }), {
+ *   value: { host: "localhost", ports: [80] },
+ * });
+ * assertEquals(
+ *   validate(server, { host: "localhost", ports: [0] }).issues?.[0].path,
+ *   ["ports", 0],
+ * );
+ * assertEquals(toJSONSchema(server).type, "object");
  * ```
  *
  * @module
  */
 
-export * from "./validator.ts";
-export * from "./json_schema.ts";
-export {
-  getStandardJSONSchemaV1Input,
-  getStandardJSONSchemaV1Output,
-  isEmptyObject,
-  isEmptyPlainObject,
-  isObject,
-  isStandardSchemaV1,
-} from "./utils.ts";
+export * from "./core.ts";
+export * from "./schemas.ts";
+export * from "./composites.ts";
+export * from "./utils.ts";
+export type {
+  NumberConstraints,
+  PropertyCountConstraints,
+} from "./constraints.ts";

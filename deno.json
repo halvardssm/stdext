@@ -15,7 +15,8 @@
     "@std/path": "jsr:@std/path@^1",
     "@std/toml": "jsr:@std/toml@^1",
     "@std/xml": "jsr:@std/xml@^0",
-    "@deno/wasmbuild": "jsr:@deno/wasmbuild@^0"
+    "@deno/wasmbuild": "jsr:@deno/wasmbuild@^0",
+    "@zod/zod": "jsr:@zod/zod@^4"
   },
   "tasks": {
     "fix": "deno task format && deno lint --fix",

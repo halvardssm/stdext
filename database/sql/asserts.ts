@@ -1,4 +1,15 @@
 import { AssertionError } from "@std/assert";
+import {
+  anyOf,
+  boolean,
+  func,
+  instanceOf,
+  isValid,
+  number,
+  optional,
+  shape,
+  string,
+} from "@stdext/validation";
 import type { Eventable } from "./events.ts";
 import type {
   Client,
@@ -17,22 +28,100 @@ import type {
   Transactionable,
 } from "./core.ts";
 
-function isObject(value: unknown): value is Record<PropertyKey, unknown> {
-  return typeof value === "object" && value !== null;
-}
+// The shape of each interface. Only the shape is checked, so any non-null
+// object matches, however it was made (classes, plain objects, ...). The
+// schemas are built once and shared.
 
-function isAsyncDisposable(value: unknown): boolean {
-  return isFn(value, Symbol.asyncDispose);
-}
+const asyncDisposable = { [Symbol.asyncDispose]: func() };
+const pingable = { ping: func() };
+const queryable = { execute: func(), query: func(), executeScript: func() };
+const preparable = { prepare: func() };
+const transactionable = { beginTransaction: func(), transaction: func() };
+const poolable = { acquire: func() };
+const eventable = { eventTarget: instanceOf(EventTarget) };
 
-function isFn(value: unknown, ...keys: PropertyKey[]): boolean {
-  return isObject(value) &&
-    keys.every((key) => typeof value[key] === "function");
-}
+const dialect = shape({
+  name: string(),
+  placeholder: func(),
+  quoteIdentifier: func(),
+});
+const dialectable = { dialect };
 
-function isBool(value: unknown, key: PropertyKey): boolean {
-  return isObject(value) && typeof value[key] === "boolean";
-}
+const connectable = {
+  ...asyncDisposable,
+  connect: func(),
+  close: func(),
+  connected: boolean(),
+  connectionUrl: anyOf([string(), instanceOf(URL)]),
+};
+
+const schemas = {
+  dialect,
+  driver: shape({
+    dialect,
+    connect: func(),
+    maxConnections: optional(number()),
+  }),
+  driverConnection: shape({
+    ...asyncDisposable,
+    ...queryable,
+    ...pingable,
+    closed: boolean(),
+    close: func(),
+    begin: func(),
+    prepare: optional(func()),
+  }),
+  connectable: shape(connectable),
+  pingable: shape(pingable),
+  queryable: shape(queryable),
+  preparable: shape(preparable),
+  transactionable: shape(transactionable),
+  dialectable: shape(dialectable),
+  eventable: shape(eventable),
+  poolable: shape(poolable),
+  transaction: shape({
+    ...asyncDisposable,
+    ...queryable,
+    ...preparable,
+    ...transactionable,
+    inTransaction: boolean(),
+    commit: func(),
+    rollback: func(),
+    createSavepoint: func(),
+    releaseSavepoint: func(),
+  }),
+  preparedStatement: shape({
+    ...asyncDisposable,
+    execute: func(),
+    query: func(),
+    deallocate: func(),
+    sql: string(),
+    deallocated: boolean(),
+  }),
+  connection: shape({
+    ...asyncDisposable,
+    ...pingable,
+    ...queryable,
+    ...preparable,
+    ...transactionable,
+    ...dialectable,
+    release: func(),
+    remove: func(),
+    released: boolean(),
+    connected: boolean(),
+  }),
+  client: shape({
+    ...connectable,
+    ...pingable,
+    ...queryable,
+    ...preparable,
+    ...transactionable,
+    ...poolable,
+    ...dialectable,
+    ...eventable,
+    options: shape({}),
+  }),
+};
 
 function assert(
   condition: boolean,
@@ -62,8 +151,7 @@ function assert(
  * ```
  */
 export function isDialect(value: unknown): value is Dialect {
-  return isObject(value) && typeof value.name === "string" &&
-    isFn(value, "placeholder", "quoteIdentifier");
+  return isValid(schemas.dialect, value);
 }
 
 /**
@@ -101,10 +189,7 @@ export function assertIsDialect(value: unknown): asserts value is Dialect {
  * ```
  */
 export function isDriver(value: unknown): value is Driver {
-  return isObject(value) && isDialect(value.dialect) &&
-    isFn(value, "connect") &&
-    (value.maxConnections === undefined ||
-      typeof value.maxConnections === "number");
+  return isValid(schemas.driver, value);
 }
 
 /**
@@ -142,18 +227,7 @@ export function assertIsDriver(value: unknown): asserts value is Driver {
  * ```
  */
 export function isDriverConnection(value: unknown): value is DriverConnection {
-  return isAsyncDisposable(value) && isBool(value, "closed") &&
-    isFn(
-      value,
-      "close",
-      "execute",
-      "query",
-      "executeScript",
-      "begin",
-      "ping",
-    ) &&
-    isObject(value) &&
-    (value.prepare === undefined || isFn(value, "prepare"));
+  return isValid(schemas.driverConnection, value);
 }
 
 /**
@@ -205,12 +279,7 @@ export function assertIsDriverConnection(
  * ```
  */
 export function isConnectable(value: unknown): value is Connectable {
-  return isAsyncDisposable(value) &&
-    isFn(value, "connect", "close") &&
-    isBool(value, "connected") &&
-    isObject(value) &&
-    (typeof value.connectionUrl === "string" ||
-      value.connectionUrl instanceof URL);
+  return isValid(schemas.connectable, value);
 }
 
 /**
@@ -248,7 +317,7 @@ export function assertIsConnectable(
  * ```
  */
 export function isPingable(value: unknown): value is Pingable {
-  return isFn(value, "ping");
+  return isValid(schemas.pingable, value);
 }
 
 /**
@@ -282,7 +351,7 @@ export function assertIsPingable(value: unknown): asserts value is Pingable {
  * ```
  */
 export function isQueryable(value: unknown): value is Queryable {
-  return isFn(value, "execute", "query", "executeScript");
+  return isValid(schemas.queryable, value);
 }
 
 /**
@@ -318,7 +387,7 @@ export function assertIsQueryable(value: unknown): asserts value is Queryable {
  * ```
  */
 export function isPreparable(value: unknown): value is Preparable {
-  return isFn(value, "prepare");
+  return isValid(schemas.preparable, value);
 }
 
 /**
@@ -356,7 +425,7 @@ export function assertIsPreparable(
  * ```
  */
 export function isTransactionable(value: unknown): value is Transactionable {
-  return isFn(value, "beginTransaction", "transaction");
+  return isValid(schemas.transactionable, value);
 }
 
 /**
@@ -394,7 +463,7 @@ export function assertIsTransactionable(
  * ```
  */
 export function isDialectable(value: unknown): value is Dialectable {
-  return isObject(value) && isDialect(value.dialect);
+  return isValid(schemas.dialectable, value);
 }
 
 /**
@@ -432,7 +501,7 @@ export function assertIsDialectable(
  * ```
  */
 export function isEventable(value: unknown): value is Eventable {
-  return isObject(value) && value.eventTarget instanceof EventTarget;
+  return isValid(schemas.eventable, value);
 }
 
 /**
@@ -468,7 +537,7 @@ export function assertIsEventable(value: unknown): asserts value is Eventable {
  * ```
  */
 export function isPoolable(value: unknown): value is Poolable {
-  return isFn(value, "acquire");
+  return isValid(schemas.poolable, value);
 }
 
 /**
@@ -505,12 +574,7 @@ export function assertIsPoolable(value: unknown): asserts value is Poolable {
  * ```
  */
 export function isTransaction(value: unknown): value is Transaction {
-  return isAsyncDisposable(value) &&
-    isQueryable(value) &&
-    isPreparable(value) &&
-    isTransactionable(value) &&
-    isBool(value, "inTransaction") &&
-    isFn(value, "commit", "rollback", "createSavepoint", "releaseSavepoint");
+  return isValid(schemas.transaction, value);
 }
 
 /**
@@ -552,11 +616,7 @@ export function assertIsTransaction(
 export function isPreparedStatement(
   value: unknown,
 ): value is PreparedStatement {
-  return isAsyncDisposable(value) &&
-    isFn(value, "execute", "query", "deallocate") &&
-    isObject(value) &&
-    typeof value.sql === "string" &&
-    isBool(value, "deallocated");
+  return isValid(schemas.preparedStatement, value);
 }
 
 /**
@@ -596,15 +656,7 @@ export function assertIsPreparedStatement(
  * ```
  */
 export function isConnection(value: unknown): value is Connection {
-  return isAsyncDisposable(value) &&
-    isPingable(value) &&
-    isQueryable(value) &&
-    isPreparable(value) &&
-    isTransactionable(value) &&
-    isDialectable(value) &&
-    isFn(value, "release", "remove") &&
-    isBool(value, "released") &&
-    isBool(value, "connected");
+  return isValid(schemas.connection, value);
 }
 
 /**
@@ -643,16 +695,7 @@ export function assertIsConnection(
  * ```
  */
 export function isClient(value: unknown): value is Client {
-  return isConnectable(value) &&
-    isPingable(value) &&
-    isQueryable(value) &&
-    isPreparable(value) &&
-    isTransactionable(value) &&
-    isPoolable(value) &&
-    isDialectable(value) &&
-    isEventable(value) &&
-    isObject(value) &&
-    isObject(value.options);
+  return isValid(schemas.client, value);
 }
 
 /**
